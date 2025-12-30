@@ -1427,106 +1427,68 @@ serve(async (req: Request) => {
     const requestSERP = models.includes("google_serp");
     const requestAIOverview = models.includes("google_ai_overview");
 
-    // Query LLM Mentions API if any LLM models requested
+    // Query LLMs DIRECTLY for REAL-TIME responses (not cached DataForSEO data)
     if (requestedLLMs.length > 0) {
       promises.push((async () => {
-        // First try DataForSEO LLM Mentions API
-        const llmResult = await getLLMMentions(
-          prompt_text,
-          targetDomain,
-          brand_name,
-          sanitizedBrandTags,
-          location_code
-        );
+        console.log(`[GEO Audit] Querying LLMs directly for REAL-TIME responses: ${requestedLLMs.join(", ")}`);
         
-        const costPerModel = llmResult.cost / Math.max(1, requestedLLMs.length);
-        totalCost += llmResult.cost;
-        
-        // Track which models got data from DataForSEO
-        const modelsWithData = new Set<string>();
-        
-        for (const modelId of requestedLLMs) {
-          const modelData = llmResult.results.get(modelId);
+        // Query each LLM sequentially to avoid rate limits
+        for (let i = 0; i < requestedLLMs.length; i++) {
+          const modelId = requestedLLMs[i];
           
-          if (modelData && modelData.answer && modelData.answer.length > 50) {
-            // Got data from DataForSEO
-            modelsWithData.add(modelId);
+          // Add delay between queries to avoid rate limits (except for first query)
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // 1s delay
+          }
+          
+          console.log(`[GEO Audit] Querying ${modelId}...`);
+          const directResult = await queryLLMDirect(prompt_text, modelId);
+          totalCost += directResult.cost;
+          
+          if (directResult.success && directResult.response.length > 10) {
+            const brandData = parseBrandData(directResult.response, brand_name, sanitizedBrandTags);
+            const competitorData = parseCompetitors(directResult.response, sanitizedCompetitors);
+            const winner = findWinnerBrand(directResult.response, brand_name, sanitizedCompetitors);
+            
             results.push(createModelResult(
               modelId,
               true,
-              modelData.answer,
-              modelData.sources,
-              costPerModel,
+              directResult.response,
+              [], // No citations from direct LLM queries
+              directResult.cost,
               brand_name,
               sanitizedBrandTags,
               targetDomain,
               sanitizedCompetitors,
               undefined,
               {
-                brand_mentioned: modelData.brand_mentioned,
-                brand_mention_count: modelData.brand_mention_count,
-                is_cited: modelData.brand_cited,
-                ai_search_volume: modelData.ai_search_volume,
-                response_time_ms: llmResult.response_time_ms,
+                brand_mentioned: brandData.mentioned,
+                brand_mention_count: brandData.count,
+                brand_rank: brandData.rank,
+                brand_sentiment: brandData.sentiment,
+                matched_terms: brandData.matchedTerms,
+                winner_brand: winner,
+                competitors_found: competitorData,
+                is_cited: false,
+                response_time_ms: directResult.response_time_ms,
               }
             ));
-          }
-        }
-        
-        // For models without DataForSEO data, query LLMs directly
-        const modelsNeedingDirectQuery = requestedLLMs.filter(m => !modelsWithData.has(m));
-        
-        if (modelsNeedingDirectQuery.length > 0) {
-          console.log(`[GEO Audit] No DataForSEO data for: ${modelsNeedingDirectQuery.join(", ")}. Querying LLMs directly...`);
-          
-          // Query each LLM sequentially with delay to avoid rate limits
-          for (let i = 0; i < modelsNeedingDirectQuery.length; i++) {
-            const modelId = modelsNeedingDirectQuery[i];
-            
-            // Add delay between queries to avoid rate limits (except for first query)
-            if (i > 0) {
-              await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5s delay
-            }
-            
-            const directResult = await queryLLMDirect(prompt_text, modelId);
-            totalCost += directResult.cost;
-            
-            if (directResult.success) {
-              const brandData = parseBrandData(directResult.response, brand_name, sanitizedBrandTags);
-              
-              results.push(createModelResult(
-                modelId,
-                true,
-                directResult.response,
-                [], // No citations from direct LLM queries
-                directResult.cost,
-                brand_name,
-                sanitizedBrandTags,
-                targetDomain,
-                sanitizedCompetitors,
-                undefined,
-                {
-                  brand_mentioned: brandData.mentioned,
-                  brand_mention_count: brandData.count,
-                  is_cited: false,
-                  response_time_ms: directResult.response_time_ms,
-                }
-              ));
-            } else {
-              // Direct query also failed
-              results.push(createModelResult(
-                modelId,
-                false,
-                directResult.error || "Failed to get response from LLM",
-                [],
-                directResult.cost,
-                brand_name,
-                sanitizedBrandTags,
-                targetDomain,
-                sanitizedCompetitors,
-                directResult.error || "LLM query failed"
-              ));
-            }
+            console.log(`[GEO Audit] ${modelId}: Got ${directResult.response.length} chars, brand_mentioned=${brandData.mentioned}`);
+          } else {
+            // Query failed - show error
+            results.push(createModelResult(
+              modelId,
+              false,
+              directResult.error || "Failed to get response",
+              [],
+              directResult.cost,
+              brand_name,
+              sanitizedBrandTags,
+              targetDomain,
+              sanitizedCompetitors,
+              directResult.error || "LLM query failed"
+            ));
+            console.log(`[GEO Audit] ${modelId}: Failed - ${directResult.error}`);
           }
         }
       })());

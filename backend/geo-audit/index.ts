@@ -1430,7 +1430,7 @@ serve(async (req: Request) => {
     // Query LLM Mentions API if any LLM models requested
     if (requestedLLMs.length > 0) {
       promises.push((async () => {
-        // First try DataForSEO LLM Mentions API
+        // First try DataForSEO LLM Mentions API - this is the PRIMARY source
         const llmResult = await getLLMMentions(
           prompt_text,
           targetDomain,
@@ -1445,11 +1445,15 @@ serve(async (req: Request) => {
         // Track which models got data from DataForSEO
         const modelsWithData = new Set<string>();
         
+        // Check if we got ANY data from DataForSEO (even if brand not mentioned)
+        const hasAnyDataForSEOData = llmResult.success && llmResult.results.size > 0;
+        
         for (const modelId of requestedLLMs) {
           const modelData = llmResult.results.get(modelId);
           
-          if (modelData && modelData.answer && modelData.answer.length > 50) {
-            // Got data from DataForSEO
+          // Accept DataForSEO data even if short - show whatever we have
+          if (modelData && modelData.answer && modelData.answer.length > 10) {
+            // Got data from DataForSEO - use it regardless of brand visibility
             modelsWithData.add(modelId);
             results.push(createModelResult(
               modelId,
@@ -1473,58 +1477,90 @@ serve(async (req: Request) => {
           }
         }
         
-        // For models without DataForSEO data, query LLMs directly
+        // ONLY use Groq as LAST RESORT when DataForSEO completely fails
+        // DataForSEO is the primary source - we want its cached AI responses
         const modelsNeedingDirectQuery = requestedLLMs.filter(m => !modelsWithData.has(m));
         
         if (modelsNeedingDirectQuery.length > 0) {
-          console.log(`[GEO Audit] No DataForSEO data for: ${modelsNeedingDirectQuery.join(", ")}. Querying LLMs directly...`);
+          // Check if DataForSEO had an error (not just no cached data)
+          const dataForSEOFailed = llmResult.error && !llmResult.error.includes("No cached");
           
-          // Query each LLM sequentially with delay to avoid rate limits
-          for (let i = 0; i < modelsNeedingDirectQuery.length; i++) {
-            const modelId = modelsNeedingDirectQuery[i];
+          if (dataForSEOFailed) {
+            // DataForSEO API failed completely - use Groq as fallback
+            console.log(`[GEO Audit] DataForSEO failed for: ${modelsNeedingDirectQuery.join(", ")}. Using Groq fallback...`);
             
-            // Add delay between queries to avoid rate limits (except for first query)
-            if (i > 0) {
-              await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5s delay
-            }
-            
-            const directResult = await queryLLMDirect(prompt_text, modelId);
-            totalCost += directResult.cost;
-            
-            if (directResult.success) {
-              const brandData = parseBrandData(directResult.response, brand_name, sanitizedBrandTags);
+            // Query each LLM sequentially with delay to avoid rate limits
+            for (let i = 0; i < modelsNeedingDirectQuery.length; i++) {
+              const modelId = modelsNeedingDirectQuery[i];
               
+              // Add delay between queries to avoid rate limits (except for first query)
+              if (i > 0) {
+                await new Promise(resolve => setTimeout(resolve, 2000)); // 2s delay
+              }
+              
+              const directResult = await queryLLMDirect(prompt_text, modelId);
+              totalCost += directResult.cost;
+              
+              if (directResult.success) {
+                const brandData = parseBrandData(directResult.response, brand_name, sanitizedBrandTags);
+                
+                results.push(createModelResult(
+                  modelId,
+                  true,
+                  directResult.response,
+                  [], // No citations from direct LLM queries
+                  directResult.cost,
+                  brand_name,
+                  sanitizedBrandTags,
+                  targetDomain,
+                  sanitizedCompetitors,
+                  undefined,
+                  {
+                    brand_mentioned: brandData.mentioned,
+                    brand_mention_count: brandData.count,
+                    is_cited: false,
+                    response_time_ms: directResult.response_time_ms,
+                  }
+                ));
+              } else {
+                // Direct query also failed - show error
+                results.push(createModelResult(
+                  modelId,
+                  false,
+                  `DataForSEO: ${llmResult.error || "No data"} | Groq fallback: ${directResult.error || "Failed"}`,
+                  [],
+                  directResult.cost,
+                  brand_name,
+                  sanitizedBrandTags,
+                  targetDomain,
+                  sanitizedCompetitors,
+                  `DataForSEO and Groq both failed`
+                ));
+              }
+            }
+          } else {
+            // DataForSEO returned no cached data for these models - show informative message
+            // This is normal - DataForSEO only has cached responses, not real-time
+            console.log(`[GEO Audit] No cached DataForSEO data for: ${modelsNeedingDirectQuery.join(", ")}. Showing as no data available.`);
+            
+            for (const modelId of modelsNeedingDirectQuery) {
               results.push(createModelResult(
                 modelId,
-                true,
-                directResult.response,
-                [], // No citations from direct LLM queries
-                directResult.cost,
+                true, // Mark as success but with no brand mention
+                `No cached AI response found for this query in DataForSEO's database. This means this specific question hasn't been asked frequently enough to be indexed. Try a more common/popular search query.`,
+                [],
+                costPerModel,
                 brand_name,
                 sanitizedBrandTags,
                 targetDomain,
                 sanitizedCompetitors,
                 undefined,
                 {
-                  brand_mentioned: brandData.mentioned,
-                  brand_mention_count: brandData.count,
+                  brand_mentioned: false,
+                  brand_mention_count: 0,
                   is_cited: false,
-                  response_time_ms: directResult.response_time_ms,
+                  response_time_ms: llmResult.response_time_ms,
                 }
-              ));
-            } else {
-              // Direct query also failed
-              results.push(createModelResult(
-                modelId,
-                false,
-                directResult.error || "Failed to get response from LLM",
-                [],
-                directResult.cost,
-                brand_name,
-                sanitizedBrandTags,
-                targetDomain,
-                sanitizedCompetitors,
-                directResult.error || "LLM query failed"
               ));
             }
           }

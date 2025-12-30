@@ -24,7 +24,7 @@ If your brand doesn't appear in these AI responses, you're invisible to a growin
 
 ---
 
-## How It Works (Simple Explanation)
+## How It Works
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -34,9 +34,9 @@ If your brand doesn't appear in these AI responses, you're invisible to a growin
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  2. WE ASK AI MODELS                                            │
-│     ChatGPT, Google AI Overview, Perplexity, etc.               │
-│     "Hey, what are the best dating apps in India?"              │
+│  2. WE QUERY DATAFORSEO'S AI DATABASE                           │
+│     Searches cached responses from ChatGPT, Claude, Gemini,     │
+│     Perplexity + Google AI Overview & SERP                      │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -57,15 +57,31 @@ If your brand doesn't appear in these AI responses, you're invisible to a growin
 
 ---
 
+## Data Sources
+
+### Primary: DataForSEO LLM Mentions API
+- Searches DataForSEO's database of cached AI responses
+- Covers: ChatGPT, Claude, Gemini, Perplexity
+- Shows real AI responses with citations
+- Cost: ~$0.02 per query
+
+### Google AI Overview & SERP
+- Real-time Google search results
+- AI Overview snippets when available
+- Traditional organic search results
+- Cost: ~$0.002-0.003 per query
+
+### Fallback: Groq (Last Resort)
+- Only used when DataForSEO API completely fails
+- Uses Llama 3.3 70B model
+- Free tier available
+
+---
+
 ## Key Metrics Explained
 
 ### Share of Voice (SOV)
-**What it means:** The percentage of AI models that mention your brand.
-
-**Example:**
-- You test 3 AI models
-- 2 of them mention your brand
-- SOV = 2/3 = 67%
+The percentage of AI models that mention your brand.
 
 | SOV Range | What It Means |
 |-----------|---------------|
@@ -75,54 +91,23 @@ If your brand doesn't appear in these AI responses, you're invisible to a growin
 | 0-24%     | Low. Urgent action needed |
 
 ### Average Rank
-**What it means:** When AI gives a numbered list, where does your brand appear?
-
-**Example Response from ChatGPT:**
-```
-1. Bumble - Great for women
-2. Juleo - Verified profiles  ← Your brand is #2
-3. Tinder - Most popular
-```
-
-Lower rank = Better (being #1 is best)
+When AI gives a numbered list, where does your brand appear? Lower = Better (#1 is best)
 
 ### Citations
-**What it means:** The websites that AI models reference when answering questions.
-
-**Why it matters:** If AI cites your website, you're seen as an authority. If it cites competitors, they're winning.
+The websites that AI models reference. If AI cites your website, you're seen as an authority.
 
 ---
 
 ## Features
 
-### 1. Multi-Client Support
-Track multiple brands from one dashboard. Perfect for agencies managing several clients.
-
-### 2. AI Model Coverage
-Test visibility across:
-- ChatGPT (OpenAI)
-- Claude (Anthropic)
-- Gemini (Google)
-- Perplexity
-- Google AI Overview
-- Google SERP
-
-### 3. Prompt Management
-- Add single prompts
-- Bulk import from CSV/JSON
-- AI-powered prompt generation from keywords
-
-### 4. Competitor Analysis
-See how your brand compares to competitors in AI responses.
-
-### 5. Citation Tracking
-Know which websites AI models are citing - and whether yours is among them.
-
-### 6. Content Generation
-Generate SEO-optimized content designed to improve your AI visibility.
-
-### 7. Export Reports
-Download detailed reports in CSV or formatted text.
+- **Multi-Client Support** - Track multiple brands from one dashboard
+- **6 AI Models** - ChatGPT, Claude, Gemini, Perplexity, Google AI Overview, Google SERP
+- **Prompt Management** - Add single, bulk import, or AI-generate prompts
+- **Competitor Analysis** - Compare your brand vs competitors
+- **Citation Tracking** - See which sources AI models cite
+- **Content Generation** - Generate SEO-optimized content via Groq
+- **Export Reports** - CSV, JSON, and formatted text reports
+- **Dark Theme UI** - Professional dashboard interface
 
 ---
 
@@ -131,20 +116,16 @@ Download detailed reports in CSV or formatted text.
 ```
 forzeo-dashboard/
 ├── src/
-│   ├── pages/
-│   │   └── ClientDashboard.tsx    # Main UI
-│   ├── hooks/
-│   │   └── useClientDashboard.ts  # All logic & state
-│   └── components/
-│       └── ui/                    # UI components
+│   ├── pages/ClientDashboard.tsx    # Main UI
+│   ├── hooks/useClientDashboard.ts  # State & logic
+│   └── components/ui/               # UI components
 ├── backend/
-│   ├── geo-audit/
-│   │   └── index.ts               # Main API
-│   └── generate-content/
-│       └── index.ts               # Content generation
+│   ├── geo-audit/index.ts           # Main audit API
+│   └── generate-content/index.ts    # Content generation
 ├── database/
-│   └── schema.sql                 # Database tables
-└── README.md                      # This file
+│   └── *.sql                        # Database schemas
+├── supabase/functions/              # Edge functions
+└── netlify.toml                     # Netlify config
 ```
 
 ---
@@ -174,28 +155,49 @@ Visit `http://localhost:5173`
 
 ---
 
+## Deployment
+
+### Netlify (Frontend)
+```bash
+netlify deploy --prod
+```
+
+### Supabase (Edge Functions)
+```bash
+npx supabase functions deploy geo-audit --project-ref YOUR_PROJECT_REF
+```
+
+---
+
 ## API Costs
 
-| Service | Cost | Free Tier |
-|---------|------|-----------|
-| DataForSEO SERP | ~$0.002/query | $1 credit on signup |
-| DataForSEO AI Overview | ~$0.003/query | Included |
-| Groq (Llama 3.1) | Free | 14,400 requests/day |
+| Service | Cost | Notes |
+|---------|------|-------|
+| DataForSEO LLM Mentions | ~$0.02/query | Primary source for AI responses |
+| DataForSEO SERP | ~$0.002/query | Google search results |
+| DataForSEO AI Overview | ~$0.003/query | Google AI snippets |
+| Groq | Free | Fallback only (14,400 req/day) |
 
-**Typical cost per prompt:** ~$0.005 (testing 3 models)
+**Typical cost per prompt:** ~$0.025 (testing 5 models)
 
 ---
 
 ## Tech Stack
 
-- **Frontend:** React, TypeScript, Tailwind CSS
-- **Backend:** Supabase Edge Functions
+- **Frontend:** React, TypeScript, Tailwind CSS, Radix UI
+- **Backend:** Supabase Edge Functions (Deno)
 - **Database:** Supabase (PostgreSQL)
-- **AI APIs:** DataForSEO, Groq
+- **APIs:** DataForSEO, Groq
+- **Hosting:** Netlify
+
+---
+
+## Live Demo
+
+**URL:** https://wondrous-queijadas-f95c7e.netlify.app
 
 ---
 
 ## Support
 
 See `ARCHITECTURE.md` for detailed technical documentation.
-#
