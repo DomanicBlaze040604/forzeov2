@@ -783,6 +783,174 @@ async function getLLMMentions(
 }
 
 /**
+ * LIVE LLM Response API - Real-time inference (NOT cached)
+ * Uses /v3/ai_optimization/llm_responses/live endpoint
+ * This guarantees fresh responses from the actual LLM
+ * 
+ * Cost: Higher than cached (~$0.05-0.10 per query)
+ */
+async function getLiveLLMResponse(
+  prompt: string,
+  model: "chatgpt" | "gemini" | "claude" | "perplexity"
+): Promise<{
+  success: boolean;
+  response: string;
+  tokens: number;
+  cost: number;
+  latency_ms: number;
+  error?: string;
+}> {
+  console.log(`[LIVE LLM/${model}] Querying real-time...`);
+  const startTime = Date.now();
+  
+  // Add entropy/nonce to prevent any caching
+  const entropy = `nonce:${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  const promptWithEntropy = `${prompt}\n\n[${entropy}]`;
+  
+  const result = await callDataForSEO("/ai_optimization/llm_responses/live", [{
+    model: model,
+    prompt: promptWithEntropy,
+    temperature: 0.6,
+    max_tokens: 800,
+  }]);
+  
+  const latency = Date.now() - startTime;
+  
+  if (result.error) {
+    console.error(`[LIVE LLM/${model}] Error: ${result.error}`);
+    return { success: false, response: "", tokens: 0, cost: 0, latency_ms: latency, error: result.error };
+  }
+  
+  const data = result.data as { tasks?: Array<{ result?: Array<{ response?: string; usage?: { total_tokens?: number }; time?: number }>; cost?: number }> };
+  const task = data?.tasks?.[0];
+  const taskResult = task?.result?.[0];
+  const cost = task?.cost || 0;
+  
+  if (!taskResult?.response) {
+    console.error(`[LIVE LLM/${model}] No response returned`);
+    return { success: false, response: "", tokens: 0, cost, latency_ms: latency, error: "No live LLM response returned" };
+  }
+  
+  // Remove the entropy from response if it appears
+  let cleanResponse = taskResult.response;
+  if (cleanResponse.includes(entropy)) {
+    cleanResponse = cleanResponse.replace(`[${entropy}]`, "").trim();
+  }
+  
+  console.log(`[LIVE LLM/${model}] Got ${cleanResponse.length} chars, ${taskResult.usage?.total_tokens || 0} tokens, ${latency}ms`);
+  
+  return {
+    success: true,
+    response: cleanResponse,
+    tokens: taskResult.usage?.total_tokens || 0,
+    cost: cost,
+    latency_ms: latency,
+  };
+}
+
+/**
+ * Multi-model LIVE LLM query with cross-validation
+ * Queries multiple models and checks for agreement to reduce hallucinations
+ */
+async function getLiveLLMWithValidation(
+  prompt: string,
+  brandName: string,
+  brandTags: string[],
+  competitors: string[],
+  models: Array<"chatgpt" | "gemini" | "claude" | "perplexity"> = ["chatgpt", "gemini", "claude"]
+): Promise<{
+  success: boolean;
+  results: Map<string, {
+    response: string;
+    tokens: number;
+    cost: number;
+    latency_ms: number;
+    brand_mentioned: boolean;
+    brand_mention_count: number;
+  }>;
+  totalCost: number;
+  agreement: "high" | "medium" | "low";
+  error?: string;
+}> {
+  console.log(`[LIVE LLM Validation] Querying ${models.length} models...`);
+  
+  const results = new Map<string, {
+    response: string;
+    tokens: number;
+    cost: number;
+    latency_ms: number;
+    brand_mentioned: boolean;
+    brand_mention_count: number;
+  }>();
+  
+  let totalCost = 0;
+  const responses: string[] = [];
+  
+  // Query models sequentially to avoid rate limits
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    
+    // Add delay between queries
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    const result = await getLiveLLMResponse(prompt, model);
+    totalCost += result.cost;
+    
+    if (result.success) {
+      const brandData = parseBrandData(result.response, brandName, brandTags);
+      
+      results.set(model, {
+        response: result.response,
+        tokens: result.tokens,
+        cost: result.cost,
+        latency_ms: result.latency_ms,
+        brand_mentioned: brandData.mentioned,
+        brand_mention_count: brandData.count,
+      });
+      
+      responses.push(result.response);
+    }
+  }
+  
+  // Check agreement between models
+  let agreement: "high" | "medium" | "low" = "low";
+  
+  if (responses.length >= 2) {
+    // Extract key terms from each response
+    const keyTerms = responses.map(r => {
+      const words = r.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
+      return new Set(words.slice(0, 30));
+    });
+    
+    // Check overlap between responses
+    let overlapCount = 0;
+    const firstTerms = keyTerms[0];
+    
+    for (let i = 1; i < keyTerms.length; i++) {
+      const overlap = [...firstTerms].filter(term => keyTerms[i].has(term)).length;
+      if (overlap >= 5) overlapCount++;
+    }
+    
+    if (overlapCount >= keyTerms.length - 1) {
+      agreement = "high";
+    } else if (overlapCount >= 1) {
+      agreement = "medium";
+    }
+  }
+  
+  console.log(`[LIVE LLM Validation] Got ${results.size}/${models.length} responses, agreement: ${agreement}`);
+  
+  return {
+    success: results.size > 0,
+    results,
+    totalCost,
+    agreement,
+  };
+}
+
+/**
  * Serper API - Alternative/Backup SERP provider
  * Useful when DataForSEO is unavailable or for cost optimization
  * Get API key from: https://serper.dev
@@ -1427,68 +1595,145 @@ serve(async (req: Request) => {
     const requestSERP = models.includes("google_serp");
     const requestAIOverview = models.includes("google_ai_overview");
 
-    // Query LLMs DIRECTLY for REAL-TIME responses (not cached DataForSEO data)
+    // Query LLM Mentions API if any LLM models requested
     if (requestedLLMs.length > 0) {
       promises.push((async () => {
-        console.log(`[GEO Audit] Querying LLMs directly for REAL-TIME responses: ${requestedLLMs.join(", ")}`);
+        // First try DataForSEO LLM Mentions API - this is the PRIMARY source
+        const llmResult = await getLLMMentions(
+          prompt_text,
+          targetDomain,
+          brand_name,
+          sanitizedBrandTags,
+          location_code
+        );
         
-        // Query each LLM sequentially to avoid rate limits
-        for (let i = 0; i < requestedLLMs.length; i++) {
-          const modelId = requestedLLMs[i];
+        const costPerModel = llmResult.cost / Math.max(1, requestedLLMs.length);
+        totalCost += llmResult.cost;
+        
+        // Track which models got data from DataForSEO
+        const modelsWithData = new Set<string>();
+        
+        // Check if we got ANY data from DataForSEO (even if brand not mentioned)
+        const hasAnyDataForSEOData = llmResult.success && llmResult.results.size > 0;
+        
+        for (const modelId of requestedLLMs) {
+          const modelData = llmResult.results.get(modelId);
           
-          // Add delay between queries to avoid rate limits (except for first query)
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000)); // 1s delay
-          }
-          
-          console.log(`[GEO Audit] Querying ${modelId}...`);
-          const directResult = await queryLLMDirect(prompt_text, modelId);
-          totalCost += directResult.cost;
-          
-          if (directResult.success && directResult.response.length > 10) {
-            const brandData = parseBrandData(directResult.response, brand_name, sanitizedBrandTags);
-            const competitorData = parseCompetitors(directResult.response, sanitizedCompetitors);
-            const winner = findWinnerBrand(directResult.response, brand_name, sanitizedCompetitors);
-            
+          // Accept DataForSEO data even if short - show whatever we have
+          if (modelData && modelData.answer && modelData.answer.length > 10) {
+            // Got data from DataForSEO - use it regardless of brand visibility
+            modelsWithData.add(modelId);
             results.push(createModelResult(
               modelId,
               true,
-              directResult.response,
-              [], // No citations from direct LLM queries
-              directResult.cost,
+              modelData.answer,
+              modelData.sources,
+              costPerModel,
               brand_name,
               sanitizedBrandTags,
               targetDomain,
               sanitizedCompetitors,
               undefined,
               {
-                brand_mentioned: brandData.mentioned,
-                brand_mention_count: brandData.count,
-                brand_rank: brandData.rank,
-                brand_sentiment: brandData.sentiment,
-                matched_terms: brandData.matchedTerms,
-                winner_brand: winner,
-                competitors_found: competitorData,
-                is_cited: false,
-                response_time_ms: directResult.response_time_ms,
+                brand_mentioned: modelData.brand_mentioned,
+                brand_mention_count: modelData.brand_mention_count,
+                is_cited: modelData.brand_cited,
+                ai_search_volume: modelData.ai_search_volume,
+                response_time_ms: llmResult.response_time_ms,
               }
             ));
-            console.log(`[GEO Audit] ${modelId}: Got ${directResult.response.length} chars, brand_mentioned=${brandData.mentioned}`);
-          } else {
-            // Query failed - show error
-            results.push(createModelResult(
-              modelId,
-              false,
-              directResult.error || "Failed to get response",
-              [],
-              directResult.cost,
+          }
+        }
+        
+        // For models without cached data, try LIVE LLM API (real-time inference)
+        const modelsNeedingDirectQuery = requestedLLMs.filter(m => !modelsWithData.has(m));
+        
+        if (modelsNeedingDirectQuery.length > 0) {
+          console.log(`[GEO Audit] No cached data for: ${modelsNeedingDirectQuery.join(", ")}. Trying LIVE LLM API...`);
+          
+          // Try LIVE LLM API first (real-time inference from DataForSEO)
+          const liveModels = modelsNeedingDirectQuery.filter(m => 
+            ["chatgpt", "gemini", "claude", "perplexity"].includes(m)
+          ) as Array<"chatgpt" | "gemini" | "claude" | "perplexity">;
+          
+          if (liveModels.length > 0) {
+            // Query LIVE LLM with validation
+            const liveResult = await getLiveLLMWithValidation(
+              prompt_text,
               brand_name,
               sanitizedBrandTags,
-              targetDomain,
               sanitizedCompetitors,
-              directResult.error || "LLM query failed"
-            ));
-            console.log(`[GEO Audit] ${modelId}: Failed - ${directResult.error}`);
+              liveModels
+            );
+            
+            totalCost += liveResult.totalCost;
+            
+            for (const modelId of liveModels) {
+              const modelData = liveResult.results.get(modelId);
+              
+              if (modelData) {
+                results.push(createModelResult(
+                  modelId,
+                  true,
+                  modelData.response,
+                  [], // LIVE LLM doesn't provide citations
+                  modelData.cost,
+                  brand_name,
+                  sanitizedBrandTags,
+                  targetDomain,
+                  sanitizedCompetitors,
+                  undefined,
+                  {
+                    brand_mentioned: modelData.brand_mentioned,
+                    brand_mention_count: modelData.brand_mention_count,
+                    is_cited: false,
+                    response_time_ms: modelData.latency_ms,
+                  }
+                ));
+              } else {
+                // LIVE LLM failed for this model - try Groq as last resort
+                console.log(`[GEO Audit] LIVE LLM failed for ${modelId}, trying Groq fallback...`);
+                
+                const groqResult = await queryLLMDirect(prompt_text, modelId);
+                totalCost += groqResult.cost;
+                
+                if (groqResult.success) {
+                  const brandData = parseBrandData(groqResult.response, brand_name, sanitizedBrandTags);
+                  results.push(createModelResult(
+                    modelId,
+                    true,
+                    groqResult.response,
+                    [],
+                    groqResult.cost,
+                    brand_name,
+                    sanitizedBrandTags,
+                    targetDomain,
+                    sanitizedCompetitors,
+                    undefined,
+                    {
+                      brand_mentioned: brandData.mentioned,
+                      brand_mention_count: brandData.count,
+                      is_cited: false,
+                      response_time_ms: groqResult.response_time_ms,
+                    }
+                  ));
+                } else {
+                  // All methods failed
+                  results.push(createModelResult(
+                    modelId,
+                    false,
+                    `All data sources failed. Cached: No data | LIVE: Failed | Groq: ${groqResult.error || "Failed"}`,
+                    [],
+                    groqResult.cost,
+                    brand_name,
+                    sanitizedBrandTags,
+                    targetDomain,
+                    sanitizedCompetitors,
+                    "All data sources failed"
+                  ));
+                }
+              }
+            }
           }
         }
       })());

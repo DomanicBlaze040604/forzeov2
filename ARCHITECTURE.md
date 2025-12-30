@@ -683,34 +683,74 @@ CREATE TABLE forzeo_prompts (
 
 ## API Integration
 
-### LLM Models Flow
+### 3-Tier Data Source System
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        geo-audit Edge Function                       │
 │                                                                      │
-│  1. Try DataForSEO LLM Mentions API (cached AI responses)           │
-│     └── If data found → Use cached responses for all LLM models     │
-│     └── If no data → Fall back to direct LLM queries via Groq       │
+│  TIER 1: DataForSEO LLM Mentions API (Cached)                       │
+│     └── Searches cached AI responses from DataForSEO database       │
+│     └── Fast & cheap (~$0.02/query)                                 │
+│     └── If data found → Use cached responses                        │
 │                                                                      │
-│  2. Query Google AI Overview (DataForSEO)                           │
+│  TIER 2: DataForSEO LIVE LLM API (Real-time) ← NEW!                 │
+│     └── /llm_responses/live endpoint                                │
+│     └── Real-time inference from actual LLMs                        │
+│     └── Multi-model validation (ChatGPT, Gemini, Claude)            │
+│     └── Entropy/nonce to prevent caching                            │
+│     └── Cost: ~$0.05-0.10/query                                     │
 │                                                                      │
-│  3. Query Google SERP (DataForSEO)                                  │
+│  TIER 3: Groq Fallback (Last Resort)                                │
+│     └── Only used when DataForSEO completely fails                  │
+│     └── Uses Llama 3.3 70B model                                    │
+│     └── FREE (14,400 req/day)                                       │
+│                                                                      │
+│  GOOGLE APIs (Always queried):                                      │
+│     └── Google AI Overview (DataForSEO)                             │
+│     └── Google SERP (DataForSEO)                                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+### LIVE LLM API (New Feature)
+
+When cached data is not available, we now use DataForSEO's LIVE LLM endpoint for real-time inference:
+
+**Endpoint:** `POST https://api.dataforseo.com/v3/ai_optimization/llm_responses/live`
+
+**Features:**
+- Real-time inference from actual LLMs (not cached)
+- Entropy/nonce added to prevent any caching
+- Multi-model validation to reduce hallucinations
+- Sequential queries with delays to avoid rate limits
+
+**Example Request:**
+```json
+{
+  "model": "chatgpt",
+  "prompt": "Best dating apps in India 2025\n\n[nonce:1735567890-abc123]",
+  "temperature": 0.6,
+  "max_tokens": 800
+}
+```
+
+**Cost:** ~$0.05-0.10 per query (higher than cached, but real data)
+
 ### Supported AI Models
 
-| Model | Provider | Source | Cost |
-|-------|----------|--------|------|
-| ChatGPT | OpenAI | Groq (Llama 3.3) | ~$0.0001 |
-| Claude | Anthropic | Groq (Llama 3.3) | ~$0.0001 |
-| Gemini | Google | Groq (Llama 3.3) | ~$0.0001 |
-| Perplexity | Perplexity AI | Groq (Llama 3.3) | ~$0.0001 |
-| Google AI Overview | DataForSEO | DataForSEO API | ~$0.003 |
-| Google SERP | DataForSEO | DataForSEO API | ~$0.002 |
+| Model | Provider | Data Source | Cost |
+|-------|----------|-------------|------|
+| ChatGPT | OpenAI | Tier 1: Cached → Tier 2: LIVE → Tier 3: Groq | $0.02-0.10 |
+| Claude | Anthropic | Tier 1: Cached → Tier 2: LIVE → Tier 3: Groq | $0.02-0.10 |
+| Gemini | Google | Tier 1: Cached → Tier 2: LIVE → Tier 3: Groq | $0.02-0.10 |
+| Perplexity | Perplexity AI | Tier 1: Cached → Tier 2: LIVE → Tier 3: Groq | $0.02-0.10 |
+| Google AI Overview | DataForSEO | DataForSEO SERP API | ~$0.003 |
+| Google SERP | DataForSEO | DataForSEO SERP API | ~$0.002 |
 
-**Note:** LLM models (ChatGPT, Claude, Gemini, Perplexity) are simulated using Groq's Llama 3.3 70B model when DataForSEO's cached responses are not available. This provides real AI responses at minimal cost.
+**Data Source Priority:**
+1. **Cached (LLM Mentions)** - Fast, cheap, historical data
+2. **LIVE LLM** - Real-time inference, more expensive but accurate
+3. **Groq Fallback** - Free, only when DataForSEO fails completely
 
 ### DataForSEO - Google SERP
 
@@ -771,14 +811,20 @@ CREATE TABLE forzeo_prompts (
 
 ## Cost Breakdown
 
-| Action | Models Used | Cost |
+| Action | Data Source | Cost |
 |--------|-------------|------|
-| Single prompt audit (all 5 models) | ChatGPT + Claude + Gemini + Perplexity + AI Overview | ~$0.01 |
-| Single prompt audit (3 models) | ChatGPT + Gemini + AI Overview | ~$0.005 |
-| 10 prompts (all models) | All 5 models | ~$0.10 |
-| 100 prompts (all models) | All 5 models | ~$1.00 |
-| Content generation | Groq only | FREE |
-| Prompt generation | Groq only | FREE |
+| Single prompt (cached data available) | Tier 1: LLM Mentions | ~$0.02-0.03 |
+| Single prompt (no cached, LIVE LLM) | Tier 2: LIVE LLM | ~$0.10-0.15 |
+| Single prompt (fallback to Groq) | Tier 3: Groq | FREE |
+| Google AI Overview | DataForSEO | ~$0.003 |
+| Google SERP | DataForSEO | ~$0.002 |
+| Content generation | Groq | FREE |
+| Prompt generation | Groq | FREE |
+
+**Typical costs:**
+- 10 prompts (mostly cached): ~$0.30
+- 10 prompts (mostly LIVE): ~$1.50
+- 100 prompts (mixed): ~$3-15
 
 ---
 

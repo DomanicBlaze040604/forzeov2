@@ -1,26 +1,21 @@
 # Forzeo GEO Dashboard
 
-## What is This?
+AI Visibility Analytics Platform - Track how your brand appears in AI-generated responses.
 
-Forzeo is a tool that helps businesses understand how visible their brand is when people ask AI assistants questions. 
+## Live Demo
 
-Think of it like this: When someone asks ChatGPT "What's the best dating app in India?" - does your app get mentioned? If yes, where in the list? This tool answers those questions.
+🚀 **https://wondrous-queijadas-f95c7e.netlify.app**
 
 ---
 
-## The Problem We Solve
+## What is This?
 
-AI assistants like ChatGPT, Google AI, and Perplexity are becoming the new search engines. People ask them:
-- "Best restaurants near me"
-- "Top dental clinics in London"
+Forzeo tracks your brand's visibility when people ask AI assistants questions like:
+- "Best dating apps in India 2025"
+- "Top restaurants near me"
 - "Affordable fashion websites"
 
-If your brand doesn't appear in these AI responses, you're invisible to a growing number of potential customers.
-
-**Forzeo tracks your brand's visibility across multiple AI platforms and shows you:**
-- Are you being mentioned?
-- Where do you rank compared to competitors?
-- Which sources are AI models citing?
+If your brand doesn't appear in AI responses, you're invisible to a growing audience.
 
 ---
 
@@ -30,117 +25,103 @@ If your brand doesn't appear in these AI responses, you're invisible to a growin
 ┌─────────────────────────────────────────────────────────────────┐
 │  1. YOU ADD PROMPTS                                             │
 │     "Best dating apps in India 2025"                            │
-│     "Dating apps with ID verification"                          │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  2. WE QUERY DATAFORSEO'S AI DATABASE                           │
-│     Searches cached responses from ChatGPT, Claude, Gemini,     │
-│     Perplexity + Google AI Overview & SERP                      │
+│  2. WE QUERY AI MODELS (3-tier system)                          │
+│     ├─ Tier 1: DataForSEO Cached Data (fast, cheap)             │
+│     ├─ Tier 2: DataForSEO LIVE LLM API (real-time)              │
+│     └─ Tier 3: Groq Fallback (last resort)                      │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  3. WE ANALYZE RESPONSES                                        │
-│     - Did they mention your brand? ✓ or ✗                       │
-│     - What rank? #1, #2, #3...                                  │
-│     - What sources did they cite?                               │
-│     - Did they mention competitors?                             │
+│     - Brand mentioned? ✓/✗                                      │
+│     - Rank in list? #1, #2, #3...                               │
+│     - Citations & sources                                       │
+│     - Competitor mentions                                       │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  4. YOU SEE RESULTS                                             │
-│     Share of Voice: 67%                                         │
-│     Average Rank: #2                                            │
-│     Top Source: wikipedia.org                                   │
+│     Share of Voice: 67% | Rank: #2 | Citations: 12              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Data Sources
+## Data Sources (3-Tier System)
 
-### Primary: DataForSEO LLM Mentions API
-- Searches DataForSEO's database of cached AI responses
+### Tier 1: DataForSEO Cached (Primary)
+- `/llm_mentions/*` API - Historical/cached AI responses
 - Covers: ChatGPT, Claude, Gemini, Perplexity
-- Shows real AI responses with citations
-- Cost: ~$0.02 per query
+- Cost: ~$0.02/query | Fast response
 
-### Google AI Overview & SERP
-- Real-time Google search results
-- AI Overview snippets when available
-- Traditional organic search results
-- Cost: ~$0.002-0.003 per query
+### Tier 2: DataForSEO LIVE (Real-time)
+- `/llm_responses/live` API - Fresh LLM inference
+- Real-time responses with entropy to prevent caching
+- Multi-model validation to reduce hallucinations
+- Cost: ~$0.05-0.10/query | Slower but accurate
 
-### Fallback: Groq (Last Resort)
-- Only used when DataForSEO API completely fails
+### Tier 3: Groq Fallback (Last Resort)
+- Only used when DataForSEO completely fails
 - Uses Llama 3.3 70B model
-- Free tier available
+- Cost: FREE (14,400 req/day limit)
+
+### Google APIs
+- **AI Overview**: Google's AI-generated snippets
+- **SERP**: Traditional organic search results
+- Cost: ~$0.002-0.003/query
 
 ---
 
-## Key Metrics Explained
+## Key Metrics
 
-### Share of Voice (SOV)
-The percentage of AI models that mention your brand.
+| Metric | Description |
+|--------|-------------|
+| **Share of Voice (SOV)** | % of AI models mentioning your brand |
+| **Average Rank** | Position in AI-generated lists (#1 is best) |
+| **Citations** | Sources AI models reference |
+| **Competitor Gap** | How you compare to competitors |
 
-| SOV Range | What It Means |
-|-----------|---------------|
-| 70-100%   | Excellent! Your brand dominates AI responses |
-| 50-69%    | Good. You appear in most responses |
-| 25-49%    | Moderate. Room for improvement |
-| 0-24%     | Low. Urgent action needed |
-
-### Average Rank
-When AI gives a numbered list, where does your brand appear? Lower = Better (#1 is best)
-
-### Citations
-The websites that AI models reference. If AI cites your website, you're seen as an authority.
+### SOV Interpretation
+| Range | Status |
+|-------|--------|
+| 70-100% | 🟢 Excellent - Dominating AI responses |
+| 50-69% | 🟡 Good - Appearing in most responses |
+| 25-49% | 🟠 Moderate - Room for improvement |
+| 0-24% | 🔴 Low - Urgent action needed |
 
 ---
 
 ## Features
 
-- **Multi-Client Support** - Track multiple brands from one dashboard
-- **6 AI Models** - ChatGPT, Claude, Gemini, Perplexity, Google AI Overview, Google SERP
-- **Prompt Management** - Add single, bulk import, or AI-generate prompts
-- **Competitor Analysis** - Compare your brand vs competitors
-- **Citation Tracking** - See which sources AI models cite
-- **Content Generation** - Generate SEO-optimized content via Groq
-- **Export Reports** - CSV, JSON, and formatted text reports
-- **Dark Theme UI** - Professional dashboard interface
-
----
-
-## Project Structure
-
-```
-forzeo-dashboard/
-├── src/
-│   ├── pages/ClientDashboard.tsx    # Main UI
-│   ├── hooks/useClientDashboard.ts  # State & logic
-│   └── components/ui/               # UI components
-├── backend/
-│   ├── geo-audit/index.ts           # Main audit API
-│   └── generate-content/index.ts    # Content generation
-├── database/
-│   └── *.sql                        # Database schemas
-├── supabase/functions/              # Edge functions
-└── netlify.toml                     # Netlify config
-```
+- ✅ **6 AI Models** - ChatGPT, Claude, Gemini, Perplexity, Google AI Overview, SERP
+- ✅ **Multi-Client** - Track multiple brands from one dashboard
+- ✅ **LIVE LLM** - Real-time inference when cached data unavailable
+- ✅ **Multi-Model Validation** - Cross-check responses to reduce hallucinations
+- ✅ **Competitor Analysis** - Compare brand vs competitors
+- ✅ **Citation Tracking** - See which sources AI cites
+- ✅ **Content Generation** - AI-powered SEO content via Groq
+- ✅ **Export Reports** - CSV, JSON, formatted text
+- ✅ **Database Storage** - All results saved to Supabase
+- ✅ **Dark Theme UI** - Professional dashboard interface
 
 ---
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Clone & Install
 ```bash
+git clone https://github.com/DomanicBlaze040604/FORZEO1.git
+cd FORZEO1
 npm install
 ```
 
-### 2. Set Environment Variables
-Create a `.env` file:
-```
-VITE_SUPABASE_URL=your-supabase-url
+### 2. Environment Variables
+Create `.env` file:
+```env
+VITE_SUPABASE_URL=https://pqvyyziaczzgaythgpyc.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
 VITE_GROQ_API_KEY=your-groq-key
 ```
@@ -157,14 +138,22 @@ Visit `http://localhost:5173`
 
 ## Deployment
 
-### Netlify (Frontend)
+### Frontend (Netlify)
 ```bash
+npm run build
 netlify deploy --prod
 ```
 
-### Supabase (Edge Functions)
+### Edge Functions (Supabase)
 ```bash
-npx supabase functions deploy geo-audit --project-ref YOUR_PROJECT_REF
+npx supabase functions deploy geo-audit --project-ref pqvyyziaczzgaythgpyc
+```
+
+### Set Supabase Secrets
+```bash
+npx supabase secrets set DATAFORSEO_LOGIN=your-login --project-ref pqvyyziaczzgaythgpyc
+npx supabase secrets set DATAFORSEO_PASSWORD=your-password --project-ref pqvyyziaczzgaythgpyc
+npx supabase secrets set GROQ_API_KEY=your-groq-key --project-ref pqvyyziaczzgaythgpyc
 ```
 
 ---
@@ -173,31 +162,51 @@ npx supabase functions deploy geo-audit --project-ref YOUR_PROJECT_REF
 
 | Service | Cost | Notes |
 |---------|------|-------|
-| DataForSEO LLM Mentions | ~$0.02/query | Primary source for AI responses |
-| DataForSEO SERP | ~$0.002/query | Google search results |
+| DataForSEO Cached | ~$0.02/query | Primary source |
+| DataForSEO LIVE | ~$0.05-0.10/query | Real-time inference |
+| DataForSEO SERP | ~$0.002/query | Google results |
 | DataForSEO AI Overview | ~$0.003/query | Google AI snippets |
-| Groq | Free | Fallback only (14,400 req/day) |
+| Groq | FREE | Fallback only |
 
-**Typical cost per prompt:** ~$0.025 (testing 5 models)
+**Typical cost per prompt:** ~$0.03-0.15 (depending on data availability)
 
 ---
 
 ## Tech Stack
 
-- **Frontend:** React, TypeScript, Tailwind CSS, Radix UI
-- **Backend:** Supabase Edge Functions (Deno)
-- **Database:** Supabase (PostgreSQL)
-- **APIs:** DataForSEO, Groq
-- **Hosting:** Netlify
+| Layer | Technology |
+|-------|------------|
+| Frontend | React, TypeScript, Tailwind CSS, Radix UI |
+| Backend | Supabase Edge Functions (Deno) |
+| Database | Supabase PostgreSQL |
+| APIs | DataForSEO, Groq |
+| Hosting | Netlify |
 
 ---
 
-## Live Demo
+## Project Structure
 
-**URL:** https://wondrous-queijadas-f95c7e.netlify.app
+```
+├── src/
+│   ├── pages/ClientDashboard.tsx    # Main UI
+│   ├── hooks/useClientDashboard.ts  # State & logic
+│   └── components/                  # UI components
+├── backend/
+│   ├── geo-audit/index.ts           # Main audit API
+│   └── generate-content/index.ts    # Content generation
+├── database/                        # SQL schemas
+├── supabase/functions/              # Edge functions
+└── netlify.toml                     # Netlify config
+```
 
 ---
 
-## Support
+## Documentation
 
 See `ARCHITECTURE.md` for detailed technical documentation.
+
+---
+
+## License
+
+MIT
