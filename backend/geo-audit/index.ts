@@ -253,6 +253,97 @@ function extractDomain(url: string): string {
 }
 
 /**
+ * Extract URLs from text response
+ * Finds all URLs mentioned in the AI response and converts them to citations
+ */
+function extractUrlsFromText(text: string): Citation[] {
+  if (!text) return [];
+  
+  const citations: Citation[] = [];
+  
+  // Match URLs in various formats
+  const urlPatterns = [
+    // Standard URLs with http/https
+    /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi,
+    // URLs without protocol (www.example.com)
+    /(?:^|\s)(www\.[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}[^\s<>"{}|\\^`\[\]]*)/gi,
+    // Domain mentions like "example.com" or "site.org"
+    /(?:^|\s)([a-zA-Z0-9][a-zA-Z0-9-]*\.(?:com|org|net|io|co|ai|dev|app|edu|gov|info)[^\s<>"{}|\\^`\[\]]*)/gi,
+  ];
+  
+  const foundUrls = new Set<string>();
+  
+  for (const pattern of urlPatterns) {
+    const matches = text.matchAll(pattern);
+    for (const match of matches) {
+      let url = match[1] || match[0];
+      url = url.trim();
+      
+      // Clean up URL
+      url = url.replace(/[.,;:!?)]+$/, ''); // Remove trailing punctuation
+      
+      // Add protocol if missing
+      if (!url.startsWith('http')) {
+        url = 'https://' + url;
+      }
+      
+      // Validate URL
+      try {
+        const parsed = new URL(url);
+        // Skip if it's just a domain without path and looks like a brand mention
+        if (parsed.pathname === '/' && !url.includes('www.')) {
+          // Check if it's a real domain reference
+          const domain = parsed.hostname.toLowerCase();
+          if (domain.length < 5) continue; // Skip very short domains
+        }
+        
+        if (!foundUrls.has(url)) {
+          foundUrls.add(url);
+          citations.push({
+            url: url,
+            title: parsed.hostname,
+            domain: parsed.hostname.replace(/^www\./, ''),
+            position: citations.length + 1,
+            snippet: '',
+          });
+        }
+      } catch {
+        // Invalid URL, skip
+      }
+    }
+  }
+  
+  // Also look for markdown-style links [text](url)
+  const markdownLinks = text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g);
+  for (const match of markdownLinks) {
+    const title = match[1];
+    let url = match[2];
+    
+    if (!url.startsWith('http')) {
+      url = 'https://' + url;
+    }
+    
+    try {
+      const parsed = new URL(url);
+      if (!foundUrls.has(url)) {
+        foundUrls.add(url);
+        citations.push({
+          url: url,
+          title: title || parsed.hostname,
+          domain: parsed.hostname.replace(/^www\./, ''),
+          position: citations.length + 1,
+          snippet: '',
+        });
+      }
+    } catch {
+      // Invalid URL, skip
+    }
+  }
+  
+  return citations;
+}
+
+/**
  * Analyze sentiment from context around brand mention
  * Uses keyword matching for positive/negative indicators
  */
@@ -972,6 +1063,7 @@ async function getLiveLLMResponse(
 /**
  * Multi-model LIVE LLM query with cross-validation
  * Queries multiple models and checks for agreement to reduce hallucinations
+ * Now also extracts URLs/citations from response text
  */
 async function getLiveLLMWithValidation(
   prompt: string,
@@ -988,6 +1080,7 @@ async function getLiveLLMWithValidation(
     latency_ms: number;
     brand_mentioned: boolean;
     brand_mention_count: number;
+    citations: Citation[];
   }>;
   totalCost: number;
   agreement: "high" | "medium" | "low";
@@ -1002,6 +1095,7 @@ async function getLiveLLMWithValidation(
     latency_ms: number;
     brand_mentioned: boolean;
     brand_mention_count: number;
+    citations: Citation[];
   }>();
   
   let totalCost = 0;
@@ -1022,6 +1116,10 @@ async function getLiveLLMWithValidation(
     if (result.success) {
       const brandData = parseBrandData(result.response, brandName, brandTags);
       
+      // Extract URLs/citations from the response text
+      const extractedCitations = extractUrlsFromText(result.response);
+      console.log(`[LIVE LLM/${model}] Extracted ${extractedCitations.length} citations from response`);
+      
       results.set(model, {
         response: result.response,
         tokens: result.tokens,
@@ -1029,6 +1127,7 @@ async function getLiveLLMWithValidation(
         latency_ms: result.latency_ms,
         brand_mentioned: brandData.mentioned,
         brand_mention_count: brandData.count,
+        citations: extractedCitations,
       });
       
       responses.push(result.response);
@@ -1700,11 +1799,22 @@ serve(async (req: Request) => {
               const modelData = liveResult.results.get(modelId);
               
               if (modelData) {
+                // Use extracted citations from the response text
+                const citations = modelData.citations || [];
+                
+                // Check if brand domain is cited
+                const isCited = citations.some(c =>
+                  [brand_name, targetDomain, ...sanitizedBrandTags].some(term =>
+                    term && (c.domain.toLowerCase().includes(term.toLowerCase()) ||
+                            c.url.toLowerCase().includes(term.toLowerCase()))
+                  )
+                );
+                
                 results.push(createModelResult(
                   modelId,
                   true,
                   modelData.response,
-                  [], // LIVE LLM doesn't provide citations
+                  citations, // Now includes extracted citations from response
                   modelData.cost,
                   brand_name,
                   sanitizedBrandTags,
@@ -1714,7 +1824,7 @@ serve(async (req: Request) => {
                   {
                     brand_mentioned: modelData.brand_mentioned,
                     brand_mention_count: modelData.brand_mention_count,
-                    is_cited: false,
+                    is_cited: isCited,
                     response_time_ms: modelData.latency_ms,
                   }
                 ));

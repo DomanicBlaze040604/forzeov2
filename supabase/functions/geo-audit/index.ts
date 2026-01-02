@@ -1,30 +1,67 @@
 // @ts-nocheck
 /**
- * Forzeo GEO Audit API - Production Ready v2.0
+ * ============================================================================
+ * FORZEO GEO AUDIT API - Production Ready v3.0
+ * ============================================================================
  * 
- * Multi-model AI visibility analysis using DataForSEO APIs:
- * - LLM Mentions: Track mentions across ChatGPT, Claude, Gemini, Perplexity
- * - Google AI Overview: AI-generated summaries
- * - Google SERP: Traditional search results
+ * This is the main backend Edge Function that powers the Forzeo GEO Dashboard.
+ * It queries multiple AI models via DataForSEO's LIVE LLM APIs and analyzes
+ * responses for brand visibility, competitor mentions, and citations.
  * 
- * Features:
- * - Niche/Super-niche prompt support
- * - Comprehensive brand detection
- * - Competitor analysis
- * - Citation tracking
- * - Cost tracking
- * - Database persistence (optional)
+ * ============================================================================
+ * DATA SOURCES (LIVE LLM - Provider-Specific APIs)
+ * ============================================================================
  * 
- * Security:
- * - Input validation
+ * Each AI model is queried via its dedicated DataForSEO LIVE endpoint:
+ * 
+ * | Model      | Endpoint                                    | internal_model           |
+ * |------------|---------------------------------------------|--------------------------|
+ * | ChatGPT    | /ai_optimization/chat_gpt/llm_responses/live| gpt-4.1-mini             |
+ * | Gemini     | /ai_optimization/gemini/llm_responses/live  | gemini-2.5-flash         |
+ * | Claude     | /ai_optimization/claude/llm_responses/live  | claude-sonnet-4-0        |
+ * | Perplexity | /ai_optimization/perplexity/llm_responses/live| sonar-pro              |
+ * 
+ * These are REAL-TIME responses from actual AI providers - NOT simulated!
+ * 
+ * ============================================================================
+ * FEATURES
+ * ============================================================================
+ * 
+ * - LIVE LLM Queries: Real-time inference from ChatGPT, Gemini, Claude, Perplexity
+ * - Brand Detection: Find brand mentions, rank in lists, sentiment analysis
+ * - Competitor Analysis: Track competitor mentions and rankings
+ * - Citation Tracking: Extract and aggregate source URLs
+ * - Cost Tracking: Monitor API costs per query
+ * - Database Persistence: Save results to Supabase (optional)
+ * - Retry Logic: Exponential backoff for reliability
+ * - Input Validation: Sanitize all inputs for security
+ * 
+ * ============================================================================
+ * API COSTS (Approximate)
+ * ============================================================================
+ * 
+ * | Service              | Cost per Query |
+ * |----------------------|----------------|
+ * | ChatGPT (LIVE)       | ~$0.05-0.10    |
+ * | Gemini (LIVE)        | ~$0.05-0.10    |
+ * | Claude (LIVE)        | ~$0.05-0.10    |
+ * | Perplexity (LIVE)    | ~$0.05-0.10    |
+ * | Google AI Overview   | ~$0.003        |
+ * | Google SERP          | ~$0.002        |
+ * 
+ * ============================================================================
+ * SECURITY
+ * ============================================================================
+ * 
+ * - Input validation and sanitization
  * - Rate limiting headers
- * - Error sanitization
+ * - Error message sanitization
  * - CORS protection
+ * - API keys stored in environment variables
  * 
- * "Forzeo does not query LLMs. It monitors how LLMs already talk about you."
- * 
- * @version 2.0.0
+ * @version 3.0.0
  * @author Forzeo Team
+ * @license MIT
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -213,6 +250,97 @@ function extractDomain(url: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * Extract URLs from text response
+ * Finds all URLs mentioned in the AI response and converts them to citations
+ */
+function extractUrlsFromText(text: string): Citation[] {
+  if (!text) return [];
+  
+  const citations: Citation[] = [];
+  
+  // Match URLs in various formats
+  const urlPatterns = [
+    // Standard URLs with http/https
+    /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi,
+    // URLs without protocol (www.example.com)
+    /(?:^|\s)(www\.[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}[^\s<>"{}|\\^`\[\]]*)/gi,
+    // Domain mentions like "example.com" or "site.org"
+    /(?:^|\s)([a-zA-Z0-9][a-zA-Z0-9-]*\.(?:com|org|net|io|co|ai|dev|app|edu|gov|info)[^\s<>"{}|\\^`\[\]]*)/gi,
+  ];
+  
+  const foundUrls = new Set<string>();
+  
+  for (const pattern of urlPatterns) {
+    const matches = text.matchAll(pattern);
+    for (const match of matches) {
+      let url = match[1] || match[0];
+      url = url.trim();
+      
+      // Clean up URL
+      url = url.replace(/[.,;:!?)]+$/, ''); // Remove trailing punctuation
+      
+      // Add protocol if missing
+      if (!url.startsWith('http')) {
+        url = 'https://' + url;
+      }
+      
+      // Validate URL
+      try {
+        const parsed = new URL(url);
+        // Skip if it's just a domain without path and looks like a brand mention
+        if (parsed.pathname === '/' && !url.includes('www.')) {
+          // Check if it's a real domain reference
+          const domain = parsed.hostname.toLowerCase();
+          if (domain.length < 5) continue; // Skip very short domains
+        }
+        
+        if (!foundUrls.has(url)) {
+          foundUrls.add(url);
+          citations.push({
+            url: url,
+            title: parsed.hostname,
+            domain: parsed.hostname.replace(/^www\./, ''),
+            position: citations.length + 1,
+            snippet: '',
+          });
+        }
+      } catch {
+        // Invalid URL, skip
+      }
+    }
+  }
+  
+  // Also look for markdown-style links [text](url)
+  const markdownLinks = text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g);
+  for (const match of markdownLinks) {
+    const title = match[1];
+    let url = match[2];
+    
+    if (!url.startsWith('http')) {
+      url = 'https://' + url;
+    }
+    
+    try {
+      const parsed = new URL(url);
+      if (!foundUrls.has(url)) {
+        foundUrls.add(url);
+        citations.push({
+          url: url,
+          title: title || parsed.hostname,
+          domain: parsed.hostname.replace(/^www\./, ''),
+          position: citations.length + 1,
+          snippet: '',
+        });
+      }
+    } catch {
+      // Invalid URL, skip
+    }
+  }
+  
+  return citations;
 }
 
 /**
@@ -935,6 +1063,7 @@ async function getLiveLLMResponse(
 /**
  * Multi-model LIVE LLM query with cross-validation
  * Queries multiple models and checks for agreement to reduce hallucinations
+ * Now also extracts URLs/citations from response text
  */
 async function getLiveLLMWithValidation(
   prompt: string,
@@ -951,6 +1080,7 @@ async function getLiveLLMWithValidation(
     latency_ms: number;
     brand_mentioned: boolean;
     brand_mention_count: number;
+    citations: Citation[];
   }>;
   totalCost: number;
   agreement: "high" | "medium" | "low";
@@ -965,6 +1095,7 @@ async function getLiveLLMWithValidation(
     latency_ms: number;
     brand_mentioned: boolean;
     brand_mention_count: number;
+    citations: Citation[];
   }>();
   
   let totalCost = 0;
@@ -985,6 +1116,10 @@ async function getLiveLLMWithValidation(
     if (result.success) {
       const brandData = parseBrandData(result.response, brandName, brandTags);
       
+      // Extract URLs/citations from the response text
+      const extractedCitations = extractUrlsFromText(result.response);
+      console.log(`[LIVE LLM/${model}] Extracted ${extractedCitations.length} citations from response`);
+      
       results.set(model, {
         response: result.response,
         tokens: result.tokens,
@@ -992,6 +1127,7 @@ async function getLiveLLMWithValidation(
         latency_ms: result.latency_ms,
         brand_mentioned: brandData.mentioned,
         brand_mention_count: brandData.count,
+        citations: extractedCitations,
       });
       
       responses.push(result.response);
@@ -1663,11 +1799,22 @@ serve(async (req: Request) => {
               const modelData = liveResult.results.get(modelId);
               
               if (modelData) {
+                // Use extracted citations from the response text
+                const citations = modelData.citations || [];
+                
+                // Check if brand domain is cited
+                const isCited = citations.some(c =>
+                  [brand_name, targetDomain, ...sanitizedBrandTags].some(term =>
+                    term && (c.domain.toLowerCase().includes(term.toLowerCase()) ||
+                            c.url.toLowerCase().includes(term.toLowerCase()))
+                  )
+                );
+                
                 results.push(createModelResult(
                   modelId,
                   true,
                   modelData.response,
-                  [], // LIVE LLM doesn't provide citations
+                  citations, // Now includes extracted citations from response
                   modelData.cost,
                   brand_name,
                   sanitizedBrandTags,
@@ -1677,7 +1824,7 @@ serve(async (req: Request) => {
                   {
                     brand_mentioned: modelData.brand_mentioned,
                     brand_mention_count: modelData.brand_mention_count,
-                    is_cited: false,
+                    is_cited: isCited,
                     response_time_ms: modelData.latency_ms,
                   }
                 ));
