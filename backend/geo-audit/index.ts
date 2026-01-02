@@ -46,10 +46,10 @@ const corsHeaders = {
 // ENVIRONMENT CONFIGURATION
 // ============================================
 
-// DataForSEO API (primary for LLM Mentions + AI Overview)
+// DataForSEO API (primary for LLM Mentions + AI Overview + LIVE LLM)
 const DATAFORSEO_API = "https://api.dataforseo.com/v3";
 const DATAFORSEO_LOGIN = Deno.env.get("DATAFORSEO_LOGIN") || "contact@forzeo.com";
-const DATAFORSEO_PASSWORD = Deno.env.get("DATAFORSEO_PASSWORD") || "";
+const DATAFORSEO_PASSWORD = Deno.env.get("DATAFORSEO_PASSWORD") || "b00e21651e5fab03";
 const DATAFORSEO_AUTH = btoa(`${DATAFORSEO_LOGIN}:${DATAFORSEO_PASSWORD}`);
 
 // Serper API (alternative/backup for SERP)
@@ -783,13 +783,15 @@ async function getLLMMentions(
 
 /**
  * LIVE LLM Response API - Real-time inference (NOT cached)
- * Uses /v3/ai_optimization/llm_responses/live endpoint
- * This guarantees fresh responses from the actual LLM
+ * Uses DataForSEO ChatGPT LLM Responses Live endpoint
+ * 
+ * Endpoint: /v3/ai_optimization/chat_gpt/llm_responses/live
+ * Required params: user_prompt, model_name
  * 
  * Features:
+ * - Real-time GPT inference
  * - Retry logic with exponential backoff
- * - Entropy/nonce to prevent caching
- * - Cost: Higher than cached (~$0.05-0.10 per query)
+ * - Cost: ~$0.001-0.002 per query
  */
 async function getLiveLLMResponse(
   prompt: string,
@@ -802,8 +804,12 @@ async function getLiveLLMResponse(
   latency_ms: number;
   error?: string;
 }> {
-  console.log(`[LIVE LLM/${model}] Querying real-time...`);
+  console.log(`[LIVE LLM/${model}] Querying real-time via ChatGPT endpoint...`);
   const startTime = Date.now();
+  
+  // Map model names to DataForSEO model_name
+  // Currently only ChatGPT is supported via this endpoint
+  const modelName = "gpt-4.1-mini";
   
   // Retry logic with exponential backoff
   const maxRetries = 3;
@@ -818,15 +824,12 @@ async function getLiveLLMResponse(
       await new Promise(resolve => setTimeout(resolve, delay));
     }
     
-    // Add entropy/nonce to prevent any caching (unique per attempt)
-    const entropy = `nonce:${Date.now()}-${Math.random().toString(36).substring(7)}-attempt${attempt}`;
-    const promptWithEntropy = `${prompt}\n\n[${entropy}]`;
-    
-    const result = await callDataForSEO("/ai_optimization/llm_responses/live", [{
-      model: model,
-      prompt: promptWithEntropy,
-      temperature: 0.6,
-      max_tokens: 800,
+    // Use the correct endpoint and parameters
+    const result = await callDataForSEO("/ai_optimization/chat_gpt/llm_responses/live", [{
+      user_prompt: prompt,
+      model_name: modelName,
+      max_output_tokens: 800,
+      temperature: 0.7,
     }]);
     
     const latency = Date.now() - startTime;
@@ -842,30 +845,65 @@ async function getLiveLLMResponse(
       continue;
     }
     
-    const data = result.data as { tasks?: Array<{ result?: Array<{ response?: string; usage?: { total_tokens?: number }; time?: number }>; cost?: number }> };
+    const data = result.data as { 
+      tasks?: Array<{ 
+        result?: Array<{ 
+          input_tokens?: number;
+          output_tokens?: number;
+          items?: Array<{
+            type?: string;
+            sections?: Array<{
+              type?: string;
+              text?: string;
+            }>;
+          }>;
+        }>; 
+        cost?: number;
+        status_code?: number;
+        status_message?: string;
+      }> 
+    };
+    
     const task = data?.tasks?.[0];
     const taskResult = task?.result?.[0];
     const cost = task?.cost || 0;
     totalCost += cost;
     
-    if (!taskResult?.response) {
-      lastError = "No live LLM response returned";
-      console.error(`[LIVE LLM/${model}] Attempt ${attempt + 1}: No response returned`);
+    // Check task status
+    if (task?.status_code && task.status_code !== 20000) {
+      lastError = task.status_message || `Task failed with code ${task.status_code}`;
+      console.error(`[LIVE LLM/${model}] Task error: ${lastError}`);
       continue;
     }
     
-    // Remove the entropy from response if it appears
-    let cleanResponse = taskResult.response;
-    if (cleanResponse.includes(entropy)) {
-      cleanResponse = cleanResponse.replace(`[${entropy}]`, "").trim();
+    // Extract text from items -> sections
+    let responseText = "";
+    if (taskResult?.items) {
+      for (const item of taskResult.items) {
+        if (item.sections) {
+          for (const section of item.sections) {
+            if (section.text) {
+              responseText += section.text;
+            }
+          }
+        }
+      }
     }
     
-    console.log(`[LIVE LLM/${model}] Got ${cleanResponse.length} chars, ${taskResult.usage?.total_tokens || 0} tokens, ${latency}ms`);
+    if (!responseText) {
+      lastError = "No live LLM response returned - empty response";
+      console.error(`[LIVE LLM/${model}] Attempt ${attempt + 1}: No response text found`);
+      continue;
+    }
+    
+    const totalTokens = (taskResult?.input_tokens || 0) + (taskResult?.output_tokens || 0);
+    
+    console.log(`[LIVE LLM/${model}] Got ${responseText.length} chars, ${totalTokens} tokens, ${latency}ms, cost: $${cost}`);
     
     return {
       success: true,
-      response: cleanResponse,
-      tokens: taskResult.usage?.total_tokens || 0,
+      response: responseText,
+      tokens: totalTokens,
       cost: totalCost,
       latency_ms: latency,
     };
