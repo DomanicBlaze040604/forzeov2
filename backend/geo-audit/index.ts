@@ -963,15 +963,15 @@ async function getLiveLLMResponse(
     }
     
     // Use the correct endpoint and parameters
-    // Add instruction to include sources/URLs in the response
+    // Enhance prompt to get specific recommendations with sources/URLs
     const enhancedPrompt = `${prompt}
 
-Please include relevant website URLs or sources in your response where applicable.`;
+Important: Please provide specific recommendations with actual business names, websites, or sources. Include URLs where possible. Do not ask clarifying questions - provide direct answers with specific options.`;
     
     const result = await callDataForSEO(config.endpoint, [{
       user_prompt: enhancedPrompt,
       model_name: config.modelName,
-      max_output_tokens: 800,
+      max_output_tokens: 1000,
       temperature: 0.7,
     }]);
     
@@ -1105,6 +1105,55 @@ function extractImplicitCitations(
         is_brand_source: brandLower === brandName.toLowerCase() || 
                          brandTags.some(t => t.toLowerCase() === brandLower),
       });
+    }
+  }
+  
+  // Extract business names that look like proper nouns (capitalized words)
+  // Pattern: 2-4 capitalized words in sequence that might be business names
+  const businessNamePattern = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\s+(?:Dental|Clinic|Practice|Surgery|Centre|Center|Hospital|Medical|Health|Care|Services|Studio|Spa|Salon|Shop|Store|Restaurant|Hotel|Agency|Company|Ltd|Inc|LLC)\b/g;
+  let match;
+  while ((match = businessNamePattern.exec(text)) !== null) {
+    const businessName = match[0].trim();
+    const businessLower = businessName.toLowerCase();
+    
+    if (!foundBrands.has(businessLower) && businessName.length > 5) {
+      foundBrands.add(businessLower);
+      
+      // Create a likely domain from the business name
+      const cleanName = businessName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '').toLowerCase();
+      const likelyDomain = `${cleanName}.co.uk`; // Use .co.uk for UK businesses
+      
+      citations.push({
+        url: `https://www.${likelyDomain}`,
+        title: businessName,
+        domain: likelyDomain,
+        position: citations.length + 1,
+        snippet: `Business mentioned in AI response`,
+        is_brand_source: false,
+      });
+    }
+  }
+  
+  // Also look for patterns like "visit [Name]" or "contact [Name]" or "check out [Name]"
+  const recommendationPattern = /(?:visit|contact|check out|try|recommend|suggest|consider)\s+([A-Z][a-zA-Z\s&']+?)(?:\s+(?:for|at|on|in|to)|[.,!?]|$)/gi;
+  while ((match = recommendationPattern.exec(text)) !== null) {
+    const name = match[1].trim();
+    const nameLower = name.toLowerCase();
+    
+    if (!foundBrands.has(nameLower) && name.length > 3 && name.length < 50) {
+      foundBrands.add(nameLower);
+      
+      const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (cleanName.length > 3) {
+        citations.push({
+          url: `https://www.${cleanName}.com`,
+          title: name,
+          domain: `${cleanName}.com`,
+          position: citations.length + 1,
+          snippet: `Recommended in AI response`,
+          is_brand_source: false,
+        });
+      }
     }
   }
   
