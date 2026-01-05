@@ -1082,6 +1082,9 @@ function extractImplicitCitations(
   const foundBrands = new Set<string>();
   const lower = text.toLowerCase();
   
+  console.log(`[extractImplicitCitations] Processing text of ${text.length} chars`);
+  console.log(`[extractImplicitCitations] Brand: ${brandName}, Tags: ${brandTags.join(', ')}, Competitors: ${competitors.join(', ')}`);
+  
   // Check for brand mentions
   const allBrands = [brandName, ...brandTags, ...competitors].filter(Boolean);
   
@@ -1096,6 +1099,8 @@ function extractImplicitCitations(
       const cleanBrand = brand.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const likelyDomain = `${cleanBrand}.com`;
       
+      console.log(`[extractImplicitCitations] Found brand mention: ${brand} -> ${likelyDomain}`);
+      
       citations.push({
         url: `https://${likelyDomain}`,
         title: brand,
@@ -1108,41 +1113,61 @@ function extractImplicitCitations(
     }
   }
   
-  // Extract business names that look like proper nouns (capitalized words)
-  // Pattern: 2-4 capitalized words in sequence that might be business names
-  const businessPatterns = [
-    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\s+(?:Dental|Clinic|Practice|Surgery|Centre|Center|Hospital|Medical|Health|Care|Services|Studio|Spa|Salon|Shop|Store|Restaurant|Hotel|Agency|Company|Ltd|Inc|LLC)\b/g,
-    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+(?:is|are|offers|provides|has|specializes)\b/g,
-    /(?:at|from|by|visit|contact|call)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b/g,
-    /\b([A-Z][a-z]+(?:'s)?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b(?=\s*[-–—]|\s*:|\s*\()/g,
-  ];
-  
-  for (const pattern of businessPatterns) {
-    let match;
-    // Reset lastIndex for global patterns
-    pattern.lastIndex = 0;
-    while ((match = pattern.exec(text)) !== null) {
-      const businessName = (match[1] || match[0]).trim();
-      const businessLower = businessName.toLowerCase();
+  // Look for capitalized multi-word names (likely business names)
+  // Match patterns like "Post House Dental", "Weybridge Dental Care", etc.
+  const capitalizedNamePattern = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g;
+  let match;
+  while ((match = capitalizedNamePattern.exec(text)) !== null) {
+    const name = match[1].trim();
+    const nameLower = name.toLowerCase();
+    
+    // Skip common phrases
+    const skipPhrases = ['google search', 'phone number', 'read more', 'book appointment', 'contact us', 'find out', 'learn more', 'click here', 'see our', 'visit our', 'check out', 'private appointments', 'official website', 'main office', 'practice manager'];
+    if (skipPhrases.some(p => nameLower.includes(p))) continue;
+    
+    // Must be at least 2 words and reasonable length
+    const wordCount = name.split(/\s+/).length;
+    if (wordCount < 2 || name.length < 5 || name.length > 50) continue;
+    
+    if (!foundBrands.has(nameLower)) {
+      foundBrands.add(nameLower);
       
-      // Skip common words and short names
-      const skipWords = ['the', 'this', 'that', 'these', 'those', 'here', 'there', 'what', 'when', 'where', 'which', 'who', 'how', 'your', 'their', 'some', 'many', 'most', 'other', 'first', 'second', 'third', 'next', 'last', 'best', 'good', 'great', 'local', 'nearby', 'online'];
-      if (skipWords.includes(businessLower) || businessName.length < 4) continue;
-      
-      if (!foundBrands.has(businessLower) && businessName.length > 3 && businessName.length < 60) {
-        foundBrands.add(businessLower);
+      const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (cleanName.length > 4) {
+        console.log(`[extractImplicitCitations] Found capitalized name: ${name} -> ${cleanName}.com`);
         
-        // Create a likely domain from the business name
-        const cleanName = businessName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '').toLowerCase();
+        citations.push({
+          url: `https://www.${cleanName}.com`,
+          title: name,
+          domain: `${cleanName}.com`,
+          position: citations.length + 1,
+          snippet: `Business mentioned in AI response`,
+          is_brand_source: false,
+        });
+      }
+    }
+  }
+  
+  // Also look for quoted names
+  const quotedPattern = /"([^"]+)"|'([^']+)'/g;
+  while ((match = quotedPattern.exec(text)) !== null) {
+    const name = (match[1] || match[2]).trim();
+    const nameLower = name.toLowerCase();
+    
+    if (name.length > 3 && name.length < 50 && !foundBrands.has(nameLower)) {
+      // Check if it looks like a business name (has capital letters)
+      if (/[A-Z]/.test(name)) {
+        foundBrands.add(nameLower);
+        const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
         if (cleanName.length > 3) {
-          const likelyDomain = `${cleanName}.com`;
+          console.log(`[extractImplicitCitations] Found quoted name: ${name} -> ${cleanName}.com`);
           
           citations.push({
-            url: `https://www.${likelyDomain}`,
-            title: businessName,
-            domain: likelyDomain,
+            url: `https://www.${cleanName}.com`,
+            title: name,
+            domain: `${cleanName}.com`,
             position: citations.length + 1,
-            snippet: `Business mentioned in AI response`,
+            snippet: `Quoted in AI response`,
             is_brand_source: false,
           });
         }
@@ -1150,30 +1175,7 @@ function extractImplicitCitations(
     }
   }
   
-  // Look for numbered lists with business names (common in AI recommendations)
-  const numberedListPattern = /(?:^|\n)\s*(?:\d+[.)\]]|\*|-)\s*\*{0,2}([A-Z][a-zA-Z\s&']+?)(?:\*{0,2})\s*[-–—:]/gm;
-  let match;
-  while ((match = numberedListPattern.exec(text)) !== null) {
-    const name = match[1].trim();
-    const nameLower = name.toLowerCase();
-    
-    if (!foundBrands.has(nameLower) && name.length > 3 && name.length < 50) {
-      foundBrands.add(nameLower);
-      
-      const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      if (cleanName.length > 3) {
-        citations.push({
-          url: `https://www.${cleanName}.com`,
-          title: name,
-          domain: `${cleanName}.com`,
-          position: citations.length + 1,
-          snippet: `Listed in AI recommendations`,
-          is_brand_source: false,
-        });
-      }
-    }
-  }
-  
+  console.log(`[extractImplicitCitations] Total citations extracted: ${citations.length}`);
   return citations;
 }
 
