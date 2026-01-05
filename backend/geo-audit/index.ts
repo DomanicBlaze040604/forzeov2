@@ -1076,30 +1076,38 @@ function extractImplicitCitations(
   brandTags: string[],
   competitors: string[]
 ): Citation[] {
-  if (!text) return [];
+  console.log(`[extractImplicitCitations] CALLED with text length: ${text?.length || 0}`);
+  
+  if (!text) {
+    console.log(`[extractImplicitCitations] No text provided, returning empty`);
+    return [];
+  }
   
   const citations: Citation[] = [];
   const foundBrands = new Set<string>();
   const lower = text.toLowerCase();
   
-  console.log(`[extractImplicitCitations] Processing text of ${text.length} chars`);
-  console.log(`[extractImplicitCitations] Brand: ${brandName}, Tags: ${brandTags.join(', ')}, Competitors: ${competitors.join(', ')}`);
+  console.log(`[extractImplicitCitations] Brand: ${brandName}, Tags: [${brandTags.join(', ')}], Competitors: [${competitors.join(', ')}]`);
   
   // Check for brand mentions
   const allBrands = [brandName, ...brandTags, ...competitors].filter(Boolean);
+  console.log(`[extractImplicitCitations] All brands to check: [${allBrands.join(', ')}]`);
   
   for (const brand of allBrands) {
     if (!brand || brand.length < 2) continue;
     const brandLower = brand.toLowerCase();
     
-    if (lower.includes(brandLower) && !foundBrands.has(brandLower)) {
+    const found = lower.includes(brandLower);
+    console.log(`[extractImplicitCitations] Checking "${brand}" (${brandLower}): found=${found}`);
+    
+    if (found && !foundBrands.has(brandLower)) {
       foundBrands.add(brandLower);
       
       // Try to construct a likely URL for the brand
       const cleanBrand = brand.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const likelyDomain = `${cleanBrand}.com`;
       
-      console.log(`[extractImplicitCitations] Found brand mention: ${brand} -> ${likelyDomain}`);
+      console.log(`[extractImplicitCitations] Adding citation for: ${brand} -> ${likelyDomain}`);
       
       citations.push({
         url: `https://${likelyDomain}`,
@@ -1113,69 +1121,7 @@ function extractImplicitCitations(
     }
   }
   
-  // Look for capitalized multi-word names (likely business names)
-  // Match patterns like "Post House Dental", "Weybridge Dental Care", etc.
-  const capitalizedNamePattern = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g;
-  let match;
-  while ((match = capitalizedNamePattern.exec(text)) !== null) {
-    const name = match[1].trim();
-    const nameLower = name.toLowerCase();
-    
-    // Skip common phrases
-    const skipPhrases = ['google search', 'phone number', 'read more', 'book appointment', 'contact us', 'find out', 'learn more', 'click here', 'see our', 'visit our', 'check out', 'private appointments', 'official website', 'main office', 'practice manager'];
-    if (skipPhrases.some(p => nameLower.includes(p))) continue;
-    
-    // Must be at least 2 words and reasonable length
-    const wordCount = name.split(/\s+/).length;
-    if (wordCount < 2 || name.length < 5 || name.length > 50) continue;
-    
-    if (!foundBrands.has(nameLower)) {
-      foundBrands.add(nameLower);
-      
-      const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      if (cleanName.length > 4) {
-        console.log(`[extractImplicitCitations] Found capitalized name: ${name} -> ${cleanName}.com`);
-        
-        citations.push({
-          url: `https://www.${cleanName}.com`,
-          title: name,
-          domain: `${cleanName}.com`,
-          position: citations.length + 1,
-          snippet: `Business mentioned in AI response`,
-          is_brand_source: false,
-        });
-      }
-    }
-  }
-  
-  // Also look for quoted names
-  const quotedPattern = /"([^"]+)"|'([^']+)'/g;
-  while ((match = quotedPattern.exec(text)) !== null) {
-    const name = (match[1] || match[2]).trim();
-    const nameLower = name.toLowerCase();
-    
-    if (name.length > 3 && name.length < 50 && !foundBrands.has(nameLower)) {
-      // Check if it looks like a business name (has capital letters)
-      if (/[A-Z]/.test(name)) {
-        foundBrands.add(nameLower);
-        const cleanName = name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        if (cleanName.length > 3) {
-          console.log(`[extractImplicitCitations] Found quoted name: ${name} -> ${cleanName}.com`);
-          
-          citations.push({
-            url: `https://www.${cleanName}.com`,
-            title: name,
-            domain: `${cleanName}.com`,
-            position: citations.length + 1,
-            snippet: `Quoted in AI response`,
-            is_brand_source: false,
-          });
-        }
-      }
-    }
-  }
-  
-  console.log(`[extractImplicitCitations] Total citations extracted: ${citations.length}`);
+  console.log(`[extractImplicitCitations] Total citations from brands: ${citations.length}`);
   return citations;
 }
 
@@ -1205,7 +1151,11 @@ async function getLiveLLMWithValidation(
   agreement: "high" | "medium" | "low";
   error?: string;
 }> {
-  console.log(`[LIVE LLM Validation] Querying ${models.length} models...`);
+  console.log(`[LIVE LLM Validation] ========== START ==========`);
+  console.log(`[LIVE LLM Validation] Querying ${models.length} models: ${models.join(', ')}`);
+  console.log(`[LIVE LLM Validation] Brand: ${brandName}`);
+  console.log(`[LIVE LLM Validation] Tags: ${JSON.stringify(brandTags)}`);
+  console.log(`[LIVE LLM Validation] Competitors: ${JSON.stringify(competitors)}`);
   
   const results = new Map<string, {
     response: string;
@@ -1235,14 +1185,20 @@ async function getLiveLLMWithValidation(
     if (result.success) {
       const brandData = parseBrandData(result.response, brandName, brandTags);
       
+      console.log(`[LIVE LLM/${model}] Response received, length: ${result.response.length}`);
+      console.log(`[LIVE LLM/${model}] Brand data: mentioned=${brandData.mentioned}, count=${brandData.count}`);
+      
       // Always extract both URL citations AND implicit citations from brand mentions
       const urlCitations = extractUrlsFromText(result.response);
+      console.log(`[LIVE LLM/${model}] URL citations extracted: ${urlCitations.length}`);
+      
       const implicitCitations = extractImplicitCitations(
         result.response,
         brandName,
         brandTags,
         competitors
       );
+      console.log(`[LIVE LLM/${model}] Implicit citations extracted: ${implicitCitations.length}`);
       
       // Merge citations, avoiding duplicates (URLs take priority)
       const seenDomains = new Set<string>();
@@ -1266,7 +1222,7 @@ async function getLiveLLMWithValidation(
         }
       }
       
-      console.log(`[LIVE LLM/${model}] Extracted ${urlCitations.length} URL citations + ${implicitCitations.length} implicit citations = ${extractedCitations.length} total`);
+      console.log(`[LIVE LLM/${model}] Total merged citations: ${extractedCitations.length}`);
       
       results.set(model, {
         response: result.response,
