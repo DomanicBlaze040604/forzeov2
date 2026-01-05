@@ -646,25 +646,77 @@ export function useClientDashboard() {
 
   const deletePrompt = useCallback(async (promptId: string) => {
     if (!selectedClient) return;
+    
+    // Delete prompt from database
     try {
       await supabase.from("forzeo_prompts").delete().eq("id", promptId);
-    } catch (err) { console.log("Supabase delete failed:", err); }
+    } catch (err) { console.log("Supabase delete prompt failed:", err); }
+    
+    // Delete associated audit result from database
+    try {
+      await supabase.from("audit_results").delete().eq("prompt_id", promptId);
+    } catch (err) { console.log("Supabase delete audit result failed:", err); }
+    
+    // Update local prompts state
     const newPrompts = prompts.filter(p => p.id !== promptId);
     setPrompts(newPrompts);
     const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
     storedPrompts[selectedClient.id] = newPrompts;
     saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
-  }, [selectedClient, prompts]);
+    
+    // Update local audit results state
+    const newResults = auditResults.filter(r => r.prompt_id !== promptId);
+    setAuditResults(newResults);
+    const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+    storedResults[selectedClient.id] = newResults;
+    saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
+    
+    // Recalculate summary
+    if (newResults.length === 0) {
+      setSummary(null);
+    } else {
+      let totalSov = 0, totalCitations = 0, totalCost = 0, rankSum = 0, rankCount = 0;
+      for (const r of newResults) {
+        totalSov += r.summary.share_of_voice;
+        totalCitations += r.summary.total_citations;
+        totalCost += r.summary.total_cost;
+        if (r.summary.average_rank) { rankSum += r.summary.average_rank; rankCount++; }
+      }
+      setSummary({
+        total_prompts: newResults.length,
+        overall_sov: Math.round(totalSov / newResults.length),
+        average_rank: rankCount > 0 ? Math.round((rankSum / rankCount) * 10) / 10 : null,
+        total_citations: totalCitations,
+        total_cost: totalCost,
+      });
+    }
+  }, [selectedClient, prompts, auditResults]);
 
   const clearAllPrompts = useCallback(async () => {
     if (!selectedClient) return;
+    
+    // Delete all prompts from database
     try {
       await supabase.from("forzeo_prompts").delete().eq("client_id", selectedClient.id);
-    } catch (err) { console.log("Supabase clear failed:", err); }
+    } catch (err) { console.log("Supabase clear prompts failed:", err); }
+    
+    // Delete all audit results from database
+    try {
+      await supabase.from("audit_results").delete().eq("client_id", selectedClient.id);
+    } catch (err) { console.log("Supabase clear results failed:", err); }
+    
+    // Clear local state
     setPrompts([]);
+    setAuditResults([]);
+    setSummary(null);
+    
     const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
     storedPrompts[selectedClient.id] = [];
     saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+    
+    const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+    storedResults[selectedClient.id] = [];
+    saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
   }, [selectedClient]);
 
   const clearResults = useCallback(async () => {
