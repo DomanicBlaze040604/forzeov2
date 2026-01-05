@@ -107,6 +107,7 @@ Each AI model is queried via its dedicated LIVE endpoint for real-time responses
 - ✅ **Citation Tracking** - See which sources AI cites
 - ✅ **Export Reports** - CSV, JSON, formatted text
 - ✅ **Database Storage** - All results saved to Supabase
+- ✅ **Historical Data Retention** - Audit results preserved even after prompt deletion
 - ✅ **Dark Theme UI** - Professional dashboard interface
 
 ---

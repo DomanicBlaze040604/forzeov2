@@ -886,6 +886,39 @@ LIMIT 20;
 
 ---
 
+## Data Retention & Deletion Behavior
+
+### Prompt Deletion
+When a prompt is deleted from the dashboard:
+
+| Action | Behavior |
+|--------|----------|
+| Prompt record | Deleted from `forzeo_prompts` table |
+| Audit results | **Kept in database** for historical tracking |
+| UI display | Removed from active prompts list |
+| Summary metrics | Recalculated based on remaining active prompts |
+
+**Why keep audit results?**
+- Historical tracking of brand visibility over time
+- Cost tracking and API usage history
+- Trend analysis and reporting
+- Audit trail for compliance
+
+### Clear All Prompts
+When "Clear All Prompts" is used:
+- All prompts for the client are deleted from database
+- Audit results remain in database for historical reference
+- UI is cleared (prompts and results removed from view)
+- Summary is reset to null
+
+### Accessing Historical Data
+Even after prompts are deleted, you can still access historical audit results:
+- Via Supabase Dashboard: https://supabase.com/dashboard/project/pqvyyziaczzgaythgpyc/editor/audit_results
+- Via SQL queries filtering by `client_id` and date range
+- Via REST API with appropriate filters
+
+---
+
 ## Security
 
 ### API Keys
