@@ -647,15 +647,10 @@ export function useClientDashboard() {
   const deletePrompt = useCallback(async (promptId: string) => {
     if (!selectedClient) return;
     
-    // Delete prompt from database
+    // Delete prompt from database (keep audit results for historical tracking)
     try {
       await supabase.from("forzeo_prompts").delete().eq("id", promptId);
     } catch (err) { console.log("Supabase delete prompt failed:", err); }
-    
-    // Delete associated audit result from database
-    try {
-      await supabase.from("audit_results").delete().eq("prompt_id", promptId);
-    } catch (err) { console.log("Supabase delete audit result failed:", err); }
     
     // Update local prompts state
     const newPrompts = prompts.filter(p => p.id !== promptId);
@@ -664,14 +659,14 @@ export function useClientDashboard() {
     storedPrompts[selectedClient.id] = newPrompts;
     saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
     
-    // Update local audit results state
+    // Update local audit results state (remove from UI but keep in DB)
     const newResults = auditResults.filter(r => r.prompt_id !== promptId);
     setAuditResults(newResults);
     const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
     storedResults[selectedClient.id] = newResults;
     saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
     
-    // Recalculate summary
+    // Recalculate summary based on remaining active prompts
     if (newResults.length === 0) {
       setSummary(null);
     } else {
@@ -695,17 +690,12 @@ export function useClientDashboard() {
   const clearAllPrompts = useCallback(async () => {
     if (!selectedClient) return;
     
-    // Delete all prompts from database
+    // Delete all prompts from database (keep audit results for historical tracking)
     try {
       await supabase.from("forzeo_prompts").delete().eq("client_id", selectedClient.id);
     } catch (err) { console.log("Supabase clear prompts failed:", err); }
     
-    // Delete all audit results from database
-    try {
-      await supabase.from("audit_results").delete().eq("client_id", selectedClient.id);
-    } catch (err) { console.log("Supabase clear results failed:", err); }
-    
-    // Clear local state
+    // Clear local state (audit results stay in DB for tracking)
     setPrompts([]);
     setAuditResults([]);
     setSummary(null);
