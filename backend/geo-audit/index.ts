@@ -1110,33 +1110,50 @@ function extractImplicitCitations(
   
   // Extract business names that look like proper nouns (capitalized words)
   // Pattern: 2-4 capitalized words in sequence that might be business names
-  const businessNamePattern = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\s+(?:Dental|Clinic|Practice|Surgery|Centre|Center|Hospital|Medical|Health|Care|Services|Studio|Spa|Salon|Shop|Store|Restaurant|Hotel|Agency|Company|Ltd|Inc|LLC)\b/g;
-  let match;
-  while ((match = businessNamePattern.exec(text)) !== null) {
-    const businessName = match[0].trim();
-    const businessLower = businessName.toLowerCase();
-    
-    if (!foundBrands.has(businessLower) && businessName.length > 5) {
-      foundBrands.add(businessLower);
+  const businessPatterns = [
+    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\s+(?:Dental|Clinic|Practice|Surgery|Centre|Center|Hospital|Medical|Health|Care|Services|Studio|Spa|Salon|Shop|Store|Restaurant|Hotel|Agency|Company|Ltd|Inc|LLC)\b/g,
+    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+(?:is|are|offers|provides|has|specializes)\b/g,
+    /(?:at|from|by|visit|contact|call)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b/g,
+    /\b([A-Z][a-z]+(?:'s)?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b(?=\s*[-–—]|\s*:|\s*\()/g,
+  ];
+  
+  for (const pattern of businessPatterns) {
+    let match;
+    // Reset lastIndex for global patterns
+    pattern.lastIndex = 0;
+    while ((match = pattern.exec(text)) !== null) {
+      const businessName = (match[1] || match[0]).trim();
+      const businessLower = businessName.toLowerCase();
       
-      // Create a likely domain from the business name
-      const cleanName = businessName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '').toLowerCase();
-      const likelyDomain = `${cleanName}.co.uk`; // Use .co.uk for UK businesses
+      // Skip common words and short names
+      const skipWords = ['the', 'this', 'that', 'these', 'those', 'here', 'there', 'what', 'when', 'where', 'which', 'who', 'how', 'your', 'their', 'some', 'many', 'most', 'other', 'first', 'second', 'third', 'next', 'last', 'best', 'good', 'great', 'local', 'nearby', 'online'];
+      if (skipWords.includes(businessLower) || businessName.length < 4) continue;
       
-      citations.push({
-        url: `https://www.${likelyDomain}`,
-        title: businessName,
-        domain: likelyDomain,
-        position: citations.length + 1,
-        snippet: `Business mentioned in AI response`,
-        is_brand_source: false,
-      });
+      if (!foundBrands.has(businessLower) && businessName.length > 3 && businessName.length < 60) {
+        foundBrands.add(businessLower);
+        
+        // Create a likely domain from the business name
+        const cleanName = businessName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '').toLowerCase();
+        if (cleanName.length > 3) {
+          const likelyDomain = `${cleanName}.com`;
+          
+          citations.push({
+            url: `https://www.${likelyDomain}`,
+            title: businessName,
+            domain: likelyDomain,
+            position: citations.length + 1,
+            snippet: `Business mentioned in AI response`,
+            is_brand_source: false,
+          });
+        }
+      }
     }
   }
   
-  // Also look for patterns like "visit [Name]" or "contact [Name]" or "check out [Name]"
-  const recommendationPattern = /(?:visit|contact|check out|try|recommend|suggest|consider)\s+([A-Z][a-zA-Z\s&']+?)(?:\s+(?:for|at|on|in|to)|[.,!?]|$)/gi;
-  while ((match = recommendationPattern.exec(text)) !== null) {
+  // Look for numbered lists with business names (common in AI recommendations)
+  const numberedListPattern = /(?:^|\n)\s*(?:\d+[.)\]]|\*|-)\s*\*{0,2}([A-Z][a-zA-Z\s&']+?)(?:\*{0,2})\s*[-–—:]/gm;
+  let match;
+  while ((match = numberedListPattern.exec(text)) !== null) {
     const name = match[1].trim();
     const nameLower = name.toLowerCase();
     
@@ -1150,22 +1167,10 @@ function extractImplicitCitations(
           title: name,
           domain: `${cleanName}.com`,
           position: citations.length + 1,
-          snippet: `Recommended in AI response`,
+          snippet: `Listed in AI recommendations`,
           is_brand_source: false,
         });
       }
-    }
-  }
-  
-  // Also extract any URLs that ARE in the text
-  const urlCitations = extractUrlsFromText(text);
-  
-  // Merge, avoiding duplicates
-  for (const urlCitation of urlCitations) {
-    const domainLower = urlCitation.domain.toLowerCase();
-    if (!foundBrands.has(domainLower)) {
-      foundBrands.add(domainLower);
-      citations.push(urlCitation);
     }
   }
   
@@ -1228,21 +1233,38 @@ async function getLiveLLMWithValidation(
     if (result.success) {
       const brandData = parseBrandData(result.response, brandName, brandTags);
       
-      // Extract URLs/citations from the response text
-      let extractedCitations = extractUrlsFromText(result.response);
+      // Always extract both URL citations AND implicit citations from brand mentions
+      const urlCitations = extractUrlsFromText(result.response);
+      const implicitCitations = extractImplicitCitations(
+        result.response,
+        brandName,
+        brandTags,
+        competitors
+      );
       
-      // If no URLs found, extract implicit citations from brand/product mentions
-      if (extractedCitations.length === 0) {
-        extractedCitations = extractImplicitCitations(
-          result.response,
-          brandName,
-          brandTags,
-          competitors
-        );
-        console.log(`[LIVE LLM/${model}] No URLs found, extracted ${extractedCitations.length} implicit citations from brand mentions`);
-      } else {
-        console.log(`[LIVE LLM/${model}] Extracted ${extractedCitations.length} URL citations from response`);
+      // Merge citations, avoiding duplicates (URLs take priority)
+      const seenDomains = new Set<string>();
+      const extractedCitations: Citation[] = [];
+      
+      // Add URL citations first
+      for (const c of urlCitations) {
+        const domainLower = c.domain.toLowerCase();
+        if (!seenDomains.has(domainLower)) {
+          seenDomains.add(domainLower);
+          extractedCitations.push(c);
+        }
       }
+      
+      // Add implicit citations that aren't duplicates
+      for (const c of implicitCitations) {
+        const domainLower = c.domain.toLowerCase();
+        if (!seenDomains.has(domainLower)) {
+          seenDomains.add(domainLower);
+          extractedCitations.push(c);
+        }
+      }
+      
+      console.log(`[LIVE LLM/${model}] Extracted ${urlCitations.length} URL citations + ${implicitCitations.length} implicit citations = ${extractedCitations.length} total`);
       
       results.set(model, {
         response: result.response,
