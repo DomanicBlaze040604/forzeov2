@@ -120,10 +120,12 @@ Each AI model is queried via its dedicated LIVE endpoint for real-time responses
 - ✅ **Sources Bar Chart** - Visual representation of source distribution
 - ✅ **Brand/Competitor Logos** - Visual icons for brands and competitors
 - ✅ **AI Model Logos** - Colored icons for each AI model (ChatGPT, Claude, Gemini, etc.)
-- ✅ **Full Audit Export** - Export complete audit data as formatted TXT report
+- ✅ **Full Audit Export** - Export complete audit data as formatted TXT report with raw responses
 - ✅ **Content Generator** - Generate SEO-optimized content (articles, listicles, guides, FAQs)
-- ✅ **Sidebar Navigation** - Clean sidebar with Overview, Prompts, Citations, Sources, Content tabs
+- ✅ **Collapsible Sidebar** - Toggle sidebar visibility with smooth animations
 - ✅ **Settings Panel** - Manage client settings, competitors, and AI models
+- ✅ **Brand Management** - Add, edit, delete brands with logo upload support
+- ✅ **Enhanced Export** - Full audit TXT includes raw AI responses, all citations, competitor data
 
 ---
 

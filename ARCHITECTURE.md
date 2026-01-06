@@ -342,20 +342,21 @@ function aggregateCitations(results: AuditResult[]) {
 
 ## Frontend Architecture
 
-### Component Structure (v6.0)
+### Component Structure (v6.1)
 
 ```
 ClientDashboard.tsx
 │
-├── Sidebar Navigation
+├── Sidebar Navigation (Collapsible)
+│   ├── Toggle Button (PanelLeft/PanelLeftClose icons)
 │   ├── Logo & Brand
 │   ├── Client Selector (dropdown with add client)
 │   ├── Navigation Items
-│   │   ├── Overview (LayoutDashboard icon)
+│   │   ├── Overview (Home icon)
 │   │   ├── Prompts (MessageSquare icon)
-│   │   ├── Citations (Link icon)
+│   │   ├── Citations (Link2 icon)
 │   │   ├── Sources (Globe icon)
-│   │   └── Content (FileText icon)
+│   │   └── Content (Sparkles icon)
 │   └── Settings Button (bottom)
 │
 ├── Main Content Area

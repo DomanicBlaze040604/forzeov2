@@ -1,9 +1,9 @@
-﻿/**
+/**
  * FORZEO GEO DASHBOARD - Redesigned UI v6.0
  */
 import { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, FileJson, ChevronRight } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +66,7 @@ export default function ClientDashboard() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [editClientOpen, setEditClientOpen] = useState(false);
+  const [manageBrandsOpen, setManageBrandsOpen] = useState(false);
   const [selectedPromptDetail, setSelectedPromptDetail] = useState<string | null>(null);
   const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
   const [newTag, setNewTag] = useState("");
@@ -86,8 +87,8 @@ export default function ClientDashboard() {
   const [modelFilter, setModelFilter] = useState<string[]>([]);
   const [promptsTabView, setPromptsTabView] = useState<"active" | "suggested" | "inactive">("active");
   const [sourcesGapView, setSourcesGapView] = useState<"all" | "gap">("all");
-  const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6" });
-  const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", primary_color: "#3b82f6" });
+  const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6", logo_url: "" });
+  const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", primary_color: "#3b82f6", logo_url: "", competitors: "" });
 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
@@ -146,9 +147,8 @@ export default function ClientDashboard() {
   const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType); if (c) setGeneratedContent(c); } finally { setGeneratingContent(false); } };
   const handleImport = () => { if (importText.trim()) { importData(importText); setImportText(""); setImportDialogOpen(false); } };
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = (ev) => importData(ev.target?.result as string); r.readAsText(f); } };
-  const handleCreateClient = async () => { if (!newClientForm.name.trim()) return; const comps = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); await addClient({ name: newClientForm.name, brand_name: newClientForm.brand_name || newClientForm.name, target_region: newClientForm.target_region, location_code: locations[newClientForm.target_region] || 2840, industry: newClientForm.industry, competitors: comps.length > 0 ? comps : industries[newClientForm.industry]?.competitors || [], primary_color: newClientForm.primary_color }); setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6" }); setAddClientOpen(false); };
-  const handleOpenEditClient = () => { if (!selectedClient) return; setEditClientForm({ name: selectedClient.name, brand_name: selectedClient.brand_name, target_region: selectedClient.target_region, industry: selectedClient.industry, primary_color: selectedClient.primary_color }); setEditClientOpen(true); };
-  const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: editClientForm.industry, primary_color: editClientForm.primary_color }); setEditClientOpen(false); };
+  const handleCreateClient = async () => { if (!newClientForm.name.trim()) return; const comps = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); await addClient({ name: newClientForm.name, brand_name: newClientForm.brand_name || newClientForm.name, target_region: newClientForm.target_region, location_code: locations[newClientForm.target_region] || 2840, industry: newClientForm.industry, competitors: comps.length > 0 ? comps : industries[newClientForm.industry]?.competitors || [], primary_color: newClientForm.primary_color }); setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6", logo_url: "" }); setAddClientOpen(false); };
+  const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; const comps = editClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: editClientForm.industry, primary_color: editClientForm.primary_color, competitors: comps }); setEditClientOpen(false); };
   const handleDeleteClient = async () => { if (!selectedClient || clients.length <= 1) return; if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
   const handleAddTag = () => { if (newTag.trim() && selectedClient) { updateBrandTags([...selectedClient.brand_tags, newTag.trim()]); setNewTag(""); } };
   const handleAddCompetitor = () => { if (newCompetitor.trim() && selectedClient) { updateCompetitors([...selectedClient.competitors, newCompetitor.trim()]); setNewCompetitor(""); } };
@@ -157,9 +157,29 @@ export default function ClientDashboard() {
 
   const handleExportFullAudit = () => {
     if (!selectedClient) return;
-    const fullData = { export_date: new Date().toISOString(), client: { name: selectedClient.name, brand_name: selectedClient.brand_name, industry: selectedClient.industry, region: selectedClient.target_region, brand_tags: selectedClient.brand_tags, competitors: selectedClient.competitors }, summary: { total_prompts: prompts.length, total_audits: auditResults.length, overall_visibility: Math.round(auditResults.reduce((sum, r) => sum + r.summary.share_of_voice, 0) / (auditResults.length || 1)), total_citations: allCitations.length, total_cost: totalCost }, model_stats: AI_MODELS.map(m => ({ model: m.name, visible: modelStats[m.id]?.visible || 0, total: modelStats[m.id]?.total || 0, cost: modelStats[m.id]?.cost || 0 })), competitor_analysis: competitorGap, prompts: prompts.map(p => ({ id: p.id, text: p.prompt_text, category: p.category })), audit_results: auditResults.map(r => ({ prompt_id: r.prompt_id, prompt_text: r.prompt_text, created_at: r.created_at, summary: r.summary, model_results: r.model_results })), citations: allCitations, top_sources: domainStats.slice(0, 50) };
-    const blob = new Blob([JSON.stringify(fullData, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${selectedClient.slug || selectedClient.name.toLowerCase().replace(/\s+/g, "-")}-full-audit-${new Date().toISOString().split("T")[0]}.json`; a.click(); URL.revokeObjectURL(url);
+    const overallVisibility = Math.round(auditResults.reduce((sum, r) => sum + r.summary.share_of_voice, 0) / (auditResults.length || 1));
+    let txt = "FORZEO GEO AUDIT REPORT\n" + "=".repeat(60) + "\n\n";
+    txt += "Export Date: " + new Date().toLocaleString() + "\n\n";
+    txt += "CLIENT INFORMATION\n" + "-".repeat(40) + "\n";
+    txt += "Name: " + selectedClient.name + "\nBrand: " + selectedClient.brand_name + "\nIndustry: " + (selectedClient.industry || "N/A") + "\nRegion: " + (selectedClient.target_region || "N/A") + "\n";
+    txt += "Brand Tags: " + (selectedClient.brand_tags?.join(", ") || "None") + "\nCompetitors: " + (selectedClient.competitors?.join(", ") || "None") + "\n\n";
+    txt += "SUMMARY\n" + "-".repeat(40) + "\n";
+    txt += "Total Prompts: " + prompts.length + "\nTotal Audits: " + auditResults.length + "\nOverall Visibility: " + overallVisibility + "%\nTotal Citations: " + allCitations.length + "\nTotal Cost: $" + totalCost.toFixed(4) + "\n\n";
+    txt += "MODEL PERFORMANCE\n" + "-".repeat(40) + "\n";
+    AI_MODELS.forEach(m => { const s = modelStats[m.id]; const pct = s?.total ? Math.round((s.visible / s.total) * 100) : 0; txt += m.name + " (" + m.provider + "): " + (s?.visible || 0) + "/" + (s?.total || 0) + " visible (" + pct + "%) - $" + (s?.cost || 0).toFixed(4) + "\n"; });
+    txt += "\nCOMPETITOR ANALYSIS\n" + "-".repeat(40) + "\n";
+    competitorGap.forEach((c, i) => { txt += (i + 1) + ". " + c.name + ": " + c.mentions + " mentions (" + c.percentage + "%)\n"; });
+    txt += "\nPROMPTS (" + prompts.length + ")\n" + "-".repeat(40) + "\n";
+    prompts.forEach((p, i) => { txt += (i + 1) + ". [" + (p.is_active ? "Active" : "Inactive") + "] " + p.prompt_text + "\n   Category: " + (p.category || "custom") + " | Niche: " + (p.niche_level || "N/A") + "\n"; });
+    txt += "\nAUDIT RESULTS (" + auditResults.length + ")\n" + "=".repeat(60) + "\n";
+    auditResults.forEach((r, i) => { txt += "\n[" + (i + 1) + "] " + r.prompt_text + "\n" + "-".repeat(50) + "\nDate: " + new Date(r.created_at).toLocaleString() + "\nSOV: " + r.summary.share_of_voice + "% | Rank: " + (r.summary.average_rank || "N/A") + " | Citations: " + r.summary.total_citations + "\n\nModel Results:\n"; r.model_results.forEach(mr => { txt += "  - " + mr.model_name + ": " + (mr.brand_mentioned ? "Mentioned" : "Not mentioned") + (mr.brand_rank ? " (Rank #" + mr.brand_rank + ")" : "") + " - " + mr.brand_mention_count + " mentions, " + (mr.citations?.length || 0) + " citations\n"; }); txt += "\n"; });
+    txt += "\nTOP CITATIONS (" + Math.min(allCitations.length, 50) + ")\n" + "-".repeat(40) + "\n";
+    allCitations.slice(0, 50).forEach((c, i) => { txt += (i + 1) + ". " + c.domain + " (" + c.count + "x)\n   " + c.url + "\n"; });
+    txt += "\nTOP SOURCES (" + Math.min(domainStats.length, 30) + ")\n" + "-".repeat(40) + "\n";
+    domainStats.slice(0, 30).forEach((s, i) => { txt += (i + 1) + ". " + s.domain + ": " + s.count + " citations across " + s.promptCount + " prompts\n"; });
+    txt += "\n" + "=".repeat(60) + "\nGenerated by Forzeo GEO Dashboard\nhttps://wondrous-queijadas-f95c7e.netlify.app\n";
+    const blob = new Blob([txt], { type: "text/plain" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = (selectedClient.slug || selectedClient.name.toLowerCase().replace(/\s+/g, "-")) + "-full-audit-" + new Date().toISOString().split("T")[0] + ".txt"; a.click(); URL.revokeObjectURL(url);
   };
 
   const dateRangeLabel = dateRangeFilter === "7d" ? "Last 7 days" : dateRangeFilter === "30d" ? "Last 30 days" : dateRangeFilter === "90d" ? "Last 90 days" : "All Time";
@@ -179,7 +199,7 @@ export default function ClientDashboard() {
           {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Sparkles }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-1 transition-colors", activeTab === item.id ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-50")}><item.icon className="h-4 w-4" />{item.label}{item.badge && <span className="ml-auto text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
           <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-3 mb-2 mt-6">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Settings className="h-4 w-4" /> Settings</button>
-          <button onClick={handleOpenEditClient} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Building2 className="h-4 w-4" /> Brands</button>
+          <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Building2 className="h-4 w-4" /> Brands</button>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"><Tag className="h-4 w-4" /> Tags</button>
           <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-3 mb-2 mt-6">Company</div>
           <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Key className="h-4 w-4" /> API Keys</button>
@@ -199,7 +219,7 @@ export default function ClientDashboard() {
                 <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors", modelFilter.length > 0 ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Filter className="h-3.5 w-3.5" /> {modelFilterLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; const isSelected = modelFilter.length === 0 || modelFilter.includes(model.id); return (<DropdownMenuItem key={model.id} onClick={() => toggleModelFilter(model.id)} className={cn(isSelected && "bg-blue-50")}><div className="flex items-center gap-2 w-full">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="flex-1">{model.name}</span>{isSelected && <CheckCircle className="h-3 w-3 text-blue-600" />}</div></DropdownMenuItem>); })}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setModelFilter([])}>Clear Filters</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               </div>
               {activeTab === "prompts" && <Button onClick={() => setBulkPromptsOpen(true)} variant="outline" size="sm"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>}
-              <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileJson className="h-4 w-4 mr-2" /> Export Full Audit (JSON)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+              <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>
             </div>
           </div>
@@ -207,7 +227,7 @@ export default function ClientDashboard() {
         {error && <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2 text-sm"><AlertTriangle className="h-4 w-4" /> {error}</div>}
         <div className="p-6">{activeTab === "overview" && <OverviewTab />}{activeTab === "prompts" && <PromptsTab />}{activeTab === "citations" && <CitationsTab />}{activeTab === "sources" && <SourcesTab />}{activeTab === "content" && <ContentTab />}</div>
       </main>
-      <SettingsSheet /><AddClientDialog /><EditClientDialog /><BulkPromptsDialog /><PromptDetailDialog /><ImportDialog />
+      <SettingsSheet /><AddClientDialog /><EditClientDialog /><ManageBrandsDialog /><BulkPromptsDialog /><PromptDetailDialog /><ImportDialog />
       <input ref={fileInputRef} type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileImport} />
     </div>
   );
@@ -286,7 +306,7 @@ export default function ClientDashboard() {
           <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3"><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search domains..." value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportToCSV}><Download className="h-3.5 w-3.5 mr-1" /> Export</Button></div></div>
           {sourcesGapView === "gap" && (<div className="px-4 py-3 bg-orange-50 border-b border-orange-100"><p className="text-sm text-orange-700"><AlertTriangle className="h-4 w-4 inline mr-1" />These domains cite your competitors but not your brand.</p></div>)}
           <table className="w-full"><thead className="bg-gray-50 border-b border-gray-100"><tr><th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase w-12">#</th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase"><button className="flex items-center gap-1"><Globe className="h-3 w-3" /> Source <ArrowUpDown className="h-3 w-3" /></button></th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th><th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Citations</th><th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Prompts</th>{sourcesGapView === "gap" && <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Competitors</th>}<th className="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase">Avg/Audit</th></tr></thead>
-            <tbody className="divide-y divide-gray-50">{(displayedStats as typeof domainStats).map((s, i) => { const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; const isExpanded = expandedDomain === s.domain; return (<><tr key={i} className={cn("hover:bg-gray-50 cursor-pointer", isExpanded && "bg-blue-50")} onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}><td className="px-5 py-3 text-sm text-gray-400">{i + 1}</td><td className="px-4 py-3"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=20`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ccc"><circle cx="12" cy="12" r="10"/></svg>'; }} /><a href={`https://${s.domain}`} target="_blank" rel="noopener noreferrer" className="text-sm text-gray-900 hover:text-blue-600">{s.domain}</a><ChevronRight className={cn("h-4 w-4 text-gray-400 transition-transform", isExpanded && "rotate-90")} /></div></td><td className="px-4 py-3"><span className={cn("px-2.5 py-1 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td><td className="px-4 py-3 text-right text-sm text-gray-600">{s.count}</td><td className="px-4 py-3 text-right text-sm text-gray-600">{s.promptCount}</td>{sourcesGapView === "gap" && (<td className="px-4 py-3"><div className="flex items-center gap-1">{((s as any).gapCompetitors || []).slice(0, 3).map((comp: string, j: number) => (<Badge key={j} variant="outline" className="text-xs">{comp}</Badge>))}</div></td>)}<td className="px-5 py-3 text-right text-sm text-gray-600">{s.avg}</td></tr>{isExpanded && s.prompts && (<tr><td colSpan={sourcesGapView === "gap" ? 7 : 6} className="px-5 py-3 bg-gray-50"><div className="text-xs text-gray-500 mb-2">Prompts citing this source:</div><div className="flex flex-wrap gap-2">{s.prompts.slice(0, 10).map((prompt, j) => (<Badge key={j} variant="secondary" className="text-xs max-w-xs truncate">{prompt}</Badge>))}{s.prompts.length > 10 && <Badge variant="outline" className="text-xs">+{s.prompts.length - 10} more</Badge>}</div></td></tr>)}</>); })}</tbody>
+            <tbody className="divide-y divide-gray-50">{(displayedStats as typeof domainStats).map((s, i) => { const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; const isExpanded = expandedDomain === s.domain; return (<><tr key={i} className={cn("hover:bg-gray-50 cursor-pointer", isExpanded && "bg-blue-50")} onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}><td className="px-5 py-3 text-sm text-gray-400">{i + 1}</td><td className="px-4 py-3"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=20`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ccc"><circle cx="12" cy="12" r="10"/></svg>'; }} /><a href={`https://${s.domain}`} target="_blank" rel="noopener noreferrer" className="text-sm text-gray-900 hover:text-blue-600">{s.domain}</a><ChevronRight className={cn("h-4 w-4 text-gray-400 transition-transform", isExpanded && "rotate-90")} /></div></td><td className="px-4 py-3"><span className={cn("px-2.5 py-1 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td><td className="px-4 py-3 text-right text-sm text-gray-600">{s.count}</td><td className="px-4 py-3 text-right text-sm text-gray-600">{s.promptCount}</td>{sourcesGapView === "gap" && (<td className="px-4 py-3"><div className="flex items-center gap-1 flex-wrap">{((s as any).gapCompetitors || []).slice(0, 3).map((comp: string, j: number) => (<span key={j} className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 border border-red-200 rounded text-xs text-red-700 font-medium"><BrandLogo name={comp} size={12} />{comp}</span>))}{((s as any).gapCompetitors || []).length > 3 && <span className="text-xs text-gray-500">+{((s as any).gapCompetitors || []).length - 3}</span>}</div></td>)}<td className="px-5 py-3 text-right text-sm text-gray-600">{s.avg}</td></tr>{isExpanded && s.prompts && (<tr><td colSpan={sourcesGapView === "gap" ? 7 : 6} className="px-5 py-3 bg-gray-50"><div className="text-xs text-gray-500 mb-2">Prompts citing this source:</div><div className="flex flex-wrap gap-2">{s.prompts.slice(0, 10).map((prompt, j) => (<Badge key={j} variant="secondary" className="text-xs max-w-xs truncate">{prompt}</Badge>))}{s.prompts.length > 10 && <Badge variant="outline" className="text-xs">+{s.prompts.length - 10} more</Badge>}</div></td></tr>)}</>); })}</tbody>
           </table>
           {displayedStats.length === 0 && (<div className="p-12 text-center"><Globe className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">{sourcesGapView === "gap" ? "No gap opportunities found" : "No source data yet. Run audits to collect data."}</p></div>)}
         </div>
@@ -305,13 +325,13 @@ export default function ClientDashboard() {
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2 bg-white rounded-xl border border-gray-200 overflow-hidden">
             <table className="w-full"><thead className="bg-gray-50 border-b border-gray-200"><tr><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">URL</th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase w-32">Domain</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-20">Count</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-24">Type</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-20">Actions</th></tr></thead>
-              <tbody className="divide-y divide-gray-100">{filteredCitations.slice(0, 50).map((c, i) => { const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other; return (<tr key={i} className={cn("hover:bg-gray-50 cursor-pointer", selectedCitation === c.url && "bg-blue-50")} onClick={() => setSelectedCitation(c.url)}><td className="px-4 py-3"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded" /><div className="min-w-0"><div className="text-sm text-gray-900 truncate max-w-md">{c.title || c.url}</div><div className="text-xs text-gray-500 truncate max-w-md">{c.url}</div></div></div></td><td className="px-4 py-3 text-sm text-gray-600">{c.domain}</td><td className="px-4 py-3 text-center"><Badge variant="secondary">{c.count}</Badge></td><td className="px-4 py-3 text-center"><span className={cn("px-2 py-0.5 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td><td className="px-4 py-3 text-center"><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-4 w-4" /></a></td></tr>); })}</tbody>
+              <tbody className="divide-y divide-gray-100">{filteredCitations.slice(0, 50).map((c, i) => { const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other; return (<tr key={i} className={cn("hover:bg-gray-50 cursor-pointer", selectedCitation === c.url && "bg-blue-50")} onClick={() => setSelectedCitation(c.url)}><td className="px-4 py-3"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded" /><div className="min-w-0"><div className="text-sm text-gray-900 truncate max-w-md">{c.title || c.url}</div><div className="text-xs text-gray-500 truncate max-w-md">{c.url}</div></div></div></td><td className="px-4 py-3 text-sm text-gray-600">{c.domain}</td><td className="px-4 py-3 text-center"><span className="inline-flex items-center justify-center min-w-[28px] px-2 py-1 bg-blue-100 text-blue-800 text-sm font-bold rounded-full">{c.count}</span></td><td className="px-4 py-3 text-center"><span className={cn("px-2 py-0.5 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td><td className="px-4 py-3 text-center"><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-4 w-4" /></a></td></tr>); })}</tbody>
             </table>
             {filteredCitations.length === 0 && (<div className="p-12 text-center"><Link2 className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No citations yet. Run audits to collect citation data.</p></div>)}
             {filteredCitations.length > 50 && <div className="p-3 text-center text-sm text-gray-500 border-t">Showing 50 of {filteredCitations.length} citations</div>}
           </div>
           <div className="space-y-4">
-            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-4">Citations by Prompt</h3><div className="space-y-3 max-h-96 overflow-y-auto">{Object.entries(citationsByPrompt).map(([promptId, citations]) => { const prompt = prompts.find(p => p.id === promptId); const result = filteredAuditResults.find(r => r.prompt_id === promptId); return (<div key={promptId} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer" onClick={() => setSelectedPromptDetail(promptId)}><div className="text-sm font-medium text-gray-900 line-clamp-2">{prompt?.prompt_text || result?.prompt_text}</div><div className="flex items-center gap-2 mt-2"><Badge variant="outline" className="text-xs">{citations.length} citations</Badge><span className="text-xs text-gray-500">{new Set(citations.map(c => c.domain)).size} domains</span></div></div>); })}{Object.keys(citationsByPrompt).length === 0 && <p className="text-sm text-gray-500 text-center py-4">No citations collected yet</p>}</div></div>
+            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-4">Citations by Prompt</h3><div className="space-y-3 max-h-96 overflow-y-auto">{Object.entries(citationsByPrompt).map(([promptId, citations]) => { const prompt = prompts.find(p => p.id === promptId); const result = filteredAuditResults.find(r => r.prompt_id === promptId); return (<div key={promptId} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer border border-gray-200" onClick={() => setSelectedPromptDetail(promptId)}><div className="text-sm font-medium text-gray-900 line-clamp-2">{prompt?.prompt_text || result?.prompt_text}</div><div className="flex items-center gap-3 mt-2"><div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(citations.length * 10, 100)}%` }} /></div><span className="text-xs font-medium text-gray-700 whitespace-nowrap">{citations.length} domains</span></div></div>); })}{Object.keys(citationsByPrompt).length === 0 && <p className="text-sm text-gray-500 text-center py-4">No citations collected yet</p>}</div></div>
             {selectedCitation && (<div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Citation Details</h3>{(() => { const c = allCitations.find(x => x.url === selectedCitation); if (!c) return null; return (<div className="space-y-3"><div><Label className="text-xs text-gray-500">Title</Label><p className="text-sm text-gray-900">{c.title || "No title"}</p></div><div><Label className="text-xs text-gray-500">URL</Label><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all">{c.url}</a></div><div><Label className="text-xs text-gray-500">Domain</Label><p className="text-sm text-gray-900">{c.domain}</p></div><div><Label className="text-xs text-gray-500">Cited in {c.prompts.length} prompt(s)</Label><div className="mt-1 space-y-1">{c.prompts.slice(0, 5).map((p, i) => <p key={i} className="text-xs text-gray-600 truncate">{p}</p>)}</div></div><Button variant="outline" size="sm" className="w-full" onClick={() => navigator.clipboard.writeText(c.url)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy URL</Button></div>); })()}</div>)}
           </div>
         </div>
@@ -327,7 +347,7 @@ export default function ClientDashboard() {
           <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-6">
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="article">Article</SelectItem><SelectItem value="listicle">Listicle (Top 10)</SelectItem><SelectItem value="comparison">Comparison Guide</SelectItem><SelectItem value="guide">How-To Guide</SelectItem><SelectItem value="faq">FAQ Section</SelectItem></SelectContent></Select></div></div>
-              <div className="p-4 bg-gray-50 rounded-lg"><Label className="text-sm font-medium">Content will include:</Label><div className="mt-2 flex flex-wrap gap-2"><Badge variant="outline">Brand: {selectedClient?.brand_name}</Badge><Badge variant="outline">Region: {selectedClient?.target_region}</Badge><Badge variant="outline">Industry: {selectedClient?.industry}</Badge>{selectedClient?.competitors.slice(0, 3).map((c, i) => <Badge key={i} variant="secondary">{c}</Badge>)}</div></div>
+              <div className="p-4 bg-gray-50 rounded-lg"><Label className="text-sm font-medium">Content will include:</Label><div className="mt-3 flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><BrandLogo name={c} size={14} />{c}</span>)}</div></div>
               <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : <><Sparkles className="h-4 w-4 mr-2" /> Generate Content</>}</Button>
               {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="prose prose-sm max-w-none p-4 bg-gray-50 rounded-lg border max-h-[500px] overflow-y-auto"><pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans">{generatedContent}</pre></div></div>)}
             </div>
@@ -343,16 +363,327 @@ export default function ClientDashboard() {
   }
 
   function SettingsSheet() {
-    return (<Sheet open={settingsOpen} onOpenChange={setSettingsOpen}><SheetContent className="w-[400px] bg-white overflow-y-auto"><SheetHeader><SheetTitle>Settings</SheetTitle></SheetHeader><div className="mt-6 space-y-6"><div><Label className="text-sm font-medium text-gray-900">Brand Tags</Label><p className="text-xs text-gray-500 mb-2">Alternative names for brand detection</p><div className="flex flex-wrap gap-2 mb-2">{selectedClient?.brand_tags.map((t, i) => (<Badge key={i} variant="secondary" className="gap-1">{t}<button onClick={() => updateBrandTags(selectedClient.brand_tags.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button></Badge>))}</div><div className="flex gap-2"><Input placeholder="Add tag..." value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddTag()} /><Button size="sm" onClick={handleAddTag}>Add</Button></div></div><div><Label className="text-sm font-medium text-gray-900">Competitors</Label><p className="text-xs text-gray-500 mb-2">Brands to track alongside yours</p><div className="flex flex-wrap gap-2 mb-2">{selectedClient?.competitors.map((c, i) => (<Badge key={i} variant="outline" className="gap-1"><BrandLogo name={c} size={12} />{c}<button onClick={() => updateCompetitors(selectedClient.competitors.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button></Badge>))}</div><div className="flex gap-2"><Input placeholder="Add competitor..." value={newCompetitor} onChange={(e) => setNewCompetitor(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddCompetitor()} /><Button size="sm" onClick={handleAddCompetitor}>Add</Button></div></div><div><Label className="text-sm font-medium text-gray-900">AI Models</Label><p className="text-xs text-gray-500 mb-2">Select models to query</p><div className="space-y-2">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; return (<div key={model.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50"><div className="flex items-center gap-2"><Checkbox id={model.id} checked={selectedModels.includes(model.id)} onCheckedChange={() => toggleModel(model.id)} />{Logo && <Logo className="h-4 w-4" style={{ color }} />}<label htmlFor={model.id} className="text-sm cursor-pointer">{model.name}</label></div><span className="text-xs text-gray-500">${model.costPerQuery.toFixed(3)}</span></div>); })}</div></div><div className="pt-4 border-t"><Label className="text-sm font-medium text-red-600">Danger Zone</Label><div className="mt-2 space-y-2"><Button variant="outline" size="sm" className="w-full text-red-600 border-red-200" onClick={clearAllPrompts}><Trash2 className="h-4 w-4 mr-2" /> Clear All Prompts</Button><Button variant="outline" size="sm" className="w-full text-red-600 border-red-200" onClick={clearResults}><Trash2 className="h-4 w-4 mr-2" /> Clear All Results</Button></div></div></div></SheetContent></Sheet>);
+    return (
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent className="w-[400px] bg-white overflow-y-auto">
+          <SheetHeader><SheetTitle>Settings</SheetTitle></SheetHeader>
+          <div className="mt-6 space-y-6">
+            <div>
+              <Label className="text-sm font-medium text-gray-900">Brand Tags</Label>
+              <p className="text-xs text-gray-500 mb-2">Alternative names for brand detection</p>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {selectedClient?.brand_tags.map((t, i) => (
+                  <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">
+                    {t}
+                    <button onClick={() => updateBrandTags(selectedClient.brand_tags.filter((_, j) => j !== i))} className="ml-1 text-blue-600 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
+                  </span>
+                ))}
+                {(!selectedClient?.brand_tags || selectedClient.brand_tags.length === 0) && <span className="text-sm text-gray-400 italic">No tags added</span>}
+              </div>
+              <div className="flex gap-2">
+                <Input placeholder="Add tag..." value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddTag()} className="bg-white" />
+                <Button size="sm" onClick={handleAddTag} className="bg-blue-600 hover:bg-blue-700 text-white">Add</Button>
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm font-medium text-gray-900">Competitors</Label>
+              <p className="text-xs text-gray-500 mb-2">Brands to track alongside yours</p>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {selectedClient?.competitors.map((c, i) => (
+                  <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-900 font-medium">
+                    <BrandLogo name={c} size={16} />
+                    <span>{c}</span>
+                    <button onClick={() => updateCompetitors(selectedClient.competitors.filter((_, j) => j !== i))} className="ml-1 text-gray-500 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
+                  </span>
+                ))}
+                {(!selectedClient?.competitors || selectedClient.competitors.length === 0) && <span className="text-sm text-gray-400 italic">No competitors added</span>}
+              </div>
+              <div className="flex gap-2">
+                <Input placeholder="Add competitor..." value={newCompetitor} onChange={(e) => setNewCompetitor(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddCompetitor()} className="bg-white" />
+                <Button size="sm" onClick={handleAddCompetitor} className="bg-green-600 hover:bg-green-700 text-white">Add</Button>
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm font-medium text-gray-900">AI Models</Label>
+              <p className="text-xs text-gray-500 mb-2">Select models to query</p>
+              <div className="space-y-2">
+                {AI_MODELS.map(model => {
+                  const Logo = MODEL_LOGOS[model.id]?.Logo;
+                  const color = MODEL_LOGOS[model.id]?.color || "#666";
+                  const isSelected = selectedModels.includes(model.id);
+                  return (
+                    <div key={model.id} onClick={() => toggleModel(model.id)} className={cn("flex items-center justify-between p-3 rounded-lg border-2 cursor-pointer transition-all", isSelected ? "bg-blue-50 border-blue-400" : "bg-white border-gray-200 hover:border-gray-300")}>
+                      <div className="flex items-center gap-3">
+                        <div className={cn("w-5 h-5 rounded border-2 flex items-center justify-center", isSelected ? "bg-blue-600 border-blue-600" : "bg-white border-gray-300")}>
+                          {isSelected && <CheckCircle className="h-3.5 w-3.5 text-white" />}
+                        </div>
+                        {Logo && <Logo className="h-6 w-6" style={{ color }} />}
+                        <span className={cn("text-sm font-medium", isSelected ? "text-gray-900" : "text-gray-700")}>{model.name}</span>
+                      </div>
+                      <span className="text-xs text-gray-600 font-mono bg-gray-100 px-2 py-1 rounded">${model.costPerQuery.toFixed(3)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="pt-4 border-t">
+              <Label className="text-sm font-medium text-red-600">Danger Zone</Label>
+              <div className="mt-2 space-y-2">
+                <Button variant="outline" size="sm" className="w-full text-red-600 border-red-200" onClick={clearAllPrompts}><Trash2 className="h-4 w-4 mr-2" /> Clear All Prompts</Button>
+                <Button variant="outline" size="sm" className="w-full text-red-600 border-red-200" onClick={clearResults}><Trash2 className="h-4 w-4 mr-2" /> Clear All Results</Button>
+              </div>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    );
   }
 
   function AddClientDialog() {
-    return (<Dialog open={addClientOpen} onOpenChange={setAddClientOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Add New Brand</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Brand Name</Label><Input placeholder="e.g., Acme Corp" value={newClientForm.name} onChange={(e) => setNewClientForm({ ...newClientForm, name: e.target.value })} /></div><div><Label>Display Name</Label><Input placeholder="e.g., Acme" value={newClientForm.brand_name} onChange={(e) => setNewClientForm({ ...newClientForm, brand_name: e.target.value })} /></div><div><Label>Industry</Label><Select value={newClientForm.industry} onValueChange={(v) => setNewClientForm({ ...newClientForm, industry: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.keys(industries).map(ind => <SelectItem key={ind} value={ind}>{ind}</SelectItem>)}</SelectContent></Select></div><div><Label>Target Region</Label><Select value={newClientForm.target_region} onValueChange={(v) => setNewClientForm({ ...newClientForm, target_region: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.keys(locations).map(loc => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}</SelectContent></Select></div><div><Label>Competitors (comma-separated)</Label><Input placeholder="e.g., Competitor1, Competitor2" value={newClientForm.competitors} onChange={(e) => setNewClientForm({ ...newClientForm, competitors: e.target.value })} /></div></div><DialogFooter><Button variant="outline" onClick={() => setAddClientOpen(false)}>Cancel</Button><Button onClick={handleCreateClient}>Create Brand</Button></DialogFooter></DialogContent></Dialog>);
+    return (
+      <Dialog open={addClientOpen} onOpenChange={setAddClientOpen}>
+        <DialogContent className="sm:max-w-lg bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-semibold text-gray-900">Add New Brand</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Brand Name *</Label>
+                <Input 
+                  placeholder="e.g., Acme Corp" 
+                  value={newClientForm.name} 
+                  onChange={(e) => setNewClientForm(prev => ({ ...prev, name: e.target.value }))} 
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500" 
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Display Name</Label>
+                <Input 
+                  placeholder="e.g., Acme" 
+                  value={newClientForm.brand_name} 
+                  onChange={(e) => setNewClientForm(prev => ({ ...prev, brand_name: e.target.value }))} 
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500" 
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Industry</Label>
+                <Select value={newClientForm.industry} onValueChange={(v) => setNewClientForm(prev => ({ ...prev, industry: v }))}>
+                  <SelectTrigger className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500">
+                    <SelectValue placeholder="Select industry..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border border-gray-200 shadow-lg">
+                    {Object.keys(industries).map(ind => (
+                      <SelectItem key={ind} value={ind} className="text-gray-900 hover:bg-gray-100 cursor-pointer">{ind}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Target Region</Label>
+                <Select value={newClientForm.target_region} onValueChange={(v) => setNewClientForm(prev => ({ ...prev, target_region: v }))}>
+                  <SelectTrigger className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500">
+                    <SelectValue placeholder="Select region..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border border-gray-200 shadow-lg max-h-60">
+                    {Object.keys(locations).map(loc => (
+                      <SelectItem key={loc} value={loc} className="text-gray-900 hover:bg-gray-100 cursor-pointer">{loc}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm font-medium text-gray-700">Competitors (comma-separated)</Label>
+              <Input 
+                placeholder="e.g., Nike, Adidas, Puma" 
+                value={newClientForm.competitors} 
+                onChange={(e) => setNewClientForm(prev => ({ ...prev, competitors: e.target.value }))} 
+                className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500" 
+              />
+              <p className="mt-1 text-xs text-gray-500">Enter competitor brand names separated by commas</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Brand Color</Label>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={newClientForm.primary_color} 
+                    onChange={(e) => setNewClientForm(prev => ({ ...prev, primary_color: e.target.value }))} 
+                    className="h-10 w-14 rounded border border-gray-300 cursor-pointer"
+                  />
+                  <Input 
+                    value={newClientForm.primary_color} 
+                    onChange={(e) => setNewClientForm(prev => ({ ...prev, primary_color: e.target.value }))} 
+                    className="flex-1 bg-white border-gray-300 text-gray-900 font-mono text-sm" 
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Logo URL (optional)</Label>
+                <Input 
+                  placeholder="https://example.com/logo.png" 
+                  value={newClientForm.logo_url} 
+                  onChange={(e) => setNewClientForm(prev => ({ ...prev, logo_url: e.target.value }))} 
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500" 
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="border-t border-gray-100 pt-4">
+            <Button variant="outline" onClick={() => setAddClientOpen(false)} className="border-gray-300 text-gray-700 hover:bg-gray-50">Cancel</Button>
+            <Button onClick={handleCreateClient} disabled={!newClientForm.name.trim()} className="bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">Create Brand</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
   }
 
   function EditClientDialog() {
-    return (<Dialog open={editClientOpen} onOpenChange={setEditClientOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit Brand</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Brand Name</Label><Input value={editClientForm.name} onChange={(e) => setEditClientForm({ ...editClientForm, name: e.target.value })} /></div><div><Label>Display Name</Label><Input value={editClientForm.brand_name} onChange={(e) => setEditClientForm({ ...editClientForm, brand_name: e.target.value })} /></div><div><Label>Industry</Label><Select value={editClientForm.industry} onValueChange={(v) => setEditClientForm({ ...editClientForm, industry: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.keys(industries).map(ind => <SelectItem key={ind} value={ind}>{ind}</SelectItem>)}</SelectContent></Select></div><div><Label>Target Region</Label><Select value={editClientForm.target_region} onValueChange={(v) => setEditClientForm({ ...editClientForm, target_region: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.keys(locations).map(loc => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}</SelectContent></Select></div></div><DialogFooter><Button variant="outline" className="text-red-600" onClick={handleDeleteClient}>Delete</Button><Button variant="outline" onClick={() => setEditClientOpen(false)}>Cancel</Button><Button onClick={handleUpdateClient}>Save Changes</Button></DialogFooter></DialogContent></Dialog>);
+    return (
+      <Dialog open={editClientOpen} onOpenChange={setEditClientOpen}>
+        <DialogContent className="sm:max-w-lg bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-semibold text-gray-900">Edit Brand</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Brand Name *</Label>
+                <Input 
+                  value={editClientForm.name} 
+                  onChange={(e) => setEditClientForm(prev => ({ ...prev, name: e.target.value }))} 
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500" 
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Display Name</Label>
+                <Input 
+                  value={editClientForm.brand_name} 
+                  onChange={(e) => setEditClientForm(prev => ({ ...prev, brand_name: e.target.value }))} 
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500" 
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Industry</Label>
+                <Select value={editClientForm.industry} onValueChange={(v) => setEditClientForm(prev => ({ ...prev, industry: v }))}>
+                  <SelectTrigger className="mt-1.5 bg-white border-gray-300 text-gray-900">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border border-gray-200 shadow-lg">
+                    {Object.keys(industries).map(ind => (
+                      <SelectItem key={ind} value={ind} className="text-gray-900 hover:bg-gray-100">{ind}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Target Region</Label>
+                <Select value={editClientForm.target_region} onValueChange={(v) => setEditClientForm(prev => ({ ...prev, target_region: v }))}>
+                  <SelectTrigger className="mt-1.5 bg-white border-gray-300 text-gray-900">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border border-gray-200 shadow-lg max-h-60">
+                    {Object.keys(locations).map(loc => (
+                      <SelectItem key={loc} value={loc} className="text-gray-900 hover:bg-gray-100">{loc}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm font-medium text-gray-700">Competitors (comma-separated)</Label>
+              <Input 
+                placeholder="e.g., Nike, Adidas, Puma" 
+                value={editClientForm.competitors} 
+                onChange={(e) => setEditClientForm(prev => ({ ...prev, competitors: e.target.value }))} 
+                className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400" 
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Brand Color</Label>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={editClientForm.primary_color} 
+                    onChange={(e) => setEditClientForm(prev => ({ ...prev, primary_color: e.target.value }))} 
+                    className="h-10 w-14 rounded border border-gray-300 cursor-pointer"
+                  />
+                  <Input 
+                    value={editClientForm.primary_color} 
+                    onChange={(e) => setEditClientForm(prev => ({ ...prev, primary_color: e.target.value }))} 
+                    className="flex-1 bg-white border-gray-300 text-gray-900 font-mono text-sm" 
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Logo URL (optional)</Label>
+                <Input 
+                  placeholder="https://example.com/logo.png" 
+                  value={editClientForm.logo_url} 
+                  onChange={(e) => setEditClientForm(prev => ({ ...prev, logo_url: e.target.value }))} 
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400" 
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="border-t border-gray-100 pt-4 flex justify-between">
+            <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={handleDeleteClient}>
+              <Trash2 className="h-4 w-4 mr-2" /> Delete Brand
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditClientOpen(false)} className="border-gray-300 text-gray-700">Cancel</Button>
+              <Button onClick={handleUpdateClient} disabled={!editClientForm.name.trim()} className="bg-blue-600 hover:bg-blue-700 text-white">Save Changes</Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
   }
+  function ManageBrandsDialog() {
+    return (
+      <Dialog open={manageBrandsOpen} onOpenChange={setManageBrandsOpen}>
+        <DialogContent className="sm:max-w-2xl bg-white max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-semibold text-gray-900">Manage Brands</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto py-4">
+            <div className="space-y-3">
+              {clients.map(client => (
+                <div key={client.id} className={cn("flex items-center justify-between p-4 rounded-xl border-2 transition-all", client.id === selectedClient?.id ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:border-gray-300")}>
+                  <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-xl flex items-center justify-center text-white font-bold text-lg" style={{ backgroundColor: client.primary_color }}>{client.brand_name.charAt(0)}</div>
+                    <div>
+                      <div className="font-semibold text-gray-900">{client.name}</div>
+                      <div className="text-sm text-gray-500">{client.industry} - {client.target_region}</div>
+                      <div className="flex items-center gap-2 mt-1">{client.competitors?.slice(0, 3).map((c, i) => (<span key={i} className="text-xs px-2 py-0.5 bg-gray-100 rounded text-gray-600">{c}</span>))}{(client.competitors?.length || 0) > 3 && <span className="text-xs text-gray-400">+{client.competitors.length - 3} more</span>}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {client.id === selectedClient?.id && <Badge className="bg-blue-100 text-blue-700">Active</Badge>}
+                    <Button variant="outline" size="sm" onClick={() => { switchClient(client); setManageBrandsOpen(false); }} className="text-gray-600"><Eye className="h-4 w-4 mr-1" /> View</Button>
+                    <Button variant="outline" size="sm" onClick={() => { setEditClientForm({ name: client.name, brand_name: client.brand_name, target_region: client.target_region, industry: client.industry, primary_color: client.primary_color, logo_url: "", competitors: client.competitors?.join(", ") || "" }); switchClient(client); setManageBrandsOpen(false); setEditClientOpen(true); }} className="text-gray-600"><Settings className="h-4 w-4 mr-1" /> Edit</Button>
+                    {clients.length > 1 && (<Button variant="outline" size="sm" onClick={() => { if (confirm("Delete " + client.name + "?")) deleteClient(client.id); }} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter className="border-t border-gray-100 pt-4">
+            <Button variant="outline" onClick={() => setManageBrandsOpen(false)} className="border-gray-300 text-gray-700">Close</Button>
+            <Button onClick={() => { setManageBrandsOpen(false); setAddClientOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white"><Plus className="h-4 w-4 mr-2" /> Add New Brand</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
 
   function BulkPromptsDialog() {
     return (<Dialog open={bulkPromptsOpen} onOpenChange={setBulkPromptsOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Add Prompts</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div><div><Label>Multiple Prompts (one per line)</Label><Textarea placeholder={"Best dating apps in India\nDating apps with verification\nSafe dating apps for women"} value={bulkPrompts} onChange={(e) => setBulkPrompts(e.target.value)} rows={6} className="mt-1" /></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or generate with AI</span></div></div><div><Label>Generate from Keywords</Label><div className="flex gap-2 mt-1"><Input placeholder="dating apps, verification, safety" value={keywordsInput} onChange={(e) => setKeywordsInput(e.target.value)} /><Button onClick={handleGeneratePrompts} disabled={generatingPrompts}>{generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate"}</Button></div></div></div><DialogFooter><Button variant="outline" onClick={() => { setImportDialogOpen(true); setBulkPromptsOpen(false); }}>Import File</Button><Button onClick={handleBulkAdd} disabled={!bulkPrompts.trim()}>Add {bulkPrompts.split("\n").filter(l => l.trim().length > 3).length} Prompts</Button></DialogFooter></DialogContent></Dialog>);
