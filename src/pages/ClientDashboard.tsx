@@ -1,1312 +1,374 @@
-/**
- * ============================================================================
- * FORZEO GEO DASHBOARD - MAIN UI COMPONENT
- * ============================================================================
- * 
- * This is the main React component for the Forzeo GEO Dashboard.
- * It provides a professional dark-themed UI for AI visibility analytics.
- * 
- * ============================================================================
- * TABS
- * ============================================================================
- * 
- * 1. Summary Tab:
- *    - Share of Voice metric
- *    - Average rank in AI responses
- *    - Total citations count
- *    - Cost tracking
- *    - Visibility by model (bar charts)
- *    - Competitor gap analysis
- *    - Top sources list
- *    - AI-generated insights
- * 
- * 2. Prompts Tab:
- *    - Add single prompts
- *    - Bulk add prompts
- *    - AI prompt generator
- *    - Run individual audits
- *    - View detailed results
- *    - Delete prompts
- * 
- * 3. Citations Tab:
- *    - All citations aggregated
- *    - Citation count by URL
- *    - Model attribution
- *    - Prompt attribution
- * 
- * 4. Content Tab:
- *    - AI content generator
- *    - Article, listicle, comparison, guide, FAQ types
- *    - SEO-optimized output
- * 
- * 5. Sources Tab:
- *    - Domain-level aggregation
- *    - Full URL listing
- *    - Citation counts
- * 
- * ============================================================================
- * FEATURES
- * ============================================================================
- * 
- * - Dark theme UI (professional look)
- * - Model selection badges
- * - Client switcher dropdown
- * - Settings panel (brand tags, competitors)
- * - Import/export functionality
- * - Real-time loading states
- * - Error handling
- * - Date filtering
- * 
- * ============================================================================
- * DEPENDENCIES
- * ============================================================================
- * 
- * - React + TypeScript
- * - Radix UI (Tabs, Dialog, Dropdown, etc.)
- * - Tailwind CSS
- * - Lucide React (icons)
- * - useClientDashboard hook (state management)
- * 
- * @version 2.0.0
- * @author Forzeo Team
+﻿/**
+ * FORZEO GEO DASHBOARD - Redesigned UI v6.0
  */
-
 import { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import {
-  BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X,
-  CheckCircle, XCircle, ExternalLink, TrendingUp, Users, Award,
-  Download, Upload, Settings, Tag, Trash2, DollarSign,
-  AlertTriangle, Lightbulb, MoreVertical, Sparkles, Copy, Link2,
-  Calendar,
-} from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, FileJson, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import * as Tabs from "@radix-ui/react-tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useClientDashboard, AI_MODELS } from "@/hooks/useClientDashboard";
-import { ForzeoLogo } from "@/components/ForzeoLogo";
 import { MODEL_LOGOS } from "@/components/ModelLogos";
 
-const MODEL_COLORS: Record<string, string> = {
-  chatgpt: "#10b981", claude: "#f59e0b", gemini: "#3b82f6",
-  perplexity: "#8b5cf6", google_ai_overview: "#ef4444", google_serp: "#22c55e",
+const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; dot: string }> = {
+  ugc: { label: "UGC", color: "text-cyan-700", bg: "bg-cyan-100", dot: "#06b6d4" },
+  corporate: { label: "Corporate", color: "text-orange-700", bg: "bg-orange-100", dot: "#f97316" },
+  editorial: { label: "Editorial", color: "text-purple-700", bg: "bg-purple-100", dot: "#a855f7" },
+  reference: { label: "Reference", color: "text-green-700", bg: "bg-green-100", dot: "#22c55e" },
+  competitor: { label: "Competitor", color: "text-red-700", bg: "bg-red-100", dot: "#ef4444" },
+  institutional: { label: "Institutional", color: "text-emerald-700", bg: "bg-emerald-100", dot: "#10b981" },
+  other: { label: "Other", color: "text-gray-700", bg: "bg-gray-100", dot: "#6b7280" },
 };
 
+function classifyDomain(domain: string): string {
+  const d = domain.toLowerCase();
+  if (d.includes("reddit") || d.includes("quora") || d.includes("youtube")) return "ugc";
+  if (d.includes("forbes") || d.includes("techcrunch") || d.includes("wired")) return "editorial";
+  if (d.includes("wikipedia")) return "reference";
+  if (d.includes(".gov") || d.includes(".edu")) return "institutional";
+  if (d.includes("apple") || d.includes("google") || d.includes("microsoft")) return "corporate";
+  return "other";
+}
+
+function BrandLogo({ name, size = 16, className = "" }: { name: string; size?: number; className?: string }) {
+  const domain = useMemo(() => {
+    const n = name.toLowerCase().replace(/\s+/g, "");
+    const domainMap: Record<string, string> = { bumble: "bumble.com", hinge: "hinge.co", tinder: "tinder.com", shaadi: "shaadi.com", aisle: "aisle.co", myntra: "myntra.com", amazon: "amazon.com", google: "google.com" };
+    return domainMap[n] || `${n}.com`;
+  }, [name]);
+  return <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=${size * 2}`} alt={name} className={cn("rounded", className)} style={{ width: size, height: size }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />;
+}
+
+function DonutChart({ value, size = 120, label = "Citations" }: { value: number; size?: number; label?: string }) {
+  const strokeWidth = 12; const radius = (size - strokeWidth) / 2; const circumference = 2 * Math.PI * radius;
+  return (<div className="relative" style={{ width: size, height: size }}><svg width={size} height={size} className="transform -rotate-90"><circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="#e5e7eb" strokeWidth={strokeWidth} /><circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="#3b82f6" strokeWidth={strokeWidth} strokeDasharray={circumference} strokeDashoffset={circumference * 0.25} strokeLinecap="round" /></svg><div className="absolute inset-0 flex flex-col items-center justify-center"><span className="text-2xl font-bold text-gray-900">{value}</span><span className="text-xs text-gray-500">{label}</span></div></div>);
+}
+
+function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: string }) {
+  if (value > 0) return <span className="flex items-center gap-0.5 text-green-600 text-xs"><TrendingUp className="h-3 w-3" />+{value}{suffix}</span>;
+  if (value < 0) return <span className="flex items-center gap-0.5 text-red-600 text-xs"><TrendingDown className="h-3 w-3" />{value}{suffix}</span>;
+  return <span className="flex items-center gap-0.5 text-gray-400 text-xs"><Minus className="h-3 w-3" />0{suffix}</span>;
+}
+
 export default function ClientDashboard() {
-  const {
-    clients, selectedClient, prompts, auditResults, summary,
-    selectedModels, loading, loadingPromptId, error,
-    
-    addClient, updateClient, deleteClient, switchClient, setSelectedModels,
-    runFullAudit, runSinglePrompt, clearResults,
-    addCustomPrompt, addMultiplePrompts, deletePrompt, clearAllPrompts,
-    updateBrandTags, updateCompetitors,
-    exportToCSV, exportPrompts, exportFullReport, importData,
-    generatePromptsFromKeywords, generateContent, getAllCitations,
-    getModelStats, getCompetitorGap, getTopSources, getInsights,
-    INDUSTRY_PRESETS: industries, LOCATION_CODES: locations
-  } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, addClient, updateClient, deleteClient, switchClient, setSelectedModels, runFullAudit, runSinglePrompt, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
-  // Theme-based colors
-  // Dark theme colors (fixed)
-  const isDark = true;
-  const colors = {
-    bg: "bg-[#0a0a0f]",
-    bgCard: "bg-[#1a1a2e]",
-    bgInput: "bg-[#0a0a0f]",
-    border: "border-[#2a2a3e]",
-    borderHover: "hover:bg-[#2a2a3e]",
-    text: "text-white",
-    textMuted: "text-gray-400",
-    textSubtle: "text-gray-500",
-  };
-
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content">("overview");
   const [newPrompt, setNewPrompt] = useState("");
-  const [bulkPromptsOpen, setBulkPromptsOpen] = useState(false);
-  const [bulkPrompts, setBulkPrompts] = useState("");
-  const [newTag, setNewTag] = useState("");
-  const [newCompetitor, setNewCompetitor] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [editClientOpen, setEditClientOpen] = useState(false);
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [importText, setImportText] = useState("");
+  const [selectedPromptDetail, setSelectedPromptDetail] = useState<string | null>(null);
+  const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
+  const [newTag, setNewTag] = useState("");
+  const [newCompetitor, setNewCompetitor] = useState("");
+  const [bulkPromptsOpen, setBulkPromptsOpen] = useState(false);
+  const [bulkPrompts, setBulkPrompts] = useState("");
   const [keywordsInput, setKeywordsInput] = useState("");
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [contentTopic, setContentTopic] = useState("");
   const [contentType, setContentType] = useState("article");
   const [generatedContent, setGeneratedContent] = useState("");
   const [generatingContent, setGeneratingContent] = useState(false);
-  const [selectedPromptDetail, setSelectedPromptDetail] = useState<string | null>(null);
-  const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
-  const [selectedDate, setSelectedDate] = useState<string>("all");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [newClientForm, setNewClientForm] = useState({
-    name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#8b5cf6"
-  });
-  const [editClientForm, setEditClientForm] = useState({
-    name: "", brand_name: "", target_region: "United States", industry: "Custom", primary_color: "#8b5cf6"
-  });
+  const [showBrandOnly, setShowBrandOnly] = useState(false);
+  const [dateRangeFilter, setDateRangeFilter] = useState<"7d" | "30d" | "90d" | "all">("all");
+  const [modelFilter, setModelFilter] = useState<string[]>([]);
+  const [promptsTabView, setPromptsTabView] = useState<"active" | "suggested" | "inactive">("active");
+  const [sourcesGapView, setSourcesGapView] = useState<"all" | "gap">("all");
+  const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6" });
+  const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", primary_color: "#3b82f6" });
 
-  const COLOR_OPTIONS = ["#ec4899", "#f59e0b", "#06b6d4", "#8b5cf6", "#10b981", "#ef4444", "#3b82f6", "#f97316"];
-
-  const allCitations = getAllCitations();
-  const modelStats = getModelStats();
-  const competitorGap = getCompetitorGap();
-  const topSources = getTopSources();
-  const insights = getInsights();
-  const pendingPrompts = prompts.filter(p => !auditResults.find(r => r.prompt_id === p.id)).length;
-  const totalCost = Object.values(modelStats).reduce((sum, m) => sum + m.cost, 0);
-  
-  // Get unique dates from audit results for filtering
-  const uniqueDates = useMemo(() => {
-    const dates = new Set<string>();
-    auditResults.forEach(r => {
-      if (r.created_at) {
-        const date = new Date(r.created_at).toISOString().split('T')[0];
-        dates.add(date);
-      }
-    });
-    return Array.from(dates).sort((a, b) => b.localeCompare(a)); // Most recent first
-  }, [auditResults]);
-
-  // Filter audit results by selected date
   const filteredAuditResults = useMemo(() => {
-    if (selectedDate === "all") return auditResults;
-    return auditResults.filter(r => {
-      if (!r.created_at) return false;
-      const resultDate = new Date(r.created_at).toISOString().split('T')[0];
-      return resultDate === selectedDate;
-    });
-  }, [auditResults, selectedDate]);
-  
-  // Estimate cost for pending prompts
-  const estimatedCost = pendingPrompts * selectedModels.reduce((sum, modelId) => {
-    const model = AI_MODELS.find(m => m.id === modelId);
-    return sum + (model?.costPerQuery || 0.02);
-  }, 0);
+    let results = auditResults;
+    if (dateRangeFilter !== "all") { const now = new Date(); const days = dateRangeFilter === "7d" ? 7 : dateRangeFilter === "30d" ? 30 : 90; const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000); results = results.filter(r => new Date(r.created_at) >= cutoff); }
+    if (modelFilter.length > 0) { results = results.map(r => ({ ...r, model_results: r.model_results.filter(mr => modelFilter.includes(mr.model)) })).filter(r => r.model_results.length > 0); }
+    return results;
+  }, [auditResults, dateRangeFilter, modelFilter]);
 
-  // Get unique domains count
-  const uniqueDomains = new Set(allCitations.map(c => c.domain)).size;
+  const allCitations = useMemo(() => {
+    const citationMap = new Map<string, { url: string; title: string; domain: string; count: number; prompts: string[] }>();
+    for (const result of filteredAuditResults) { for (const mr of result.model_results) { for (const c of mr.citations) { const key = c.url; if (citationMap.has(key)) { const existing = citationMap.get(key)!; existing.count++; if (!existing.prompts.includes(result.prompt_text)) existing.prompts.push(result.prompt_text); } else { citationMap.set(key, { ...c, count: 1, prompts: [result.prompt_text] }); } } } }
+    return Array.from(citationMap.values()).sort((a, b) => b.count - a.count);
+  }, [filteredAuditResults]);
 
-  // Handlers
-  const handleAddPrompt = async () => {
-    if (newPrompt.trim()) {
-      await addCustomPrompt(newPrompt.trim());
-      setNewPrompt("");
-    }
-  };
+  const modelStats = useMemo(() => {
+    const stats: Record<string, { visible: number; total: number; cost: number }> = {};
+    AI_MODELS.forEach(model => { stats[model.id] = { visible: 0, total: 0, cost: 0 }; });
+    filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { if (stats[mr.model]) { stats[mr.model].total++; if (mr.brand_mentioned) stats[mr.model].visible++; stats[mr.model].cost += mr.api_cost; } }); });
+    return stats;
+  }, [filteredAuditResults]);
 
-  const handleBulkAdd = () => {
-    if (bulkPrompts.trim()) {
-      addMultiplePrompts(bulkPrompts.split("\n").filter(l => l.trim().length > 3));
-      setBulkPrompts("");
-      setBulkPromptsOpen(false);
-    }
-  };
+  const competitorGap = useMemo(() => {
+    if (!selectedClient) return [];
+    const mentions: Record<string, number> = {}; mentions[selectedClient.brand_name] = 0; selectedClient.competitors.forEach(c => { mentions[c] = 0; });
+    filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { const response = mr.raw_response?.toLowerCase() || ""; if (mr.brand_mentioned) mentions[selectedClient.brand_name] += mr.brand_mention_count; selectedClient.competitors.forEach(comp => { const regex = new RegExp(comp.toLowerCase(), "gi"); const matches = response.match(regex); if (matches) mentions[comp] += matches.length; }); }); });
+    const total = Object.values(mentions).reduce((a, b) => a + b, 0) || 1;
+    return Object.entries(mentions).map(([name, count]) => ({ name, mentions: count, percentage: Math.round((count / total) * 100) })).sort((a, b) => b.mentions - a.mentions);
+  }, [selectedClient, filteredAuditResults]);
 
-  const handleImport = () => {
-    if (importText.trim()) {
-      importData(importText);
-      setImportText("");
-      setImportDialogOpen(false);
-    }
-  };
+  const filteredPromptsByTab = useMemo(() => {
+    const activePrompts = prompts.filter(p => p.is_active !== false);
+    const inactivePrompts = prompts.filter(p => p.is_active === false);
+    const runPromptIds = new Set(auditResults.map(r => r.prompt_id));
+    const suggestedPrompts = activePrompts.filter(p => !runPromptIds.has(p.id));
+    switch (promptsTabView) { case "active": return activePrompts; case "suggested": return suggestedPrompts; case "inactive": return inactivePrompts; default: return activePrompts; }
+  }, [prompts, auditResults, promptsTabView]);
 
-  const handleGeneratePrompts = async () => {
-    if (!keywordsInput.trim()) return;
-    setGeneratingPrompts(true);
-    try {
-      const generated = await generatePromptsFromKeywords(keywordsInput);
-      if (generated && generated.length > 0) {
-        addMultiplePrompts(generated);
-        setKeywordsInput("");
-      }
-    } finally {
-      setGeneratingPrompts(false);
-    }
-  };
-
-  const handleGenerateContent = async () => {
-    if (!contentTopic.trim()) return;
-    setGeneratingContent(true);
-    setGeneratedContent("");
-    try {
-      const content = await generateContent(contentTopic, contentType);
-      if (content) setGeneratedContent(content);
-    } finally {
-      setGeneratingContent(false);
-    }
-  };
-
-  const handleRunSinglePrompt = async (promptId: string) => {
-    await runSinglePrompt(promptId);
-  };
-
-  const handleCreateClient = async () => {
-    if (!newClientForm.name.trim()) return;
-    const competitors = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean);
-    console.log("Creating client:", newClientForm);
-    const result = await addClient({
-      name: newClientForm.name,
-      brand_name: newClientForm.brand_name || newClientForm.name,
-      target_region: newClientForm.target_region,
-      location_code: locations[newClientForm.target_region] || 2840,
-      industry: newClientForm.industry,
-      competitors: competitors.length > 0 ? competitors : industries[newClientForm.industry]?.competitors || [],
-      primary_color: newClientForm.primary_color,
-    });
-    console.log("Created client:", result);
-    setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#8b5cf6" });
-    setAddClientOpen(false);
-  };
-
-  const handleOpenEditClient = () => {
-    if (!selectedClient) return;
-    setEditClientForm({
-      name: selectedClient.name,
-      brand_name: selectedClient.brand_name,
-      target_region: selectedClient.target_region,
-      industry: selectedClient.industry,
-      primary_color: selectedClient.primary_color,
-    });
-    setEditClientOpen(true);
-  };
-
-  const handleUpdateClient = async () => {
-    if (!selectedClient || !editClientForm.name.trim()) {
-      console.log("Update blocked - no client or empty name");
-      return;
-    }
-    console.log("Updating client:", selectedClient.id, editClientForm);
-    const result = await updateClient(selectedClient.id, {
-      name: editClientForm.name,
-      brand_name: editClientForm.brand_name || editClientForm.name,
-      target_region: editClientForm.target_region,
-      location_code: locations[editClientForm.target_region] || selectedClient.location_code,
-      industry: editClientForm.industry,
-      primary_color: editClientForm.primary_color,
-    });
-    console.log("Update result:", result);
-    setEditClientOpen(false);
-  };
-
-  const handleDeleteClient = async () => {
-    if (!selectedClient) return;
-    if (clients.length <= 1) {
-      alert("Cannot delete the last client. Add another client first.");
-      return;
-    }
-    if (confirm(`Are you sure you want to delete "${selectedClient.name}"? This will also delete all prompts and results.`)) {
-      await deleteClient(selectedClient.id);
-    }
-  };
-
-  const handleAddTag = () => {
-    if (newTag.trim() && selectedClient) {
-      updateBrandTags([...selectedClient.brand_tags, newTag.trim()]);
-      setNewTag("");
-    }
-  };
-
-  const handleAddCompetitor = () => {
-    if (newCompetitor.trim() && selectedClient) {
-      updateCompetitors([...selectedClient.competitors, newCompetitor.trim()]);
-      setNewCompetitor("");
-    }
-  };
-
-  const toggleModel = (modelId: string) => {
-    if (selectedModels.includes(modelId)) {
-      if (selectedModels.length > 1) setSelectedModels(selectedModels.filter(m => m !== modelId));
-    } else {
-      setSelectedModels([...selectedModels, modelId]);
-    }
-  };
-
-  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => importData(ev.target?.result as string);
-      reader.readAsText(file);
-    }
-  };
-
+  const filteredPrompts = useMemo(() => !searchQuery ? filteredPromptsByTab : filteredPromptsByTab.filter(p => p.prompt_text.toLowerCase().includes(searchQuery.toLowerCase())), [filteredPromptsByTab, searchQuery]);
+  const pendingPrompts = prompts.filter(p => p.is_active !== false && !auditResults.find(r => r.prompt_id === p.id)).length;
+  const totalCost = Object.values(modelStats).reduce((sum, m) => sum + m.cost, 0);
   const getPromptResult = (promptId: string) => filteredAuditResults.find(r => r.prompt_id === promptId);
-  const selectedPromptResult = selectedPromptDetail ? getPromptResult(selectedPromptDetail) : null;
 
-  // Get citation with model info
-  const getCitationModels = (citation: typeof allCitations[0]) => {
-    const models = new Set<string>();
-    auditResults.forEach(result => {
-      result.model_results.forEach(mr => {
-        if (mr.citations.some(c => c.url === citation.url)) {
-          models.add(mr.model);
-        }
-      });
-    });
-    return Array.from(models);
+  const domainStats = useMemo(() => {
+    const stats: Record<string, { count: number; type: string; avg: number; prompts: Set<string> }> = {};
+    filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { mr.citations.forEach(c => { if (!stats[c.domain]) stats[c.domain] = { count: 0, type: classifyDomain(c.domain), avg: 0, prompts: new Set() }; stats[c.domain].count++; stats[c.domain].prompts.add(result.prompt_text); }); }); });
+    const total = filteredAuditResults.length || 1;
+    Object.keys(stats).forEach(d => { stats[d].avg = Math.round((stats[d].count / total) * 10) / 10; });
+    return Object.entries(stats).map(([domain, data]) => ({ domain, count: data.count, type: data.type, avg: data.avg, promptCount: data.prompts.size, prompts: Array.from(data.prompts) })).sort((a, b) => b.count - a.count);
+  }, [filteredAuditResults]);
+
+  const recentPrompts = useMemo(() => filteredAuditResults.slice(0, 9).map(r => { const p = prompts.find(x => x.id === r.prompt_id); return { ...r, prompt_text: p?.prompt_text || r.prompt_text }; }), [filteredAuditResults, prompts]);
+
+  const handleAddPrompt = async () => { if (newPrompt.trim()) { await addCustomPrompt(newPrompt.trim()); setNewPrompt(""); } };
+  const handleBulkAdd = () => { if (bulkPrompts.trim()) { addMultiplePrompts(bulkPrompts.split("\n").filter(l => l.trim().length > 3)); setBulkPrompts(""); setBulkPromptsOpen(false); } };
+  const handleGeneratePrompts = async () => { if (!keywordsInput.trim()) return; setGeneratingPrompts(true); try { const g = await generatePromptsFromKeywords(keywordsInput); if (g?.length) { addMultiplePrompts(g); setKeywordsInput(""); } } finally { setGeneratingPrompts(false); } };
+  const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType); if (c) setGeneratedContent(c); } finally { setGeneratingContent(false); } };
+  const handleImport = () => { if (importText.trim()) { importData(importText); setImportText(""); setImportDialogOpen(false); } };
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = (ev) => importData(ev.target?.result as string); r.readAsText(f); } };
+  const handleCreateClient = async () => { if (!newClientForm.name.trim()) return; const comps = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); await addClient({ name: newClientForm.name, brand_name: newClientForm.brand_name || newClientForm.name, target_region: newClientForm.target_region, location_code: locations[newClientForm.target_region] || 2840, industry: newClientForm.industry, competitors: comps.length > 0 ? comps : industries[newClientForm.industry]?.competitors || [], primary_color: newClientForm.primary_color }); setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6" }); setAddClientOpen(false); };
+  const handleOpenEditClient = () => { if (!selectedClient) return; setEditClientForm({ name: selectedClient.name, brand_name: selectedClient.brand_name, target_region: selectedClient.target_region, industry: selectedClient.industry, primary_color: selectedClient.primary_color }); setEditClientOpen(true); };
+  const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: editClientForm.industry, primary_color: editClientForm.primary_color }); setEditClientOpen(false); };
+  const handleDeleteClient = async () => { if (!selectedClient || clients.length <= 1) return; if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
+  const handleAddTag = () => { if (newTag.trim() && selectedClient) { updateBrandTags([...selectedClient.brand_tags, newTag.trim()]); setNewTag(""); } };
+  const handleAddCompetitor = () => { if (newCompetitor.trim() && selectedClient) { updateCompetitors([...selectedClient.competitors, newCompetitor.trim()]); setNewCompetitor(""); } };
+  const toggleModel = (id: string) => { if (selectedModels.includes(id)) { if (selectedModels.length > 1) setSelectedModels(selectedModels.filter(m => m !== id)); } else { setSelectedModels([...selectedModels, id]); } };
+  const toggleModelFilter = (id: string) => { if (modelFilter.includes(id)) { setModelFilter(modelFilter.filter(m => m !== id)); } else { setModelFilter([...modelFilter, id]); } };
+
+  const handleExportFullAudit = () => {
+    if (!selectedClient) return;
+    const fullData = { export_date: new Date().toISOString(), client: { name: selectedClient.name, brand_name: selectedClient.brand_name, industry: selectedClient.industry, region: selectedClient.target_region, brand_tags: selectedClient.brand_tags, competitors: selectedClient.competitors }, summary: { total_prompts: prompts.length, total_audits: auditResults.length, overall_visibility: Math.round(auditResults.reduce((sum, r) => sum + r.summary.share_of_voice, 0) / (auditResults.length || 1)), total_citations: allCitations.length, total_cost: totalCost }, model_stats: AI_MODELS.map(m => ({ model: m.name, visible: modelStats[m.id]?.visible || 0, total: modelStats[m.id]?.total || 0, cost: modelStats[m.id]?.cost || 0 })), competitor_analysis: competitorGap, prompts: prompts.map(p => ({ id: p.id, text: p.prompt_text, category: p.category })), audit_results: auditResults.map(r => ({ prompt_id: r.prompt_id, prompt_text: r.prompt_text, created_at: r.created_at, summary: r.summary, model_results: r.model_results })), citations: allCitations, top_sources: domainStats.slice(0, 50) };
+    const blob = new Blob([JSON.stringify(fullData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${selectedClient.slug || selectedClient.name.toLowerCase().replace(/\s+/g, "-")}-full-audit-${new Date().toISOString().split("T")[0]}.json`; a.click(); URL.revokeObjectURL(url);
   };
+
+  const dateRangeLabel = dateRangeFilter === "7d" ? "Last 7 days" : dateRangeFilter === "30d" ? "Last 30 days" : dateRangeFilter === "90d" ? "Last 90 days" : "All Time";
+  const modelFilterLabel = modelFilter.length === 0 ? "All Models" : modelFilter.length === 1 ? AI_MODELS.find(m => m.id === modelFilter[0])?.name : `${modelFilter.length} Models`;
 
   return (
-    <div className={cn("min-h-screen p-6 transition-colors", isDark ? "" : "light", isDark ? "bg-[#0a0a0f] text-white" : "bg-gray-50 text-gray-900")}>
-      {/* Header Row 1 - Logo, Client, Settings, Run */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <ForzeoLogo className="h-7" isDark={isDark} />
-          <span className={cn("text-xl font-semibold", colors.text)}>GEO Dashboard</span>
-          
+    <div className="min-h-screen bg-gray-50 flex">
+      <aside className="w-56 bg-white border-r border-gray-200 flex flex-col fixed h-full z-20">
+        <div className="p-4 border-b border-gray-100">
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className={cn("gap-2 bg-transparent border-blue-500 hover:bg-blue-500/10 ml-4", colors.text)}>
-                <div className="h-2 w-2 rounded-full bg-blue-500" />
-                {selectedClient?.name || "Select Client"}
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className={cn("w-72", colors.bgCard, colors.border)}>
-              {clients.map(client => (
-                <DropdownMenuItem key={client.id} onClick={() => switchClient(client)} className={cn(colors.text, colors.borderHover, "flex justify-between")}>
-                  <div className="flex items-center gap-2">
-                    <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: client.primary_color }} />
-                    <span>{client.name}</span>
-                  </div>
-                  <span className="text-gray-500 text-sm">{client.target_region}</span>
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator className={colors.border} />
-              <DropdownMenuItem onClick={() => setAddClientOpen(true)} className={cn(colors.text, colors.borderHover)}>
-                <Plus className="h-4 w-4 mr-2" /> Add New Client
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className={cn(colors.textMuted, "hover:text-white h-8 w-8")}>
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className={cn(colors.bgCard, colors.border)}>
-              <DropdownMenuItem onClick={handleOpenEditClient} className={cn(colors.text, colors.borderHover)}>
-                <Settings className="h-4 w-4 mr-2" /> Edit Client
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className={colors.border} />
-              <DropdownMenuItem onClick={handleDeleteClient} className={cn("text-red-400", colors.borderHover)}>
-                <Trash2 className="h-4 w-4 mr-2" /> Delete Client
-              </DropdownMenuItem>
-            </DropdownMenuContent>
+            <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2"><div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span></div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400" /></button></DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-52">{clients.map(c => (<DropdownMenuItem key={c.id} onClick={() => switchClient(c)} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-5 w-5 rounded flex items-center justify-center" style={{ backgroundColor: c.primary_color }}><span className="text-white text-xs font-bold">{c.brand_name.charAt(0)}</span></div><span>{c.brand_name}</span></div>{c.id === selectedClient?.id && <CheckCircle className="h-4 w-4 text-green-500" />}</DropdownMenuItem>))}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setAddClientOpen(true)}><Plus className="h-4 w-4 mr-2" /> Add Brand</DropdownMenuItem></DropdownMenuContent>
           </DropdownMenu>
         </div>
-        
-        <div className="flex items-center gap-3">
-          
-          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} className={cn(colors.textMuted, isDark ? "hover:text-white" : "hover:text-gray-900")}>
-            <Settings className="h-5 w-5" />
-          </Button>
-          <span className={cn("text-sm", colors.textMuted)}>{prompts.length} Prompts</span>
-          <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Run {pendingPrompts > 0 ? pendingPrompts : auditResults.length}
-            {pendingPrompts > 0 && <span className="text-blue-200">(~${estimatedCost.toFixed(3)})</span>}
-          </Button>
-        </div>
-      </div>
+        <nav className="flex-1 p-3 overflow-y-auto">
+          <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-3 mb-2">General</div>
+          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Sparkles }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-1 transition-colors", activeTab === item.id ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-50")}><item.icon className="h-4 w-4" />{item.label}{item.badge && <span className="ml-auto text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
+          <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-3 mb-2 mt-6">Project</div>
+          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Settings className="h-4 w-4" /> Settings</button>
+          <button onClick={handleOpenEditClient} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Building2 className="h-4 w-4" /> Brands</button>
+          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"><Tag className="h-4 w-4" /> Tags</button>
+          <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-3 mb-2 mt-6">Company</div>
+          <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Key className="h-4 w-4" /> API Keys</button>
+          <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"><CreditCard className="h-4 w-4" /> Billing</button>
+        </nav>
+        <div className="p-3 border-t border-gray-100"><div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3 mb-3"><div className="text-xs font-medium text-gray-500 mb-1">API Cost</div><div className="text-lg font-bold text-gray-900">${totalCost.toFixed(4)}</div><div className="text-xs text-gray-400 mt-1">{auditResults.length} audits run</div></div><button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50"><HelpCircle className="h-4 w-4" /> Help</button></div>
+      </aside>
 
-      {/* Header Row 2 - Model Badges */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex flex-wrap gap-2">
-          {AI_MODELS.map(model => {
-            const isSelected = selectedModels.includes(model.id);
-            const LogoComponent = MODEL_LOGOS[model.id]?.Logo;
-            return (
-              <Badge key={model.id} variant="outline" 
-                className={cn(
-                  "cursor-pointer transition-all px-3 py-1.5 rounded-full flex items-center gap-2",
-                  isSelected ? "opacity-100" : "opacity-40"
-                )}
-                style={{ 
-                  borderColor: MODEL_COLORS[model.id], 
-                  backgroundColor: 'transparent',
-                  color: MODEL_COLORS[model.id]
-                }}
-                onClick={() => toggleModel(model.id)}>
-                {LogoComponent && <LogoComponent className="h-4 w-4" />}
-                {model.name}
-              </Badge>
-            );
-          })}
-        </div>
-        <span className={cn("text-sm", colors.textMuted)}>{selectedClient?.industry} • {selectedClient?.target_region}</span>
-      </div>
-
-      {error && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4" /> {error}
-        </div>
-      )}
-
-      {/* Main Tabs */}
-      <Tabs.Root defaultValue="summary" className="space-y-4">
-        <Tabs.List className={cn("inline-flex p-1 rounded-lg gap-1 border", colors.bgCard, colors.border)}>
-          <Tabs.Trigger value="summary" className={cn("px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 data-[state=active]:bg-blue-600 data-[state=active]:text-white", colors.textMuted)}>
-            <BarChart3 className="h-4 w-4 mr-2" /> Summary
-          </Tabs.Trigger>
-          <Tabs.Trigger value="prompts" className={cn("px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 data-[state=active]:bg-blue-600 data-[state=active]:text-white", colors.textMuted)}>
-            <FileText className="h-4 w-4 mr-2" /> Prompts ({prompts.length})
-          </Tabs.Trigger>
-          <Tabs.Trigger value="citations" className={cn("px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 data-[state=active]:bg-blue-600 data-[state=active]:text-white", colors.textMuted)}>
-            <Link2 className="h-4 w-4 mr-2" /> Citations ({allCitations.length})
-          </Tabs.Trigger>
-          <Tabs.Trigger value="content" className={cn("px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 data-[state=active]:bg-blue-600 data-[state=active]:text-white", colors.textMuted)}>
-            <Sparkles className="h-4 w-4 mr-2" /> Content
-          </Tabs.Trigger>
-          <Tabs.Trigger value="sources" className={cn("px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 data-[state=active]:bg-blue-600 data-[state=active]:text-white", colors.textMuted)}>
-            <Globe className="h-4 w-4 mr-2" /> Sources
-          </Tabs.Trigger>
-        </Tabs.List>
-
-        {/* Summary Tab */}
-        <Tabs.Content value="summary" className="space-y-6">
-          <div className="grid grid-cols-5 gap-4">
-            <div className={cn("rounded-xl p-4 border", colors.bgCard, colors.border)}>
-              <div className={cn("flex items-center gap-2 text-sm mb-2", colors.textMuted)}><TrendingUp className="h-4 w-4" /> Share of Voice</div>
-              <div className={cn("text-3xl font-bold", (summary?.overall_sov || 0) >= 50 ? "text-emerald-500" : (summary?.overall_sov || 0) >= 20 ? "text-yellow-500" : "text-red-500")}>{summary?.overall_sov || 0}%</div>
-            </div>
-            <div className={cn("rounded-xl p-4 border", colors.bgCard, colors.border)}>
-              <div className={cn("flex items-center gap-2 text-sm mb-2", colors.textMuted)}><Award className="h-4 w-4" /> Average Rank</div>
-              <div className="text-3xl font-bold text-blue-400">{summary?.average_rank ? `#${summary.average_rank}` : "—"}</div>
-            </div>
-            <div className={cn("rounded-xl p-4 border", colors.bgCard, colors.border)}>
-              <div className={cn("flex items-center gap-2 text-sm mb-2", colors.textMuted)}><Globe className="h-4 w-4" /> Citations</div>
-              <div className="text-3xl font-bold text-purple-400">{summary?.total_citations || 0}</div>
-            </div>
-            <div className={cn("rounded-xl p-4 border", colors.bgCard, colors.border)}>
-              <div className={cn("flex items-center gap-2 text-sm mb-2", colors.textMuted)}><FileText className="h-4 w-4" /> Prompts</div>
-              <div className="text-3xl font-bold text-cyan-400">{auditResults.length}</div>
-            </div>
-            <div className={cn("rounded-xl p-4 border", colors.bgCard, colors.border)}>
-              <div className={cn("flex items-center gap-2 text-sm mb-2", colors.textMuted)}><DollarSign className="h-4 w-4" /> Total Cost</div>
-              <div className="text-3xl font-bold text-orange-400">${totalCost.toFixed(4)}</div>
-            </div>
-          </div>
-
-          {/* Visibility by Model */}
-          <div className={cn("rounded-xl p-6 border", colors.bgCard, colors.border)}>
-            <h3 className={cn("text-lg font-semibold mb-4", colors.text)}>Visibility by Model</h3>
-            <div className="grid grid-cols-3 gap-4">
-              {AI_MODELS.filter(m => selectedModels.includes(m.id)).map(model => {
-                const stats = modelStats[model.id] || { visible: 0, total: 0, cost: 0 };
-                const pct = stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0;
-                const LogoComponent = MODEL_LOGOS[model.id]?.Logo;
-                return (
-                  <div key={model.id} className={cn("rounded-lg p-4 border", colors.bgInput, colors.border)}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {LogoComponent && <LogoComponent className="h-5 w-5" />}
-                        <span className={cn("text-sm", colors.text)}>{model.name}</span>
-                      </div>
-                      <span className={cn("text-xs", colors.textSubtle)}>${stats.cost.toFixed(4)}</span>
-                    </div>
-                    <div className="text-2xl font-bold mb-1" style={{ color: MODEL_COLORS[model.id] }}>{stats.visible}/{stats.total}</div>
-                    <div className={cn("w-full h-1.5 rounded-full overflow-hidden", isDark ? "bg-[#2a2a3e]" : "bg-gray-200")}>
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: MODEL_COLORS[model.id] }} />
-                    </div>
-                    <div className={cn("text-xs mt-1", colors.textSubtle)}>{pct}% visible</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Competitor Gap & Top Sources */}
-          <div className="grid grid-cols-2 gap-6">
-            <div className={cn("rounded-xl p-6 border", colors.bgCard, colors.border)}>
-              <div className="flex items-center gap-2 mb-4"><Users className={cn("h-5 w-5", colors.textMuted)} /><h3 className={cn("text-lg font-semibold", colors.text)}>Competitor Gap</h3></div>
-              <div className="space-y-3">
-                {competitorGap.length > 0 ? competitorGap.map((comp, idx) => (
-                  <div key={idx} className="flex items-center gap-3">
-                    <span className={cn("text-sm w-32 truncate", colors.text)}>{comp.name}</span>
-                    <div className={cn("flex-1 h-6 rounded-full overflow-hidden", colors.bgInput)}>
-                      <div className="h-full rounded-full flex items-center justify-end pr-2" style={{ width: `${Math.min(comp.percentage, 100)}%`, backgroundColor: idx === 0 ? '#3b82f6' : '#4b5563' }}>
-                        <span className="text-xs text-white font-medium">{comp.percentage}%</span>
-                      </div>
-                    </div>
-                    <Badge variant="outline" className={cn("text-xs", colors.bgInput, colors.border, colors.text)}>{comp.mentions}</Badge>
-                  </div>
-                )) : <div className={cn("text-sm", colors.textSubtle)}>Run audits to see competitor data</div>}
-              </div>
-            </div>
-            <div className={cn("rounded-xl p-6 border", colors.bgCard, colors.border)}>
-              <div className="flex items-center gap-2 mb-4"><Globe className={cn("h-5 w-5", colors.textMuted)} /><h3 className={cn("text-lg font-semibold", colors.text)}>Top Sources</h3></div>
-              <div className="space-y-2">
-                {topSources.length > 0 ? topSources.slice(0, 5).map((source, idx) => (
-                  <div key={idx} className="flex items-center justify-between py-1">
-                    <div className="flex items-center gap-2">
-                      <span className={cn("text-sm w-4", colors.textSubtle)}>{idx + 1}.</span>
-                      <span className={cn("text-sm truncate max-w-[200px]", colors.text)}>{source.domain}</span>
-                    </div>
-                    <span className={cn("text-sm", colors.textMuted)}>{source.count}</span>
-                  </div>
-                )) : <div className={cn("text-sm", colors.textSubtle)}>Run audits to see source data</div>}
-              </div>
-            </div>
-          </div>
-
-          {/* Insights */}
-          <div className={cn("rounded-xl p-6 border", colors.bgCard, colors.border)}>
-            <div className="flex items-center gap-2 mb-4"><Lightbulb className="h-5 w-5 text-yellow-500" /><h3 className={cn("text-lg font-semibold", colors.text)}>Insights</h3></div>
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <div className={cn("text-sm mb-2", colors.textMuted)}>Status</div>
-                <div className={cn("flex items-center gap-2", insights.status === "high" ? "text-emerald-500" : insights.status === "medium" ? "text-yellow-500" : "text-red-500")}>
-                  {insights.status === "high" ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                  <span>{insights.statusText}</span>
-                </div>
-              </div>
-              <div>
-                <div className={cn("text-sm mb-2", colors.textMuted)}>Recommendations</div>
-                <ul className={cn("space-y-1 text-sm", colors.text)}>
-                  {insights.recommendations.map((rec, idx) => <li key={idx} className="flex items-start gap-2"><span className={colors.textSubtle}>•</span><span>{rec}</span></li>)}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </Tabs.Content>
-
-        {/* Prompts Tab */}
-        <Tabs.Content value="prompts" className="space-y-4">
-          <div className="flex gap-2">
-            <Input placeholder="Add a prompt..." value={newPrompt} onChange={e => setNewPrompt(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleAddPrompt()}
-              className="bg-[#1a1a2e] border-[#2a2a3e] text-white placeholder:text-gray-500" />
-            <Button onClick={handleAddPrompt} className="bg-blue-600 hover:bg-blue-700"><Plus className="h-4 w-4 mr-1" /> Add</Button>
-          </div>
-
-          {/* AI Prompt Generator */}
-          <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3"><Sparkles className="h-4 w-4 text-purple-400" /><span className="font-medium">AI Prompt Generator</span></div>
-            <div className="flex gap-2">
-              <Input placeholder="Enter keywords, tags, or topics (e.g., dating apps, safety features, India)" 
-                value={keywordsInput} onChange={e => setKeywordsInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleGeneratePrompts()}
-                className="bg-[#0a0a0f] border-[#2a2a3e] text-white placeholder:text-gray-500" />
-              <Button onClick={handleGeneratePrompts} disabled={generatingPrompts || !keywordsInput.trim()} className="bg-emerald-600 hover:bg-emerald-700 min-w-[100px]">
-                {generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate"}
-              </Button>
-            </div>
-            <p className="text-xs text-gray-500 mt-2">Enter keywords and AI will generate relevant search prompts for visibility analysis</p>
-          </div>
-
-          {/* Bulk Add */}
-          <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl overflow-hidden">
-            <button onClick={() => setBulkPromptsOpen(!bulkPromptsOpen)} className="w-full flex items-center justify-between p-4 text-left hover:bg-[#2a2a3e]">
-              <span className="text-sm text-gray-300">▸ + Add multiple prompts at once</span>
-              <ChevronDown className={cn("h-4 w-4 text-gray-400 transition-transform", bulkPromptsOpen && "rotate-180")} />
-            </button>
-            {bulkPromptsOpen && (
-              <div className="p-4 pt-0 border-t border-[#2a2a3e]">
-                <Textarea placeholder="Paste prompts here (one per line)..." value={bulkPrompts} onChange={e => setBulkPrompts(e.target.value)} rows={4}
-                  className="bg-[#0a0a0f] border-[#2a2a3e] text-white placeholder:text-gray-500 mb-2" />
-                <Button onClick={handleBulkAdd} disabled={!bulkPrompts.trim()} className="bg-blue-600 hover:bg-blue-700">Add All</Button>
-              </div>
-            )}
-          </div>
-
-          {/* Date Filter & Prompts Table */}
-          <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl overflow-hidden">
-            {/* Date Filter Header */}
-            <div className="flex items-center justify-between p-3 border-b border-[#2a2a3e] bg-[#0a0a0f]">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-gray-400" />
-                <span className="text-sm text-gray-400">Filter by Date:</span>
-                <Select value={selectedDate} onValueChange={setSelectedDate}>
-                  <SelectTrigger className="w-[180px] h-8 bg-[#1a1a2e] border-[#2a2a3e] text-white text-sm">
-                    <SelectValue placeholder="All dates" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#1a1a2e] border-[#2a2a3e]">
-                    <SelectItem value="all" className="text-white hover:bg-[#2a2a3e]">All dates</SelectItem>
-                    {uniqueDates.map(date => (
-                      <SelectItem key={date} value={date} className="text-white hover:bg-[#2a2a3e]">
-                        {new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <span className="text-xs text-gray-500">
-                {filteredAuditResults.length} results {selectedDate !== "all" && `on ${new Date(selectedDate).toLocaleDateString()}`}
-              </span>
-            </div>
-            <table className="w-full">
-              <thead className="bg-[#0a0a0f]">
-                <tr>
-                  <th className="text-left p-3 text-sm font-medium text-gray-400">Prompt</th>
-                  <th className="text-center p-3 text-sm font-medium text-gray-400 w-20">Category</th>
-                  {AI_MODELS.filter(m => selectedModels.includes(m.id)).map(model => (
-                    <th key={model.id} className="text-center p-2 text-sm font-medium w-16">
-                      <div className="flex flex-col items-center gap-1">
-                        <div className="h-2 w-2 rounded-full" style={{ backgroundColor: MODEL_COLORS[model.id] }} />
-                        <span className="text-xs text-gray-500">{model.name.split(' ')[0]}</span>
-                      </div>
-                    </th>
-                  ))}
-                  <th className="text-center p-3 text-sm font-medium text-gray-400 w-20">Cost</th>
-                  <th className="text-center p-3 text-sm font-medium text-gray-400 w-32">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {prompts.map(prompt => {
-                  const result = getPromptResult(prompt.id);
-                  const isRunning = loadingPromptId === prompt.id;
-                  return (
-                    <tr key={prompt.id} className="border-t border-[#2a2a3e] hover:bg-[#2a2a3e]/50">
-                      <td className="p-3 text-sm text-gray-200 max-w-[300px] truncate">{prompt.prompt_text}</td>
-                      <td className="p-3 text-center">
-                        <Badge variant="outline" className="bg-[#2a2a3e] border-[#3a3a4e] text-gray-400 text-xs">{prompt.category || "Custom"}</Badge>
-                      </td>
-                      {AI_MODELS.filter(m => selectedModels.includes(m.id)).map(model => {
-                        const mr = result?.model_results.find(r => r.model === model.id);
-                        if (!result) return <td key={model.id} className="p-2 text-center text-gray-600">-</td>;
-                        return (
-                          <td key={model.id} className="p-2 text-center">
-                            {mr?.brand_mentioned ? (
-                              <div className="flex flex-col items-center">
-                                <CheckCircle className="h-4 w-4 text-emerald-500" />
-                                {mr.brand_mention_count > 1 && <span className="text-xs text-emerald-400">x{mr.brand_mention_count}</span>}
-                              </div>
-                            ) : <XCircle className="h-4 w-4 text-red-500 mx-auto" />}
-                          </td>
-                        );
-                      })}
-                      <td className="p-3 text-center text-sm text-gray-400">{result ? `$${result.summary.total_cost.toFixed(4)}` : '-'}</td>
-                      <td className="p-3 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          {result && (
-                            <Button variant="ghost" size="sm" onClick={() => setSelectedPromptDetail(prompt.id)} className="text-gray-400 hover:text-white h-7 px-2">View</Button>
-                          )}
-                          <Button variant="ghost" size="sm" onClick={() => handleRunSinglePrompt(prompt.id)} disabled={isRunning || loading} className={cn("h-7 px-2", result ? "text-orange-400 hover:text-orange-300" : "text-blue-400 hover:text-blue-300")}>
-                            {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
-                            {isRunning ? "" : result ? "Re-run" : "Run"}
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => deletePrompt(prompt.id)} className="text-gray-400 hover:text-red-400 h-7 w-7">
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {prompts.length === 0 && <div className="p-8 text-center text-gray-500">No prompts yet. Add some above!</div>}
-          </div>
-        </Tabs.Content>
-
-        {/* Citations Tab - All Citations Summary */}
-        <Tabs.Content value="citations" className="space-y-4">
+      <main className="flex-1 ml-56 min-h-screen">
+        <header className="bg-white border-b border-gray-200 px-6 py-3 sticky top-0 z-10">
           <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3"><h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-gray-400" />{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "citations" ? "Citations" : activeTab === "content" ? "Content Generator" : "Sources"}</h1>{(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs">Filtered</Badge>}</div>
             <div className="flex items-center gap-2">
-              <Link2 className="h-5 w-5 text-gray-400" />
-              <h3 className="text-lg font-semibold">All Citations Summary</h3>
-            </div>
-            <Badge variant="outline" className="bg-[#1a1a2e] border-[#2a2a3e] text-gray-300">{allCitations.length} unique citations</Badge>
-          </div>
-
-          {/* Citation Stats */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl p-4">
-              <div className="text-sm text-gray-400 mb-3">Top Domains</div>
-              <div className="space-y-2">
-                {topSources.slice(0, 5).map((s, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-300 truncate max-w-[180px]">{s.domain}</span>
-                    <span className="text-gray-500">{s.count}</span>
-                  </div>
-                ))}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white shadow-sm text-gray-900"><div className="h-4 w-4 rounded flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white text-[10px] font-bold">{selectedClient?.brand_name?.charAt(0)}</span></div>{selectedClient?.brand_name}</button>
+                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors", dateRangeFilter !== "all" ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Calendar className="h-3.5 w-3.5" /> {dateRangeLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setDateRangeFilter("7d")} className={cn(dateRangeFilter === "7d" && "bg-blue-50")}>Last 7 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("30d")} className={cn(dateRangeFilter === "30d" && "bg-blue-50")}>Last 30 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("90d")} className={cn(dateRangeFilter === "90d" && "bg-blue-50")}>Last 90 days</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setDateRangeFilter("all")} className={cn(dateRangeFilter === "all" && "bg-blue-50")}>All Time</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors", modelFilter.length > 0 ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Filter className="h-3.5 w-3.5" /> {modelFilterLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; const isSelected = modelFilter.length === 0 || modelFilter.includes(model.id); return (<DropdownMenuItem key={model.id} onClick={() => toggleModelFilter(model.id)} className={cn(isSelected && "bg-blue-50")}><div className="flex items-center gap-2 w-full">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="flex-1">{model.name}</span>{isSelected && <CheckCircle className="h-3 w-3 text-blue-600" />}</div></DropdownMenuItem>); })}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setModelFilter([])}>Clear Filters</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               </div>
-            </div>
-            <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl p-4">
-              <div className="text-sm text-gray-400 mb-3">Most Cited</div>
-              <div className="space-y-2">
-                {allCitations.slice(0, 5).map((c, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-300 truncate max-w-[180px]">{c.title || c.domain}</span>
-                    <span className="text-cyan-400">{c.count}×</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl p-4">
-              <div className="text-sm text-gray-400 mb-3">Citation Coverage</div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-300">Total Citations</span>
-                  <span className="text-white font-medium">{summary?.total_citations || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-300">Unique URLs</span>
-                  <span className="text-white font-medium">{allCitations.length}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-300">Unique Domains</span>
-                  <span className="text-white font-medium">{uniqueDomains}</span>
-                </div>
-              </div>
+              {activeTab === "prompts" && <Button onClick={() => setBulkPromptsOpen(true)} variant="outline" size="sm"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>}
+              <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileJson className="h-4 w-4 mr-2" /> Export Full Audit (JSON)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+              <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>
             </div>
           </div>
-
-          {/* Citations Table */}
-          <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-[#0a0a0f]">
-                <tr>
-                  <th className="text-left p-3 text-sm font-medium text-gray-400">Citation</th>
-                  <th className="text-center p-3 text-sm font-medium text-gray-400 w-20">Count</th>
-                  <th className="text-center p-3 text-sm font-medium text-gray-400 w-40">Models</th>
-                  <th className="text-left p-3 text-sm font-medium text-gray-400 w-48">Prompts</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allCitations.map((citation, idx) => {
-                  const models = getCitationModels(citation);
-                  return (
-                    <tr key={idx} className="border-t border-[#2a2a3e] hover:bg-[#2a2a3e]/50">
-                      <td className="p-3">
-                        <div className="space-y-1">
-                          <a href={citation.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline text-sm flex items-center gap-1">
-                            {citation.title || citation.url.slice(0, 60)}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                          <div className="text-xs text-gray-500">{citation.url.slice(0, 80)}{citation.url.length > 80 ? '...' : ''}</div>
-                        </div>
-                      </td>
-                      <td className="p-3 text-center">
-                        <span className="text-white font-medium">{citation.count}</span>
-                      </td>
-                      <td className="p-3">
-                        <div className="flex flex-wrap gap-1 justify-center">
-                          {models.map(m => (
-                            <Badge key={m} variant="outline" className="text-xs px-1.5 py-0" style={{ borderColor: MODEL_COLORS[m], color: MODEL_COLORS[m] }}>
-                              {AI_MODELS.find(am => am.id === m)?.name.split(' ')[0] || m}
-                            </Badge>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="p-3 text-sm text-gray-400">
-                        <div className="space-y-1">
-                          {citation.prompts.slice(0, 2).map((p, i) => (
-                            <div key={i} className="truncate max-w-[180px]">{p.slice(0, 30)}...</div>
-                          ))}
-                          {citation.prompts.length > 2 && <span className="text-gray-500">+{citation.prompts.length - 2}</span>}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {allCitations.length === 0 && <div className="p-8 text-center text-gray-500">No citations yet. Run an audit to see citation sources.</div>}
-          </div>
-        </Tabs.Content>
-
-        {/* Content Tab */}
-        <Tabs.Content value="content">
-          <div className="grid grid-cols-2 gap-6">
-            <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl p-6 space-y-4">
-              <div>
-                <Label className="mb-2 block text-gray-300">Topic</Label>
-                <Input placeholder="Best dating apps in India 2025" value={contentTopic} onChange={e => setContentTopic(e.target.value)}
-                  className="bg-[#0a0a0f] border-[#2a2a3e] text-white placeholder:text-gray-500" />
-              </div>
-              <div>
-                <Label className="mb-2 block text-gray-300">Content Type</Label>
-                <Select value={contentType} onValueChange={setContentType}>
-                  <SelectTrigger className="bg-[#0a0a0f] border-[#2a2a3e] text-white"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-[#1a1a2e] border-[#2a2a3e]">
-                    <SelectItem value="article" className="text-white hover:bg-[#2a2a3e]">Article</SelectItem>
-                    <SelectItem value="listicle" className="text-white hover:bg-[#2a2a3e]">Listicle</SelectItem>
-                    <SelectItem value="comparison" className="text-white hover:bg-[#2a2a3e]">Comparison</SelectItem>
-                    <SelectItem value="guide" className="text-white hover:bg-[#2a2a3e]">Guide</SelectItem>
-                    <SelectItem value="faq" className="text-white hover:bg-[#2a2a3e]">FAQ</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="bg-purple-600 hover:bg-purple-700 w-full">
-                {generatingContent ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
-                {generatingContent ? "Generating..." : "Generate Content"}
-              </Button>
-            </div>
-            <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl p-6">
-              <div className="flex items-center justify-between mb-2">
-                <Label className="text-gray-300">Generated Content</Label>
-                {generatedContent && (
-                  <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)} className="text-gray-400 hover:text-white">
-                    <Copy className="h-4 w-4 mr-1" /> Copy
-                  </Button>
-                )}
-              </div>
-              {generatedContent ? (
-                <div className="bg-[#0a0a0f] rounded-lg p-4 max-h-[500px] overflow-auto">
-                  <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap text-gray-300">{generatedContent}</div>
-                </div>
-              ) : (
-                <div className="text-center text-gray-500 py-16">Generated content will appear here</div>
-              )}
-            </div>
-          </div>
-        </Tabs.Content>
-
-        {/* Sources Tab */}
-        <Tabs.Content value="sources">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Button variant={sourcesView === "domains" ? "default" : "outline"} onClick={() => setSourcesView("domains")}
-                className={sourcesView === "domains" ? "bg-blue-600" : "bg-[#1a1a2e] border-[#2a2a3e] text-white"}>Domains</Button>
-              <Button variant={sourcesView === "urls" ? "default" : "outline"} onClick={() => setSourcesView("urls")}
-                className={sourcesView === "urls" ? "bg-blue-600" : "bg-[#1a1a2e] border-[#2a2a3e] text-white"}>URLs</Button>
-              <div className="flex-1" />
-              <Badge variant="outline" className="bg-[#1a1a2e] border-[#2a2a3e] text-gray-300">{sourcesView === "domains" ? uniqueDomains : allCitations.length} sources</Badge>
-            </div>
-
-            <div className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-[#0a0a0f]">
-                  <tr>
-                    <th className="text-left p-3 text-sm font-medium text-gray-400">{sourcesView === "domains" ? "Domain" : "URL"}</th>
-                    <th className="text-center p-3 text-sm font-medium text-gray-400">Citations</th>
-                    <th className="text-left p-3 text-sm font-medium text-gray-400">{sourcesView === "domains" ? "Prompts" : "Domain"}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sourcesView === "domains" ? (
-                    topSources.map((source, idx) => (
-                      <tr key={idx} className="border-t border-[#2a2a3e] hover:bg-[#2a2a3e]/50">
-                        <td className="p-3">
-                          <a href={`https://${source.domain}`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline flex items-center gap-1">
-                            {source.domain}<ExternalLink className="h-3 w-3" />
-                          </a>
-                        </td>
-                        <td className="p-3 text-center text-gray-300">{source.count}</td>
-                        <td className="p-3 text-sm text-gray-400 truncate max-w-[300px]">
-                          {source.prompts?.slice(0, 2).join(", ")}{(source.prompts?.length || 0) > 2 && <span className="text-gray-500"> +{(source.prompts?.length || 0) - 2}</span>}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    allCitations.map((citation, idx) => (
-                      <tr key={idx} className="border-t border-[#2a2a3e] hover:bg-[#2a2a3e]/50">
-                        <td className="p-3">
-                          <a href={citation.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline flex items-center gap-1 text-sm">
-                            {citation.url.slice(0, 60)}{citation.url.length > 60 ? '...' : ''}<ExternalLink className="h-3 w-3" />
-                          </a>
-                        </td>
-                        <td className="p-3 text-center text-gray-300">{citation.count}</td>
-                        <td className="p-3 text-sm text-gray-400">{citation.domain}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-              {(sourcesView === "domains" ? topSources : allCitations).length === 0 && (
-                <div className="p-8 text-center text-gray-500">No sources yet. Run an audit to see source data.</div>
-              )}
-            </div>
-          </div>
-        </Tabs.Content>
-      </Tabs.Root>
-
-      {/* Prompt Detail Dialog - Prompt Analysis */}
-      <Dialog open={!!selectedPromptDetail} onOpenChange={() => setSelectedPromptDetail(null)}>
-        <DialogContent className="bg-[#0a0a0f] border-[#2a2a3e] text-white max-w-4xl max-h-[90vh] overflow-hidden p-0">
-          <DialogHeader className="p-6 pb-4 border-b border-[#2a2a3e]">
-            <DialogTitle className="text-xl font-semibold">Prompt Analysis</DialogTitle>
-            <DialogDescription className="text-white text-lg mt-2">
-              {prompts.find(p => p.id === selectedPromptDetail)?.prompt_text}
-            </DialogDescription>
-            {selectedPromptResult && (
-              <div className="flex items-center gap-4 mt-3 text-sm">
-                <span className={cn("font-medium", (selectedPromptResult.summary.share_of_voice || 0) > 0 ? "text-emerald-400" : "text-red-400")}>
-                  SOV: {selectedPromptResult.summary.share_of_voice}%
-                </span>
-                <span className="text-purple-400">Citations: {selectedPromptResult.summary.total_citations}</span>
-                <span className="text-orange-400">Cost: ${selectedPromptResult.summary.total_cost.toFixed(4)}</span>
-                <span className="text-gray-400 text-xs">
-                  {selectedPromptResult.created_at && new Date(selectedPromptResult.created_at).toLocaleString()}
-                </span>
-              </div>
-            )}
-          </DialogHeader>
-          
-          {selectedPromptResult && (
-            <div className="overflow-auto max-h-[calc(90vh-140px)] p-6 space-y-4">
-              {selectedPromptResult.model_results.map(mr => (
-                <div key={mr.model} className="bg-[#1a1a2e] border border-[#2a2a3e] rounded-xl overflow-hidden">
-                  {/* Model Header */}
-                  <div className="flex items-center justify-between p-4 border-b border-[#2a2a3e]">
-                    <div className="flex items-center gap-3">
-                      <div className="h-3 w-3 rounded-full" style={{ backgroundColor: MODEL_COLORS[mr.model] }} />
-                      <span className="font-medium text-white">{mr.model_name}</span>
-                      <span className="text-xs text-gray-500">({mr.provider})</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {mr.brand_mentioned ? (
-                        <Badge className="bg-emerald-500 text-white border-0 px-3">
-                          Visible {mr.brand_mention_count > 1 ? `(${mr.brand_mention_count}×)` : ""}
-                        </Badge>
-                      ) : (
-                        <Badge className="bg-red-500 text-white border-0 px-3">
-                          Not Visible
-                        </Badge>
-                      )}
-                      <span className="text-xs text-gray-500">${mr.api_cost?.toFixed(4) || '0.00'}</span>
-                    </div>
-                  </div>
-                  
-                  {/* Response Section - Always show */}
-                  <div className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm text-gray-400">Response ({mr.response_length || 0} chars)</div>
-                      {mr.brand_rank && (
-                        <Badge variant="outline" className="text-xs border-blue-500 text-blue-400">
-                          Rank #{mr.brand_rank}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="bg-[#0a0a0f] rounded-lg p-4 max-h-80 overflow-auto">
-                      {mr.raw_response && mr.raw_response.length > 0 ? (
-                        <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
-                          {mr.raw_response}
-                        </pre>
-                      ) : mr.error ? (
-                        <div className="text-yellow-400 text-sm">
-                          <div className="font-medium mb-2">ℹ️ {mr.error}</div>
-                          {mr.error.includes("No cached") && (
-                            <p className="text-gray-500 text-xs mt-2">
-                              Tip: The LLM Mentions API searches cached AI responses. For real-time data, use Google SERP or AI Overview models.
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-gray-500 italic text-sm">
-                          No response data returned from this model.
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Winner Brand */}
-                    {mr.winner_brand && (
-                      <div className="mt-3 flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Top mentioned:</span>
-                        <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-400">
-                          {mr.winner_brand}
-                        </Badge>
-                      </div>
-                    )}
-                    
-                    {/* Competitors Found */}
-                    {mr.competitors_found && mr.competitors_found.length > 0 && (
-                      <div className="mt-3">
-                        <div className="text-xs text-gray-500 mb-2">Competitors mentioned:</div>
-                        <div className="flex flex-wrap gap-2">
-                          {mr.competitors_found.map((comp, i) => (
-                            <Badge key={i} variant="outline" className="text-xs border-gray-600 text-gray-400">
-                              {comp.name} ({comp.count}×){comp.rank && ` #${comp.rank}`}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Citations */}
-                    {mr.citations && mr.citations.length > 0 && (
-                      <div className="mt-4">
-                        <div className="text-sm text-gray-400 mb-2">Citations ({mr.citations.length})</div>
-                        <div className="flex flex-wrap gap-2">
-                          {mr.citations.slice(0, 10).map((c, i) => (
-                            <a key={i} href={c.url} target="_blank" rel="noopener noreferrer" 
-                              className="text-xs text-blue-400 hover:text-blue-300 hover:underline bg-[#0a0a0f] px-3 py-1.5 rounded-full flex items-center gap-1">
-                              {c.domain}
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          ))}
-                          {mr.citations.length > 10 && (
-                            <span className="text-xs text-gray-500 px-3 py-1.5">+{mr.citations.length - 10} more</span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Client Dialog */}
-      <Dialog open={addClientOpen} onOpenChange={setAddClientOpen}>
-        <DialogContent className={cn("max-w-lg", colors.bgCard, colors.border, colors.text)}>
-          <DialogHeader>
-            <DialogTitle className="text-xl">Add New Client</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-5 mt-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className={cn("mb-2 block", colors.textMuted)}>Client Name</Label>
-                <Input placeholder="Acme Corp" value={newClientForm.name} onChange={e => setNewClientForm({ ...newClientForm, name: e.target.value })}
-                  className={cn("border-blue-500 focus:border-blue-400", colors.bgInput, colors.text)} />
-              </div>
-              <div>
-                <Label className={cn("mb-2 block", colors.textMuted)}>Brand Name</Label>
-                <Input placeholder="Acme" value={newClientForm.brand_name} onChange={e => setNewClientForm({ ...newClientForm, brand_name: e.target.value })}
-                  className={cn(colors.bgInput, colors.border, colors.text)} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className={cn("mb-2 block", colors.textMuted)}>Industry</Label>
-                <Select value={newClientForm.industry} onValueChange={v => setNewClientForm({ ...newClientForm, industry: v })}>
-                  <SelectTrigger className={cn(colors.bgInput, colors.border, colors.text)}><SelectValue /></SelectTrigger>
-                  <SelectContent className={cn(colors.bgCard, colors.border)}>
-                    {Object.keys(industries).map(ind => (
-                      <SelectItem key={ind} value={ind} className={cn(colors.text, colors.borderHover)}>{ind}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className={cn("mb-2 block", colors.textMuted)}>Target Region</Label>
-                <Select value={newClientForm.target_region} onValueChange={v => setNewClientForm({ ...newClientForm, target_region: v })}>
-                  <SelectTrigger className={cn(colors.bgInput, colors.border, colors.text)}><SelectValue /></SelectTrigger>
-                  <SelectContent className={cn(colors.bgCard, colors.border)}>
-                    {Object.keys(locations).map(loc => (
-                      <SelectItem key={loc} value={loc} className={cn(colors.text, colors.borderHover)}>{loc}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div>
-              <Label className={cn("mb-2 block", colors.textMuted)}>Primary Color</Label>
-              <div className="flex gap-3">
-                {COLOR_OPTIONS.map(color => (
-                  <button key={color} onClick={() => setNewClientForm({ ...newClientForm, primary_color: color })}
-                    className={cn("h-10 w-10 rounded-full transition-all", newClientForm.primary_color === color && "ring-2 ring-blue-500 ring-offset-2", isDark ? "ring-offset-[#1a1a2e]" : "ring-offset-white")}
-                    style={{ backgroundColor: color }} />
-                ))}
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="mt-6">
-            <Button onClick={handleCreateClient} disabled={!newClientForm.name.trim()} className="bg-blue-600 hover:bg-blue-700 px-6">Create</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Client Dialog */}
-      <Dialog open={editClientOpen} onOpenChange={setEditClientOpen}>
-        <DialogContent className={cn("max-w-lg", colors.bgCard, colors.border, colors.text)}>
-          <DialogHeader>
-            <DialogTitle className="text-xl">Edit Client</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-5 mt-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className={cn("mb-2 block", colors.textMuted)}>Client Name</Label>
-                <Input placeholder="Acme Corp" value={editClientForm.name} onChange={e => setEditClientForm({ ...editClientForm, name: e.target.value })}
-                  className={cn("border-blue-500 focus:border-blue-400", colors.bgInput, colors.text)} />
-              </div>
-              <div>
-                <Label className={cn("mb-2 block", colors.textMuted)}>Brand Name</Label>
-                <Input placeholder="Acme" value={editClientForm.brand_name} onChange={e => setEditClientForm({ ...editClientForm, brand_name: e.target.value })}
-                  className={cn(colors.bgInput, colors.border, colors.text)} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className={cn("mb-2 block", colors.textMuted)}>Industry</Label>
-                <Select value={editClientForm.industry} onValueChange={v => setEditClientForm({ ...editClientForm, industry: v })}>
-                  <SelectTrigger className={cn(colors.bgInput, colors.border, colors.text)}><SelectValue /></SelectTrigger>
-                  <SelectContent className={cn(colors.bgCard, colors.border)}>
-                    {Object.keys(industries).map(ind => (
-                      <SelectItem key={ind} value={ind} className={cn(colors.text, colors.borderHover)}>{ind}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className={cn("mb-2 block", colors.textMuted)}>Target Region</Label>
-                <Select value={editClientForm.target_region} onValueChange={v => setEditClientForm({ ...editClientForm, target_region: v })}>
-                  <SelectTrigger className={cn(colors.bgInput, colors.border, colors.text)}><SelectValue /></SelectTrigger>
-                  <SelectContent className={cn(colors.bgCard, colors.border)}>
-                    {Object.keys(locations).map(loc => (
-                      <SelectItem key={loc} value={loc} className={cn(colors.text, colors.borderHover)}>{loc}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div>
-              <Label className={cn("mb-2 block", colors.textMuted)}>Primary Color</Label>
-              <div className="flex gap-3">
-                {COLOR_OPTIONS.map(color => (
-                  <button key={color} onClick={() => setEditClientForm({ ...editClientForm, primary_color: color })}
-                    className={cn("h-10 w-10 rounded-full transition-all", editClientForm.primary_color === color && "ring-2 ring-blue-500 ring-offset-2", isDark ? "ring-offset-[#1a1a2e]" : "ring-offset-white")}
-                    style={{ backgroundColor: color }} />
-                ))}
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="mt-6">
-            <Button variant="outline" onClick={() => setEditClientOpen(false)} className={cn("bg-transparent mr-2", colors.border, colors.text)}>Cancel</Button>
-            <Button onClick={handleUpdateClient} disabled={!editClientForm.name.trim()} className="bg-blue-600 hover:bg-blue-700 px-6">Save Changes</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Import Prompts Dialog */}
-      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-        <DialogContent className={cn(colors.bgCard, colors.border, colors.text)}>
-          <DialogHeader>
-            <DialogTitle>Import Prompts</DialogTitle>
-            <DialogDescription className={colors.textMuted}>Paste prompts (one per line) or import from file</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <Textarea placeholder="Best dating apps in India 2025&#10;Dating apps with verification&#10;Safe dating apps for women" 
-              value={importText} onChange={e => setImportText(e.target.value)} rows={8}
-              className={cn("placeholder:text-gray-500", colors.bgInput, colors.border, colors.text)} />
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => fileInputRef.current?.click()} className={cn("bg-transparent", colors.border, colors.text)}>
-                <Upload className="h-4 w-4 mr-2" /> Import File
-              </Button>
-              <span className={cn("text-xs", colors.textSubtle)}>Supports .txt, .csv, .json</span>
-            </div>
-          </div>
-          <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setImportDialogOpen(false)} className={cn("bg-transparent", colors.border, colors.text)}>Cancel</Button>
-            <Button onClick={handleImport} disabled={!importText.trim()} className="bg-blue-600 hover:bg-blue-700">Import Prompts</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Settings Sheet */}
-      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <SheetContent className={cn("w-[420px] overflow-auto border-l", colors.bg, colors.border, colors.text)}>
-          <SheetHeader>
-            <SheetTitle className={cn("text-xl", colors.text)}>Settings & Configuration</SheetTitle>
-          </SheetHeader>
-          <div className="space-y-8 mt-8">
-            
-
-            {/* Brand Tags */}
-            <div>
-              <Label className={cn("flex items-center gap-2 text-base mb-1", colors.text)}><Tag className="h-5 w-5" /> Brand Tags</Label>
-              <p className={cn("text-sm mb-3", colors.textMuted)}>Alternative names to detect in AI responses</p>
-              <div className="flex flex-wrap gap-2 mb-3">
-                {selectedClient?.brand_tags.map((tag, idx) => (
-                  <Badge key={idx} variant="outline" className={cn("px-3 py-1.5 rounded-full", colors.bgCard, colors.border, colors.text)}>
-                    {tag}
-                    <button onClick={() => updateBrandTags(selectedClient.brand_tags.filter((_, i) => i !== idx))} className={cn("ml-2 hover:text-white", colors.textMuted)}>
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <Input placeholder="Add tag..." value={newTag} onChange={e => setNewTag(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddTag()}
-                  className={cn("border-blue-500 placeholder:text-gray-500 focus:border-blue-400", colors.bgInput, colors.text)} />
-                <Button onClick={handleAddTag} className="bg-blue-600 hover:bg-blue-700 px-5">Add</Button>
-              </div>
-            </div>
-
-            {/* Competitors */}
-            <div>
-              <Label className={cn("flex items-center gap-2 text-base mb-1", colors.text)}><Users className="h-5 w-5" /> Competitors</Label>
-              <p className={cn("text-sm mb-3", colors.textMuted)}>Track competitor mentions in AI responses</p>
-              <div className="flex flex-wrap gap-2 mb-3">
-                {selectedClient?.competitors.map((comp, idx) => (
-                  <Badge key={idx} variant="outline" className={cn("px-3 py-1.5 rounded-full", colors.bgCard, colors.border, colors.text)}>
-                    {comp}
-                    <button onClick={() => updateCompetitors(selectedClient.competitors.filter((_, i) => i !== idx))} className={cn("ml-2 hover:text-white", colors.textMuted)}>
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <Input placeholder="Add competitor..." value={newCompetitor} onChange={e => setNewCompetitor(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddCompetitor()}
-                  className={cn("placeholder:text-gray-500", colors.bgInput, colors.border, colors.text)} />
-                <Button onClick={handleAddCompetitor} className="bg-blue-600 hover:bg-blue-700 px-5">Add</Button>
-              </div>
-            </div>
-
-            {/* AI Models */}
-            <div>
-              <Label className={cn("flex items-center gap-2 text-base mb-3", colors.text)}><Sparkles className="h-5 w-5" /> AI Models</Label>
-              <div className="space-y-2">
-                {AI_MODELS.map(model => {
-                  const LogoComponent = MODEL_LOGOS[model.id]?.Logo;
-                  return (
-                    <div key={model.id} className={cn("flex items-center justify-between p-3 rounded-lg border", colors.bgCard, colors.border)}>
-                      <div className="flex items-center gap-3">
-                        <Checkbox checked={selectedModels.includes(model.id)} onCheckedChange={() => toggleModel(model.id)} className="border-gray-400 data-[state=checked]:bg-blue-600" />
-                        {LogoComponent && <LogoComponent className="h-5 w-5" />}
-                        <span className={cn("text-sm", colors.text)}>{model.name}</span>
-                      </div>
-                      <span className={cn("text-xs", colors.textSubtle)}>${model.costPerQuery}/query</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Export/Import */}
-            <div>
-              <Label className={cn("flex items-center gap-2 text-base mb-3", colors.text)}><Download className="h-5 w-5" /> Export & Import</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" onClick={exportToCSV} className={cn("text-sm", colors.bgCard, colors.border, colors.text, colors.borderHover)}>
-                  <Download className="h-4 w-4 mr-2" /> CSV
-                </Button>
-                <Button variant="outline" onClick={exportPrompts} className={cn("text-sm", colors.bgCard, colors.border, colors.text, colors.borderHover)}>
-                  <Download className="h-4 w-4 mr-2" /> Prompts
-                </Button>
-                <Button variant="outline" onClick={exportFullReport} className={cn("text-sm col-span-2", colors.bgCard, colors.border, colors.text, colors.borderHover)}>
-                  <FileText className="h-4 w-4 mr-2" /> Full Report
-                </Button>
-                <Button variant="outline" onClick={() => setImportDialogOpen(true)} className={cn("text-sm col-span-2", colors.bgCard, colors.border, colors.text, colors.borderHover)}>
-                  <Upload className="h-4 w-4 mr-2" /> Import Prompts
-                </Button>
-              </div>
-            </div>
-
-            {/* Danger Zone */}
-            <div className={cn("border-t pt-6", colors.border)}>
-              <Label className="text-red-400 flex items-center gap-2 text-base mb-3"><AlertTriangle className="h-5 w-5" /> Danger Zone</Label>
-              <div className="space-y-2">
-                <Button variant="outline" onClick={clearResults} className="w-full bg-transparent border-red-500/30 text-red-400 hover:bg-red-500/10">
-                  <Trash2 className="h-4 w-4 mr-2" /> Clear All Results
-                </Button>
-                <Button variant="outline" onClick={clearAllPrompts} className="w-full bg-transparent border-red-500/30 text-red-400 hover:bg-red-500/10">
-                  <Trash2 className="h-4 w-4 mr-2" /> Clear All Prompts
-                </Button>
-              </div>
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* Hidden file input */}
-      <input type="file" ref={fileInputRef} onChange={handleFileImport} accept=".txt,.csv,.json" className="hidden" />
+        </header>
+        {error && <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2 text-sm"><AlertTriangle className="h-4 w-4" /> {error}</div>}
+        <div className="p-6">{activeTab === "overview" && <OverviewTab />}{activeTab === "prompts" && <PromptsTab />}{activeTab === "citations" && <CitationsTab />}{activeTab === "sources" && <SourcesTab />}{activeTab === "content" && <ContentTab />}</div>
+      </main>
+      <SettingsSheet /><AddClientDialog /><EditClientDialog /><BulkPromptsDialog /><PromptDetailDialog /><ImportDialog />
+      <input ref={fileInputRef} type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileImport} />
     </div>
   );
+
+  function OverviewTab() {
+    const overallVisibility = filteredAuditResults.length > 0 ? Math.round(filteredAuditResults.reduce((sum, r) => sum + r.summary.share_of_voice, 0) / filteredAuditResults.length) : 0;
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-4 gap-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4"><div className="flex items-center justify-between"><div className="text-sm text-gray-500">Overall Visibility</div><Eye className="h-4 w-4 text-gray-400" /></div><div className="mt-2 flex items-baseline gap-2"><span className="text-3xl font-bold text-gray-900">{overallVisibility}%</span><TrendIndicator value={0} /></div></div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4"><div className="flex items-center justify-between"><div className="text-sm text-gray-500">Total Prompts</div><MessageSquare className="h-4 w-4 text-gray-400" /></div><div className="mt-2 flex items-baseline gap-2"><span className="text-3xl font-bold text-gray-900">{prompts.length}</span><span className="text-sm text-gray-400">unlimited</span></div></div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4"><div className="flex items-center justify-between"><div className="text-sm text-gray-500">Citations Found</div><Link2 className="h-4 w-4 text-gray-400" /></div><div className="mt-2 flex items-baseline gap-2"><span className="text-3xl font-bold text-gray-900">{allCitations.length}</span><span className="text-sm text-gray-400">{domainStats.length} domains</span></div></div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4"><div className="flex items-center justify-between"><div className="text-sm text-gray-500">API Cost</div><CreditCard className="h-4 w-4 text-gray-400" /></div><div className="mt-2 flex items-baseline gap-2"><span className="text-3xl font-bold text-gray-900">${totalCost.toFixed(2)}</span><span className="text-sm text-gray-400">{filteredAuditResults.length} audits</span></div></div>
+        </div>
+        <div className="grid grid-cols-5 gap-6">
+          <div className="col-span-3 bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Eye className="h-4 w-4 text-gray-400" /> Visibility by Model</h3><p className="text-xs text-gray-500 mt-0.5">Percentage of responses mentioning your brand</p></div></div>
+            <div className="space-y-4 mt-6">{AI_MODELS.filter(m => selectedModels.includes(m.id)).map(model => { const stats = modelStats[model.id] || { visible: 0, total: 0, cost: 0 }; const pct = stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0; const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; return (<div key={model.id} className="flex items-center gap-3"><div className="w-32 flex items-center gap-2">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="text-sm text-gray-700 truncate">{model.name}</span></div><div className="flex-1 h-8 bg-gray-100 rounded-full overflow-hidden relative"><div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: color }} /><span className="absolute inset-0 flex items-center justify-center text-xs font-medium" style={{ color: pct > 50 ? "white" : "#374151" }}>{pct}%</span></div><span className="text-sm font-medium text-gray-600 w-16 text-right">{stats.visible}/{stats.total}</span></div>); })}</div>
+            {filteredAuditResults.length === 0 && <div className="text-center py-8 text-gray-500"><BarChart3 className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p className="text-sm">Run audits to see visibility data</p></div>}
+          </div>
+          <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Brand Visibility</h3></div>
+            <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><BrandLogo name={c.name} size={20} /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Globe className="h-4 w-4 text-gray-400" /> Top Sources</h3><p className="text-xs text-gray-500 mt-0.5">Most cited domains across all models</p></div><button onClick={() => setActiveTab("sources")} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">View All <ChevronRight className="h-3.5 w-3.5" /></button></div>
+          <div className="grid grid-cols-3 gap-6"><div className="flex flex-col items-center justify-center"><DonutChart value={allCitations.length} size={140} /><div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-4 text-xs">{Object.entries(DOMAIN_TYPES).slice(0, 6).map(([k, t]) => (<div key={k} className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: t.dot }} /><span className="text-gray-600">{t.label}</span></div>))}</div></div><div className="col-span-2"><table className="w-full"><thead><tr className="text-xs text-gray-500 border-b border-gray-100"><th className="text-left pb-2 font-medium">Domain</th><th className="text-right pb-2 font-medium">Citations</th><th className="text-right pb-2 font-medium">Prompts</th><th className="text-right pb-2 font-medium">Type</th></tr></thead><tbody className="text-sm">{domainStats.slice(0, 6).map((s, i) => { const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; return (<tr key={i} className="border-b border-gray-50"><td className="py-2.5"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} alt="" className="h-4 w-4 rounded" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /><span className="text-gray-900">{s.domain}</span></div></td><td className="py-2.5 text-right text-gray-600">{s.count}</td><td className="py-2.5 text-right text-gray-600">{s.promptCount}</td><td className="py-2.5 text-right"><span className={cn("px-2 py-0.5 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td></tr>); })}{domainStats.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-gray-500">Run audits to see source data</td></tr>}</tbody></table></div></div>
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><MessageSquare className="h-4 w-4 text-gray-400" /> Recent Audits</h3><div className="flex items-center gap-2"><span className="text-sm text-gray-500">{selectedClient?.brand_name} mentioned</span><button onClick={() => setShowBrandOnly(!showBrandOnly)} className={cn("relative w-10 h-5 rounded-full transition-colors", showBrandOnly ? "bg-blue-500" : "bg-gray-200")}><span className={cn("absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform", showBrandOnly ? "translate-x-5" : "translate-x-0.5")} /></button></div></div>
+          <div className="grid grid-cols-3 gap-4">{recentPrompts.filter(r => !showBrandOnly || r.summary.share_of_voice > 0).slice(0, 9).map((r, i) => (<div key={i} onClick={() => setSelectedPromptDetail(r.prompt_id)} className="bg-white rounded-xl border border-gray-200 p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer"><h4 className="font-medium text-gray-900 text-sm line-clamp-2 mb-2">{r.prompt_text}</h4><p className="text-xs text-gray-500 line-clamp-2 mb-3">{r.model_results[0]?.raw_response?.substring(0, 100) || "No response"}...</p><div className="flex items-center justify-between"><div className="flex items-center gap-1">{r.model_results.slice(0, 4).map((mr, j) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return Logo ? (<div key={j} className={cn("p-1 rounded", mr.brand_mentioned ? "bg-green-50" : "bg-gray-50")}><Logo className="h-3.5 w-3.5" style={{ color: mr.brand_mentioned ? color : "#9ca3af" }} /></div>) : null; })}</div><span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(r.created_at).toLocaleDateString()}</span></div></div>))}</div>
+          {recentPrompts.length === 0 && (<div className="bg-white rounded-xl border border-gray-200 p-12 text-center"><MessageSquare className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No recent audits. Run some prompts to see results here.</p></div>)}
+        </div>
+      </div>
+    );
+  }
+
+  function PromptsTab() {
+    const activeCount = prompts.filter(p => p.is_active !== false).length;
+    const runPromptIds = new Set(auditResults.map(r => r.prompt_id));
+    const suggestedCount = prompts.filter(p => p.is_active !== false && !runPromptIds.has(p.id)).length;
+    const inactiveCount = prompts.filter(p => p.is_active === false).length;
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2"><div className="flex items-center bg-gray-100 rounded-lg p-1"><button onClick={() => setPromptsTabView("active")} className={cn("px-3 py-1.5 rounded-md text-sm font-medium transition-colors", promptsTabView === "active" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>Active <span className="ml-1 text-xs text-gray-400">({activeCount})</span></button><button onClick={() => setPromptsTabView("suggested")} className={cn("px-3 py-1.5 rounded-md text-sm font-medium transition-colors", promptsTabView === "suggested" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>Pending <span className="ml-1 text-xs text-orange-500">({suggestedCount})</span></button><button onClick={() => setPromptsTabView("inactive")} className={cn("px-3 py-1.5 rounded-md text-sm font-medium transition-colors", promptsTabView === "inactive" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>Inactive <span className="ml-1 text-xs text-gray-400">({inactiveCount})</span></button></div></div>
+          <div className="flex items-center gap-3"><span className="text-sm text-gray-500">{prompts.length} total prompts</span><Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button></div>
+        </div>
+        <div className="flex items-center gap-3"><div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search prompts..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-white border-gray-200" /></div><Button variant="outline" onClick={exportToCSV}><Download className="h-4 w-4 mr-1" /> Export</Button></div>
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <table className="w-full"><thead className="bg-gray-50 border-b border-gray-200"><tr><th className="w-10 px-4 py-3"><Checkbox /></th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider"><button className="flex items-center gap-1 hover:text-gray-700">Prompt <ArrowUpDown className="h-3 w-3" /></button></th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Visibility</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Position</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Models</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Citations</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-28">Actions</th></tr></thead>
+            <tbody className="divide-y divide-gray-100">{filteredPrompts.map((p) => { const r = getPromptResult(p.id); const isLoading = loadingPromptId === p.id; const vis = r?.summary.share_of_voice || 0; const pos = r?.summary.average_rank; const cit = r?.summary.total_citations || 0; return (<tr key={p.id} className="hover:bg-gray-50"><td className="px-4 py-3"><Checkbox /></td><td className="px-4 py-3"><div className="flex items-center gap-2"><span className="text-gray-900 text-sm">{p.prompt_text}</span>{p.niche_level && <Badge variant="outline" className="text-xs">{p.niche_level === "super_niche" ? "Super Niche" : p.niche_level === "niche" ? "Niche" : "Broad"}</Badge>}</div></td><td className="px-4 py-3 text-center"><span className={cn("text-sm font-medium", vis > 0 ? "text-green-600" : "text-gray-400")}>{r ? `${vis}%` : "--"}</span></td><td className="px-4 py-3 text-center text-gray-500">{pos ? `#${pos}` : "--"}</td><td className="px-4 py-3"><div className="flex items-center justify-center gap-1">{r?.model_results.slice(0, 4).map((mr, i) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return Logo ? <Logo key={i} className="h-4 w-4" style={{ color: mr.brand_mentioned ? color : "#d1d5db" }} /> : null; })}{!r && <span className="text-xs text-gray-400">Not run</span>}</div></td><td className="px-4 py-3 text-center">{cit > 0 ? <Badge variant="secondary">{cit}</Badge> : <span className="text-gray-400">--</span>}</td><td className="px-4 py-3"><div className="flex items-center justify-center gap-1"><Button variant="ghost" size="sm" onClick={() => setSelectedPromptDetail(p.id)} className="h-7 px-2 text-gray-500 hover:text-gray-700"><Eye className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600">{isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}</Button><Button variant="ghost" size="sm" onClick={() => deletePrompt(p.id)} className="h-7 px-2 text-gray-500 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></Button></div></td></tr>); })}</tbody>
+          </table>
+          {filteredPrompts.length === 0 && (<div className="p-12 text-center"><MessageSquare className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">{promptsTabView === "suggested" ? "All prompts have been run!" : promptsTabView === "inactive" ? "No inactive prompts" : "No prompts yet. Add your first prompt to get started."}</p></div>)}
+        </div>
+      </div>
+    );
+  }
+
+  function SourcesTab() {
+    const [sourceSearch, setSourceSearch] = useState("");
+    const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
+    const filteredDomainStats = useMemo(() => !sourceSearch ? domainStats : domainStats.filter(s => s.domain.toLowerCase().includes(sourceSearch.toLowerCase())), [domainStats, sourceSearch]);
+    const gapDomains = useMemo(() => { if (!selectedClient) return []; const brandDomains = new Set<string>(); const competitorDomains = new Map<string, Set<string>>(); filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { const response = mr.raw_response?.toLowerCase() || ""; const hasBrand = mr.brand_mentioned; mr.citations.forEach(c => { if (hasBrand) brandDomains.add(c.domain); selectedClient.competitors.forEach(comp => { if (response.includes(comp.toLowerCase())) { if (!competitorDomains.has(c.domain)) competitorDomains.set(c.domain, new Set()); competitorDomains.get(c.domain)!.add(comp); } }); }); }); }); return Array.from(competitorDomains.entries()).filter(([domain]) => !brandDomains.has(domain)).map(([domain, competitors]) => ({ domain, competitors: Array.from(competitors) })).slice(0, 20); }, [selectedClient, filteredAuditResults]);
+    const displayedStats = sourcesGapView === "gap" ? gapDomains.map(g => { const stat = domainStats.find(s => s.domain === g.domain); return stat ? { ...stat, gapCompetitors: g.competitors } : null; }).filter(Boolean) : filteredDomainStats;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2"><button onClick={() => setSourcesView("domains")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "domains" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>Domains</button><button onClick={() => setSourcesView("urls")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "urls" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>URLs</button></div>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">Source Usage by Domain</h3><div className="flex items-center gap-4 text-xs">{domainStats.slice(0, 5).map((s, i) => (<div key={i} className="flex items-center gap-1.5"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} alt="" className="h-3.5 w-3.5 rounded" /><span className="text-gray-600">{s.domain}</span></div>))}</div></div>
+          <div className="h-48 flex items-end gap-2 border-b border-gray-100 pb-4">{domainStats.slice(0, 15).map((s, i) => { const max = Math.max(...domainStats.slice(0, 15).map(x => x.count), 1); const h = (s.count / max) * 100; const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; return (<div key={i} className="flex-1 flex flex-col items-center gap-1 group cursor-pointer" onClick={() => setExpandedDomain(expandedDomain === s.domain ? null : s.domain)}><div className="w-full rounded-t hover:opacity-80 transition-opacity relative" style={{ height: `${Math.max(h, 4)}%`, backgroundColor: t.dot, minHeight: 4 }}><div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">{s.domain}: {s.count}</div></div><span className="text-xs text-gray-500">{s.count}</span></div>); })}</div>
+          <div className="flex items-center justify-end gap-4 mt-4 text-xs">{Object.entries(DOMAIN_TYPES).slice(0, 6).map(([k, t]) => (<div key={k} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.dot }} /><span className="text-gray-600">{t.label}</span></div>))}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3"><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search domains..." value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportToCSV}><Download className="h-3.5 w-3.5 mr-1" /> Export</Button></div></div>
+          {sourcesGapView === "gap" && (<div className="px-4 py-3 bg-orange-50 border-b border-orange-100"><p className="text-sm text-orange-700"><AlertTriangle className="h-4 w-4 inline mr-1" />These domains cite your competitors but not your brand.</p></div>)}
+          <table className="w-full"><thead className="bg-gray-50 border-b border-gray-100"><tr><th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase w-12">#</th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase"><button className="flex items-center gap-1"><Globe className="h-3 w-3" /> Source <ArrowUpDown className="h-3 w-3" /></button></th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th><th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Citations</th><th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Prompts</th>{sourcesGapView === "gap" && <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Competitors</th>}<th className="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase">Avg/Audit</th></tr></thead>
+            <tbody className="divide-y divide-gray-50">{(displayedStats as typeof domainStats).map((s, i) => { const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; const isExpanded = expandedDomain === s.domain; return (<><tr key={i} className={cn("hover:bg-gray-50 cursor-pointer", isExpanded && "bg-blue-50")} onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}><td className="px-5 py-3 text-sm text-gray-400">{i + 1}</td><td className="px-4 py-3"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=20`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ccc"><circle cx="12" cy="12" r="10"/></svg>'; }} /><a href={`https://${s.domain}`} target="_blank" rel="noopener noreferrer" className="text-sm text-gray-900 hover:text-blue-600">{s.domain}</a><ChevronRight className={cn("h-4 w-4 text-gray-400 transition-transform", isExpanded && "rotate-90")} /></div></td><td className="px-4 py-3"><span className={cn("px-2.5 py-1 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td><td className="px-4 py-3 text-right text-sm text-gray-600">{s.count}</td><td className="px-4 py-3 text-right text-sm text-gray-600">{s.promptCount}</td>{sourcesGapView === "gap" && (<td className="px-4 py-3"><div className="flex items-center gap-1">{((s as any).gapCompetitors || []).slice(0, 3).map((comp: string, j: number) => (<Badge key={j} variant="outline" className="text-xs">{comp}</Badge>))}</div></td>)}<td className="px-5 py-3 text-right text-sm text-gray-600">{s.avg}</td></tr>{isExpanded && s.prompts && (<tr><td colSpan={sourcesGapView === "gap" ? 7 : 6} className="px-5 py-3 bg-gray-50"><div className="text-xs text-gray-500 mb-2">Prompts citing this source:</div><div className="flex flex-wrap gap-2">{s.prompts.slice(0, 10).map((prompt, j) => (<Badge key={j} variant="secondary" className="text-xs max-w-xs truncate">{prompt}</Badge>))}{s.prompts.length > 10 && <Badge variant="outline" className="text-xs">+{s.prompts.length - 10} more</Badge>}</div></td></tr>)}</>); })}</tbody>
+          </table>
+          {displayedStats.length === 0 && (<div className="p-12 text-center"><Globe className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">{sourcesGapView === "gap" ? "No gap opportunities found" : "No source data yet. Run audits to collect data."}</p></div>)}
+        </div>
+      </div>
+    );
+  }
+
+  function CitationsTab() {
+    const [citationSearch, setCitationSearch] = useState("");
+    const [selectedCitation, setSelectedCitation] = useState<string | null>(null);
+    const filteredCitations = useMemo(() => !citationSearch ? allCitations : allCitations.filter(c => c.url.toLowerCase().includes(citationSearch.toLowerCase()) || c.domain.toLowerCase().includes(citationSearch.toLowerCase()) || c.title?.toLowerCase().includes(citationSearch.toLowerCase())), [allCitations, citationSearch]);
+    const citationsByPrompt = useMemo(() => { const map: Record<string, typeof allCitations> = {}; filteredAuditResults.forEach(r => { const promptCitations: typeof allCitations = []; r.model_results.forEach(mr => { mr.citations.forEach(c => { promptCitations.push({ ...c, count: 1, prompts: [r.prompt_text] }); }); }); if (promptCitations.length > 0) map[r.prompt_id] = promptCitations; }); return map; }, [filteredAuditResults]);
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between"><div className="flex items-center gap-4"><h2 className="text-lg font-semibold text-gray-900">All Citations</h2><Badge variant="outline">{allCitations.length} total</Badge></div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search citations..." value={citationSearch} onChange={(e) => setCitationSearch(e.target.value)} className="pl-9 w-64" /></div><Button variant="outline" size="sm" onClick={exportToCSV}><Download className="h-4 w-4 mr-1" /> Export</Button></div></div>
+        <div className="grid grid-cols-3 gap-6">
+          <div className="col-span-2 bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full"><thead className="bg-gray-50 border-b border-gray-200"><tr><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">URL</th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase w-32">Domain</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-20">Count</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-24">Type</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-20">Actions</th></tr></thead>
+              <tbody className="divide-y divide-gray-100">{filteredCitations.slice(0, 50).map((c, i) => { const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other; return (<tr key={i} className={cn("hover:bg-gray-50 cursor-pointer", selectedCitation === c.url && "bg-blue-50")} onClick={() => setSelectedCitation(c.url)}><td className="px-4 py-3"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded" /><div className="min-w-0"><div className="text-sm text-gray-900 truncate max-w-md">{c.title || c.url}</div><div className="text-xs text-gray-500 truncate max-w-md">{c.url}</div></div></div></td><td className="px-4 py-3 text-sm text-gray-600">{c.domain}</td><td className="px-4 py-3 text-center"><Badge variant="secondary">{c.count}</Badge></td><td className="px-4 py-3 text-center"><span className={cn("px-2 py-0.5 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td><td className="px-4 py-3 text-center"><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-4 w-4" /></a></td></tr>); })}</tbody>
+            </table>
+            {filteredCitations.length === 0 && (<div className="p-12 text-center"><Link2 className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No citations yet. Run audits to collect citation data.</p></div>)}
+            {filteredCitations.length > 50 && <div className="p-3 text-center text-sm text-gray-500 border-t">Showing 50 of {filteredCitations.length} citations</div>}
+          </div>
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-4">Citations by Prompt</h3><div className="space-y-3 max-h-96 overflow-y-auto">{Object.entries(citationsByPrompt).map(([promptId, citations]) => { const prompt = prompts.find(p => p.id === promptId); const result = filteredAuditResults.find(r => r.prompt_id === promptId); return (<div key={promptId} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer" onClick={() => setSelectedPromptDetail(promptId)}><div className="text-sm font-medium text-gray-900 line-clamp-2">{prompt?.prompt_text || result?.prompt_text}</div><div className="flex items-center gap-2 mt-2"><Badge variant="outline" className="text-xs">{citations.length} citations</Badge><span className="text-xs text-gray-500">{new Set(citations.map(c => c.domain)).size} domains</span></div></div>); })}{Object.keys(citationsByPrompt).length === 0 && <p className="text-sm text-gray-500 text-center py-4">No citations collected yet</p>}</div></div>
+            {selectedCitation && (<div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Citation Details</h3>{(() => { const c = allCitations.find(x => x.url === selectedCitation); if (!c) return null; return (<div className="space-y-3"><div><Label className="text-xs text-gray-500">Title</Label><p className="text-sm text-gray-900">{c.title || "No title"}</p></div><div><Label className="text-xs text-gray-500">URL</Label><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all">{c.url}</a></div><div><Label className="text-xs text-gray-500">Domain</Label><p className="text-sm text-gray-900">{c.domain}</p></div><div><Label className="text-xs text-gray-500">Cited in {c.prompts.length} prompt(s)</Label><div className="mt-1 space-y-1">{c.prompts.slice(0, 5).map((p, i) => <p key={i} className="text-xs text-gray-600 truncate">{p}</p>)}</div></div><Button variant="outline" size="sm" className="w-full" onClick={() => navigator.clipboard.writeText(c.url)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy URL</Button></div>); })()}</div>)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function ContentTab() {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold text-gray-900">Content Generator</h2><p className="text-sm text-gray-500">Generate SEO-optimized content based on your brand and audit insights</p></div></div>
+        <div className="grid grid-cols-3 gap-6">
+          <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-6">
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="article">Article</SelectItem><SelectItem value="listicle">Listicle (Top 10)</SelectItem><SelectItem value="comparison">Comparison Guide</SelectItem><SelectItem value="guide">How-To Guide</SelectItem><SelectItem value="faq">FAQ Section</SelectItem></SelectContent></Select></div></div>
+              <div className="p-4 bg-gray-50 rounded-lg"><Label className="text-sm font-medium">Content will include:</Label><div className="mt-2 flex flex-wrap gap-2"><Badge variant="outline">Brand: {selectedClient?.brand_name}</Badge><Badge variant="outline">Region: {selectedClient?.target_region}</Badge><Badge variant="outline">Industry: {selectedClient?.industry}</Badge>{selectedClient?.competitors.slice(0, 3).map((c, i) => <Badge key={i} variant="secondary">{c}</Badge>)}</div></div>
+              <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : <><Sparkles className="h-4 w-4 mr-2" /> Generate Content</>}</Button>
+              {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="prose prose-sm max-w-none p-4 bg-gray-50 rounded-lg border max-h-[500px] overflow-y-auto"><pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans">{generatedContent}</pre></div></div>)}
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Quick Topics</h3><p className="text-xs text-gray-500 mb-3">Based on your prompts and audit results</p><div className="space-y-2">{prompts.slice(0, 5).map((p, i) => (<button key={i} onClick={() => setContentTopic(p.prompt_text)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg truncate">{p.prompt_text}</button>))}{prompts.length === 0 && <p className="text-sm text-gray-500 text-center py-2">Add prompts to see suggestions</p>}</div></div>
+            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Content Ideas</h3><div className="space-y-2">{[`Why ${selectedClient?.brand_name} is the best choice in ${selectedClient?.target_region}`, `${selectedClient?.brand_name} vs ${selectedClient?.competitors[0] || "Competitors"}: Complete Comparison`, `Top 10 reasons to choose ${selectedClient?.brand_name}`, `How ${selectedClient?.brand_name} solves common ${selectedClient?.industry} problems`].map((idea, i) => (<button key={i} onClick={() => setContentTopic(idea)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">{idea}</button>))}</div></div>
+            <div className="bg-blue-50 rounded-xl border border-blue-200 p-5"><h3 className="font-semibold text-blue-900 mb-2">Pro Tip</h3><p className="text-sm text-blue-700">Generate content for topics where your brand has low visibility to improve your AI search presence.</p></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function SettingsSheet() {
+    return (<Sheet open={settingsOpen} onOpenChange={setSettingsOpen}><SheetContent className="w-[400px] bg-white overflow-y-auto"><SheetHeader><SheetTitle>Settings</SheetTitle></SheetHeader><div className="mt-6 space-y-6"><div><Label className="text-sm font-medium text-gray-900">Brand Tags</Label><p className="text-xs text-gray-500 mb-2">Alternative names for brand detection</p><div className="flex flex-wrap gap-2 mb-2">{selectedClient?.brand_tags.map((t, i) => (<Badge key={i} variant="secondary" className="gap-1">{t}<button onClick={() => updateBrandTags(selectedClient.brand_tags.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button></Badge>))}</div><div className="flex gap-2"><Input placeholder="Add tag..." value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddTag()} /><Button size="sm" onClick={handleAddTag}>Add</Button></div></div><div><Label className="text-sm font-medium text-gray-900">Competitors</Label><p className="text-xs text-gray-500 mb-2">Brands to track alongside yours</p><div className="flex flex-wrap gap-2 mb-2">{selectedClient?.competitors.map((c, i) => (<Badge key={i} variant="outline" className="gap-1"><BrandLogo name={c} size={12} />{c}<button onClick={() => updateCompetitors(selectedClient.competitors.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button></Badge>))}</div><div className="flex gap-2"><Input placeholder="Add competitor..." value={newCompetitor} onChange={(e) => setNewCompetitor(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddCompetitor()} /><Button size="sm" onClick={handleAddCompetitor}>Add</Button></div></div><div><Label className="text-sm font-medium text-gray-900">AI Models</Label><p className="text-xs text-gray-500 mb-2">Select models to query</p><div className="space-y-2">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; return (<div key={model.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50"><div className="flex items-center gap-2"><Checkbox id={model.id} checked={selectedModels.includes(model.id)} onCheckedChange={() => toggleModel(model.id)} />{Logo && <Logo className="h-4 w-4" style={{ color }} />}<label htmlFor={model.id} className="text-sm cursor-pointer">{model.name}</label></div><span className="text-xs text-gray-500">${model.costPerQuery.toFixed(3)}</span></div>); })}</div></div><div className="pt-4 border-t"><Label className="text-sm font-medium text-red-600">Danger Zone</Label><div className="mt-2 space-y-2"><Button variant="outline" size="sm" className="w-full text-red-600 border-red-200" onClick={clearAllPrompts}><Trash2 className="h-4 w-4 mr-2" /> Clear All Prompts</Button><Button variant="outline" size="sm" className="w-full text-red-600 border-red-200" onClick={clearResults}><Trash2 className="h-4 w-4 mr-2" /> Clear All Results</Button></div></div></div></SheetContent></Sheet>);
+  }
+
+  function AddClientDialog() {
+    return (<Dialog open={addClientOpen} onOpenChange={setAddClientOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Add New Brand</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Brand Name</Label><Input placeholder="e.g., Acme Corp" value={newClientForm.name} onChange={(e) => setNewClientForm({ ...newClientForm, name: e.target.value })} /></div><div><Label>Display Name</Label><Input placeholder="e.g., Acme" value={newClientForm.brand_name} onChange={(e) => setNewClientForm({ ...newClientForm, brand_name: e.target.value })} /></div><div><Label>Industry</Label><Select value={newClientForm.industry} onValueChange={(v) => setNewClientForm({ ...newClientForm, industry: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.keys(industries).map(ind => <SelectItem key={ind} value={ind}>{ind}</SelectItem>)}</SelectContent></Select></div><div><Label>Target Region</Label><Select value={newClientForm.target_region} onValueChange={(v) => setNewClientForm({ ...newClientForm, target_region: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.keys(locations).map(loc => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}</SelectContent></Select></div><div><Label>Competitors (comma-separated)</Label><Input placeholder="e.g., Competitor1, Competitor2" value={newClientForm.competitors} onChange={(e) => setNewClientForm({ ...newClientForm, competitors: e.target.value })} /></div></div><DialogFooter><Button variant="outline" onClick={() => setAddClientOpen(false)}>Cancel</Button><Button onClick={handleCreateClient}>Create Brand</Button></DialogFooter></DialogContent></Dialog>);
+  }
+
+  function EditClientDialog() {
+    return (<Dialog open={editClientOpen} onOpenChange={setEditClientOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit Brand</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Brand Name</Label><Input value={editClientForm.name} onChange={(e) => setEditClientForm({ ...editClientForm, name: e.target.value })} /></div><div><Label>Display Name</Label><Input value={editClientForm.brand_name} onChange={(e) => setEditClientForm({ ...editClientForm, brand_name: e.target.value })} /></div><div><Label>Industry</Label><Select value={editClientForm.industry} onValueChange={(v) => setEditClientForm({ ...editClientForm, industry: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.keys(industries).map(ind => <SelectItem key={ind} value={ind}>{ind}</SelectItem>)}</SelectContent></Select></div><div><Label>Target Region</Label><Select value={editClientForm.target_region} onValueChange={(v) => setEditClientForm({ ...editClientForm, target_region: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.keys(locations).map(loc => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}</SelectContent></Select></div></div><DialogFooter><Button variant="outline" className="text-red-600" onClick={handleDeleteClient}>Delete</Button><Button variant="outline" onClick={() => setEditClientOpen(false)}>Cancel</Button><Button onClick={handleUpdateClient}>Save Changes</Button></DialogFooter></DialogContent></Dialog>);
+  }
+
+  function BulkPromptsDialog() {
+    return (<Dialog open={bulkPromptsOpen} onOpenChange={setBulkPromptsOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Add Prompts</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div><div><Label>Multiple Prompts (one per line)</Label><Textarea placeholder={"Best dating apps in India\nDating apps with verification\nSafe dating apps for women"} value={bulkPrompts} onChange={(e) => setBulkPrompts(e.target.value)} rows={6} className="mt-1" /></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or generate with AI</span></div></div><div><Label>Generate from Keywords</Label><div className="flex gap-2 mt-1"><Input placeholder="dating apps, verification, safety" value={keywordsInput} onChange={(e) => setKeywordsInput(e.target.value)} /><Button onClick={handleGeneratePrompts} disabled={generatingPrompts}>{generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate"}</Button></div></div></div><DialogFooter><Button variant="outline" onClick={() => { setImportDialogOpen(true); setBulkPromptsOpen(false); }}>Import File</Button><Button onClick={handleBulkAdd} disabled={!bulkPrompts.trim()}>Add {bulkPrompts.split("\n").filter(l => l.trim().length > 3).length} Prompts</Button></DialogFooter></DialogContent></Dialog>);
+  }
+
+  function PromptDetailDialog() {
+    const result = filteredAuditResults.find(r => r.prompt_id === selectedPromptDetail);
+    const prompt = prompts.find(p => p.id === selectedPromptDetail);
+    const [detailTab, setDetailTab] = useState<"models" | "citations">("models");
+    if (!result && !prompt) return null;
+    const allPromptCitations = result?.model_results.flatMap(mr => mr.citations.map(c => ({ ...c, model: mr.model_name }))) || [];
+    const uniqueCitations = Array.from(new Map(allPromptCitations.map(c => [c.url, c])).values());
+    return (<Dialog open={!!selectedPromptDetail} onOpenChange={() => setSelectedPromptDetail(null)}><DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle className="text-lg pr-8">{prompt?.prompt_text || result?.prompt_text}</DialogTitle></DialogHeader>{result ? (<div className="space-y-4"><div className="grid grid-cols-4 gap-4"><div className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-2xl font-bold text-gray-900">{result.summary.share_of_voice}%</div><div className="text-xs text-gray-500">Visibility</div></div><div className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-2xl font-bold text-gray-900">{result.summary.average_rank ? `#${result.summary.average_rank}` : "--"}</div><div className="text-xs text-gray-500">Avg Rank</div></div><div className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-2xl font-bold text-gray-900">{result.summary.total_citations}</div><div className="text-xs text-gray-500">Citations</div></div><div className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-2xl font-bold text-gray-900">${result.summary.total_cost.toFixed(4)}</div><div className="text-xs text-gray-500">Cost</div></div></div><div className="flex items-center gap-2 border-b"><button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px", detailTab === "models" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700")}>Model Results</button><button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px", detailTab === "citations" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700")}>Citations ({uniqueCitations.length})</button></div>{detailTab === "models" && (<div className="space-y-3">{result.model_results.map((mr, i) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return (<div key={i} className="border rounded-lg p-4"><div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2">{Logo && <Logo className="h-5 w-5" style={{ color }} />}<span className="font-medium">{mr.model_name}</span></div><div className="flex items-center gap-2">{mr.brand_mentioned ? <Badge className="bg-green-100 text-green-700">Visible</Badge> : <Badge variant="outline" className="text-gray-500">Not Visible</Badge>}{mr.brand_rank && <Badge variant="outline">#{mr.brand_rank}</Badge>}<Badge variant="secondary">{mr.citations.length} citations</Badge></div></div>{mr.raw_response && <div className="mt-2 p-3 bg-gray-50 rounded text-sm text-gray-700 max-h-40 overflow-y-auto whitespace-pre-wrap">{mr.raw_response.substring(0, 800)}{mr.raw_response.length > 800 && "..."}</div>}{mr.citations.length > 0 && (<div className="mt-3 pt-3 border-t"><div className="text-xs font-medium text-gray-500 mb-2">Sources cited:</div><div className="grid grid-cols-2 gap-2">{mr.citations.slice(0, 6).map((c, j) => (<a key={j} href={c.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 bg-gray-50 rounded hover:bg-gray-100 text-xs"><img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4" /><span className="truncate text-gray-700">{c.title || c.domain}</span><ExternalLink className="h-3 w-3 text-gray-400 flex-shrink-0" /></a>))}{mr.citations.length > 6 && <div className="text-xs text-gray-400 p-2">+{mr.citations.length - 6} more</div>}</div></div>)}</div>); })}</div>)}{detailTab === "citations" && (<div className="space-y-2">{uniqueCitations.length === 0 ? (<div className="text-center py-8 text-gray-500"><Link2 className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p>No citations found for this prompt</p></div>) : (uniqueCitations.map((c, i) => { const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other; const modelsUsing = allPromptCitations.filter(x => x.url === c.url).map(x => x.model); return (<div key={i} className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50"><img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=20`} alt="" className="h-5 w-5 mt-0.5 rounded" /><div className="flex-1 min-w-0"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-900 hover:text-blue-600 line-clamp-1">{c.title || c.url}</a><p className="text-xs text-gray-500 truncate">{c.url}</p></div><span className={cn("px-2 py-0.5 rounded text-xs font-medium flex-shrink-0", t.bg, t.color)}>{t.label}</span></div><div className="flex items-center gap-2 mt-2"><span className="text-xs text-gray-500">Cited by:</span>{[...new Set(modelsUsing)].map((m, j) => <Badge key={j} variant="outline" className="text-xs">{m}</Badge>)}</div></div><div className="flex gap-1"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => navigator.clipboard.writeText(c.url)}><Copy className="h-3.5 w-3.5" /></Button><a href={c.url} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="sm" className="h-7 w-7 p-0"><ExternalLink className="h-3.5 w-3.5" /></Button></a></div></div>); }))}</div>)}</div>) : (<div className="text-center py-8 text-gray-500"><MessageSquare className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p>No results yet. Run this prompt to see analysis.</p><Button className="mt-4" onClick={() => { if (prompt) runSinglePrompt(prompt.id); setSelectedPromptDetail(null); }}>Run Now</Button></div>)}</DialogContent></Dialog>);
+  }
+
+  function ImportDialog() {
+    return (<Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Import Prompts</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Paste JSON or text (one prompt per line)</Label><Textarea placeholder={'{"prompts": ["prompt 1", "prompt 2"]}\nor\nprompt 1\nprompt 2'} value={importText} onChange={(e) => setImportText(e.target.value)} rows={8} className="mt-1 font-mono text-sm" /></div><div className="text-center text-sm text-gray-500">or</div><Button variant="outline" className="w-full" onClick={() => fileInputRef.current?.click()}>Upload File (.json, .csv, .txt)</Button></div><DialogFooter><Button variant="outline" onClick={() => setImportDialogOpen(false)}>Cancel</Button><Button onClick={handleImport}>Import</Button></DialogFooter></DialogContent></Dialog>);
+  }
 }

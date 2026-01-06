@@ -342,55 +342,76 @@ function aggregateCitations(results: AuditResult[]) {
 
 ## Frontend Architecture
 
-### Component Structure
+### Component Structure (v6.0)
 
 ```
 ClientDashboard.tsx
 │
-├── Header Section
-│   ├── Logo
-│   ├── Client Dropdown (select/add clients)
-│   ├── Settings Button
-│   ├── Prompts Count Badge
-│   └── Run Audit Button
+├── Sidebar Navigation
+│   ├── Logo & Brand
+│   ├── Client Selector (dropdown with add client)
+│   ├── Navigation Items
+│   │   ├── Overview (LayoutDashboard icon)
+│   │   ├── Prompts (MessageSquare icon)
+│   │   ├── Citations (Link icon)
+│   │   ├── Sources (Globe icon)
+│   │   └── Content (FileText icon)
+│   └── Settings Button (bottom)
 │
-├── Model Badges Bar
-│   └── Clickable badges for each AI model
-│
-├── Main Tabs
+├── Main Content Area
 │   │
-│   ├── Summary Tab
+│   ├── Header Bar
+│   │   ├── Page Title
+│   │   ├── Date Range Filter (functional)
+│   │   ├── Model Filter (multi-select)
+│   │   ├── Export Button (JSON full audit)
+│   │   └── Run All Audits Button
+│   │
+│   ├── Overview Tab
 │   │   ├── Metric Cards (SOV, Rank, Citations, Cost)
-│   │   ├── Visibility by Model (bar charts)
-│   │   ├── Competitor Gap (horizontal bars)
-│   │   ├── Top Sources (list)
-│   │   └── Insights & Recommendations
+│   │   ├── Visibility by Model (bar chart with MODEL_LOGOS)
+│   │   ├── Competitor Gap (horizontal bars with BrandLogo)
+│   │   ├── Top Sources (list with domain icons)
+│   │   └── AI Insights & Recommendations
 │   │
 │   ├── Prompts Tab
+│   │   ├── Sub-tabs (Active/Suggested/Inactive)
 │   │   ├── Add Prompt Input
-│   │   ├── AI Prompt Generator
-│   │   ├── Bulk Add Section
-│   │   └── Prompts Table (with Run/View/Delete)
+│   │   ├── Bulk Add Button
+│   │   └── Prompts Table (with Run/View/Delete actions)
 │   │
 │   ├── Citations Tab
 │   │   ├── Citation Stats Cards
-│   │   └── All Citations Table
+│   │   └── Citations Table (URL, Domain, Model, COUNT column)
 │   │
-│   ├── Content Tab
-│   │   ├── Topic Input
-│   │   ├── Content Type Selector
-│   │   └── Generated Content Display
+│   ├── Sources Tab
+│   │   ├── Sources Bar Chart (pixel-based heights)
+│   │   ├── Domains/URLs Toggle
+│   │   └── Sources Table (with prompt info)
 │   │
-│   └── Sources Tab
-│       ├── Domains/URLs Toggle
-│       └── Sources Table
+│   └── Content Tab
+│       ├── Topic Input
+│       ├── Content Type Selector (article, listicle, guide, FAQ, comparison)
+│       ├── Generate Button
+│       └── Generated Content Display (markdown)
 │
 └── Dialogs/Sheets
-    ├── Prompt Detail Dialog
+    ├── Prompt Detail Dialog (full audit results)
     ├── Add Client Dialog
-    ├── Import Prompts Dialog
+    ├── Bulk Prompts Dialog
     └── Settings Sheet
+        ├── Brand Settings (name, tags)
+        ├── Competitors (with BrandLogo icons)
+        └── AI Models (with MODEL_LOGOS icons)
 ```
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| `MODEL_LOGOS` | AI model icons with brand colors (ChatGPT green, Claude orange, etc.) |
+| `BrandLogo` | Brand/competitor logo component with fallback initials |
+| `useClientDashboard` | Central state management hook with Supabase integration |
 
 ### State Management
 

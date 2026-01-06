@@ -98,6 +98,7 @@ Each AI model is queried via its dedicated LIVE endpoint for real-time responses
 
 ## Features
 
+### Core Features
 - ✅ **6 AI Models** - ChatGPT, Claude, Gemini, Perplexity, Google AI Overview, SERP
 - ✅ **Multi-Client** - Track multiple brands from one dashboard
 - ✅ **LIVE LLM** - Real-time inference from actual AI providers (no simulated responses)
@@ -105,10 +106,24 @@ Each AI model is queried via its dedicated LIVE endpoint for real-time responses
 - ✅ **Retry Logic** - Exponential backoff for reliable API calls
 - ✅ **Competitor Analysis** - Compare brand vs competitors
 - ✅ **Citation Tracking** - See which sources AI cites
-- ✅ **Export Reports** - CSV, JSON, formatted text
+- ✅ **Export Reports** - CSV, TXT full audit report export
 - ✅ **Database Storage** - All results saved to Supabase
 - ✅ **Historical Data Retention** - Audit results preserved even after prompt deletion
 - ✅ **Dark Theme UI** - Professional dashboard interface
+
+### v6.0 Features (Latest)
+- ✅ **Unlimited Prompts** - No limit on prompts per client
+- ✅ **Functional Date Range Filter** - Filter results by date range
+- ✅ **Model Filter** - Filter results by specific AI models
+- ✅ **Prompts Tabs** - Active, Suggested, and Inactive prompt management
+- ✅ **Enhanced Citations Tab** - COUNT column showing citation frequency
+- ✅ **Sources Bar Chart** - Visual representation of source distribution
+- ✅ **Brand/Competitor Logos** - Visual icons for brands and competitors
+- ✅ **AI Model Logos** - Colored icons for each AI model (ChatGPT, Claude, Gemini, etc.)
+- ✅ **Full Audit Export** - Export complete audit data as formatted TXT report
+- ✅ **Content Generator** - Generate SEO-optimized content (articles, listicles, guides, FAQs)
+- ✅ **Sidebar Navigation** - Clean sidebar with Overview, Prompts, Citations, Sources, Content tabs
+- ✅ **Settings Panel** - Manage client settings, competitors, and AI models
 
 ---
 
@@ -190,14 +205,18 @@ npx supabase secrets set DATAFORSEO_PASSWORD=your-password --project-ref pqvyyzi
 
 ```
 ├── src/
-│   ├── pages/ClientDashboard.tsx    # Main UI
-│   ├── hooks/useClientDashboard.ts  # State & logic
-│   └── components/                  # UI components
+│   ├── pages/ClientDashboard.tsx    # Main dashboard UI (v6.0 - sidebar, tabs, dialogs)
+│   ├── hooks/useClientDashboard.ts  # State management & Supabase integration
+│   ├── components/
+│   │   ├── ModelLogos.tsx           # AI model icons with colors
+│   │   ├── BrandLogo.tsx            # Brand/competitor logo component
+│   │   └── ui/                      # Radix UI components
+│   └── lib/                         # Utilities
 ├── backend/
-│   ├── geo-audit/index.ts           # Main audit API
-│   └── generate-content/index.ts    # Content generation
-├── database/                        # SQL schemas
-├── supabase/functions/              # Edge functions
+│   ├── geo-audit/index.ts           # Main audit API (LIVE LLM queries)
+│   └── generate-content/index.ts    # Content generation API
+├── database/                        # SQL schemas & migrations
+├── supabase/functions/              # Edge functions (deployed)
 └── netlify.toml                     # Netlify config
 ```
 
