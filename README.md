@@ -4,7 +4,7 @@ AI Visibility Analytics Platform - Track how your brand appears in AI-generated 
 
 ## Live Demo
 
-🚀 **https://wondrous-queijadas-f95c7e.netlify.app**
+🚀 https://singular-marigold-949625.netlify.app/
 
 ---
 
@@ -231,3 +231,4 @@ See `ARCHITECTURE.md` for detailed technical documentation.
 ## License
 
 MIT
+
