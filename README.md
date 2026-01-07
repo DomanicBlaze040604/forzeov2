@@ -111,21 +111,19 @@ Each AI model is queried via its dedicated LIVE endpoint for real-time responses
 - ✅ **Historical Data Retention** - Audit results preserved even after prompt deletion
 - ✅ **Dark Theme UI** - Professional dashboard interface
 
-### v6.0 Features (Latest)
-- ✅ **Unlimited Prompts** - No limit on prompts per client
-- ✅ **Functional Date Range Filter** - Filter results by date range
-- ✅ **Model Filter** - Filter results by specific AI models
-- ✅ **Prompts Tabs** - Active, Suggested, and Inactive prompt management
-- ✅ **Enhanced Citations Tab** - COUNT column showing citation frequency
-- ✅ **Sources Bar Chart** - Visual representation of source distribution
-- ✅ **Brand/Competitor Logos** - Visual icons for brands and competitors
-- ✅ **AI Model Logos** - Colored icons for each AI model (ChatGPT, Claude, Gemini, etc.)
-- ✅ **Full Audit Export** - Export complete audit data as formatted TXT report with raw responses
-- ✅ **Content Generator** - Generate SEO-optimized content (articles, listicles, guides, FAQs)
-- ✅ **Collapsible Sidebar** - Toggle sidebar visibility with smooth animations
-- ✅ **Settings Panel** - Manage client settings, competitors, and AI models
-- ✅ **Brand Management** - Add, edit, delete brands with logo upload support
-- ✅ **Enhanced Export** - Full audit TXT includes raw AI responses, all citations, competitor data
+
+### v6.1 Features (Consolidated & Polished)
+- ✅ **Premium UI Design** - Complete redesign with glassmorphism, refined typography (Inter), and "finished product" aesthetics.
+- ✅ **Rules of Hooks Fixes** - Refactored core tab architecture for maximum stability.
+- ✅ **Interactive Competitor Analysis** - Clickable "+N" badges to reveal hidden competitors.
+- ✅ **Expanded Source Tracking** - Dedicated "Sources" tab with domain/URL toggle and gap analysis.
+- ✅ **Dynamic Charts** - Sources Bar Chart and Donut Charts with interactivity.
+- ✅ **Enhanced Tables** - Expandable rows, improved visibility metrics, and sticky headers.
+- ✅ **Unlimited Prompts** - No limit on prompts per client.
+- ✅ **Functional Filters** - Filter results by date range, model, and active/inactive status.
+- ✅ **Export Capabilities** - Export to CSV, TXT (Report), and detailed audit logs.
+- ✅ **Global Search** - Search across prompts, citations, and domains.
+- ✅ **Content Generator** - Built-in AI content generation tool.
 
 ---
 

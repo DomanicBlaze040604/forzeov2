@@ -1,9 +1,9 @@
 /**
  * FORZEO GEO DASHBOARD - Redesigned UI v6.0
  */
-import { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -37,18 +37,38 @@ function classifyDomain(domain: string): string {
   return "other";
 }
 
-function BrandLogo({ name, size = 16, className = "" }: { name: string; size?: number; className?: string }) {
-  const domain = useMemo(() => {
-    const n = name.toLowerCase().replace(/\s+/g, "");
-    const domainMap: Record<string, string> = { bumble: "bumble.com", hinge: "hinge.co", tinder: "tinder.com", shaadi: "shaadi.com", aisle: "aisle.co", myntra: "myntra.com", amazon: "amazon.com", google: "google.com" };
-    return domainMap[n] || `${n}.com`;
-  }, [name]);
-  return <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=${size * 2}`} alt={name} className={cn("rounded", className)} style={{ width: size, height: size }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />;
-}
 
-function DonutChart({ value, size = 120, label = "Citations" }: { value: number; size?: number; label?: string }) {
-  const strokeWidth = 12; const radius = (size - strokeWidth) / 2; const circumference = 2 * Math.PI * radius;
-  return (<div className="relative" style={{ width: size, height: size }}><svg width={size} height={size} className="transform -rotate-90"><circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="#e5e7eb" strokeWidth={strokeWidth} /><circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="#3b82f6" strokeWidth={strokeWidth} strokeDasharray={circumference} strokeDashoffset={circumference * 0.25} strokeLinecap="round" /></svg><div className="absolute inset-0 flex flex-col items-center justify-center"><span className="text-2xl font-bold text-gray-900">{value}</span><span className="text-xs text-gray-500">{label}</span></div></div>);
+function DonutChart({ value, size = 120, label = "Citations", segments = [] }: { value: number; size?: number; label?: string; segments?: { type: string; count: number }[] }) {
+  const strokeWidth = 14;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const total = segments.reduce((sum, s) => sum + s.count, 0) || value || 1;
+
+  // Build arcs for each segment
+  let currentOffset = 0;
+  const arcs = segments.length > 0 ? segments.map(s => {
+    const pct = s.count / total;
+    const dash = circumference * pct;
+    const offset = circumference * currentOffset;
+    currentOffset += pct;
+    const typeColor = (DOMAIN_TYPES as any)[s.type]?.dot || "#6b7280";
+    return { dash, offset, color: typeColor, type: s.type, count: s.count, pct: Math.round(pct * 100) };
+  }) : [{ dash: circumference * 0.75, offset: 0, color: "#3b82f6", type: "default", count: value, pct: 100 }];
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="transform -rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#f3f4f6" strokeWidth={strokeWidth} />
+        {arcs.map((arc, i) => (
+          <circle key={i} cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={arc.color} strokeWidth={strokeWidth} strokeDasharray={`${arc.dash} ${circumference}`} strokeDashoffset={-arc.offset} strokeLinecap="round" className="transition-all duration-500" />
+        ))}
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-bold text-gray-900">{value}</span>
+        <span className="text-xs text-gray-500">{label}</span>
+      </div>
+    </div>
+  );
 }
 
 function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: string }) {
@@ -58,7 +78,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, addClient, updateClient, deleteClient, switchClient, setSelectedModels, runFullAudit, runSinglePrompt, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, addClient, updateClient, deleteClient, switchClient, setSelectedModels, runFullAudit, runSinglePrompt, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content">("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -140,7 +160,33 @@ export default function ClientDashboard() {
     return Object.entries(stats).map(([domain, data]) => ({ domain, count: data.count, type: data.type, avg: data.avg, promptCount: data.prompts.size, prompts: Array.from(data.prompts) })).sort((a, b) => b.count - a.count);
   }, [filteredAuditResults]);
 
+  // Group citations by domain type for pie chart
+  const typeSegments = useMemo(() => {
+    const typeMap: Record<string, number> = {};
+    domainStats.forEach(d => {
+      if (!typeMap[d.type]) typeMap[d.type] = 0;
+      typeMap[d.type] += d.count;
+    });
+    return Object.entries(typeMap).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count);
+  }, [domainStats]);
+
   const recentPrompts = useMemo(() => filteredAuditResults.slice(0, 9).map(r => { const p = prompts.find(x => x.id === r.prompt_id); return { ...r, prompt_text: p?.prompt_text || r.prompt_text }; }), [filteredAuditResults, prompts]);
+
+  // Sources Tab State & Logic (Lifted to fix hooks)
+  const [sourceSearch, setSourceSearch] = useState("");
+  const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
+  const filteredDomainStats = useMemo(() => !sourceSearch ? domainStats : domainStats.filter(s => s.domain.toLowerCase().includes(sourceSearch.toLowerCase())), [domainStats, sourceSearch]);
+  const filteredUrlCitations = useMemo(() => !sourceSearch ? allCitations : allCitations.filter(c => c.url.toLowerCase().includes(sourceSearch.toLowerCase()) || c.domain.toLowerCase().includes(sourceSearch.toLowerCase()) || c.title?.toLowerCase().includes(sourceSearch.toLowerCase())), [allCitations, sourceSearch]);
+  const gapDomains = useMemo(() => { if (!selectedClient) return []; const brandDomains = new Set<string>(); const competitorDomains = new Map<string, Set<string>>(); filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { const response = mr.raw_response?.toLowerCase() || ""; const hasBrand = mr.brand_mentioned; mr.citations.forEach(c => { if (hasBrand) brandDomains.add(c.domain); selectedClient.competitors.forEach(comp => { if (response.includes(comp.toLowerCase())) { if (!competitorDomains.has(c.domain)) competitorDomains.set(c.domain, new Set()); competitorDomains.get(c.domain)!.add(comp); } }); }); }); }); return Array.from(competitorDomains.entries()).filter(([domain]) => !brandDomains.has(domain)).map(([domain, competitors]) => ({ domain, competitors: Array.from(competitors) })).slice(0, 20); }, [selectedClient, filteredAuditResults]);
+  const displayedStats = sourcesGapView === "gap" ? gapDomains.map(g => { const stat = domainStats.find(s => s.domain === g.domain); return stat ? { ...stat, gapCompetitors: g.competitors } : null; }).filter(Boolean) : filteredDomainStats;
+  const exportSources = () => { if (sourcesView === "domains") { if (domainStats.length === 0) return; const rows = [["Domain", "Type", "Citations", "Prompts", "Avg/Audit"]]; for (const s of domainStats) { rows.push([s.domain, s.type, s.count.toString(), s.promptCount.toString(), s.avg.toString()]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-domains-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } else { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-urls-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } };
+
+  // Citations Tab State & Logic (Lifted to fix hooks)
+  const [citationSearch, setCitationSearch] = useState("");
+  const [selectedCitation, setSelectedCitation] = useState<string | null>(null);
+  const filteredCitations = useMemo(() => !citationSearch ? allCitations : allCitations.filter(c => c.url.toLowerCase().includes(citationSearch.toLowerCase()) || c.domain.toLowerCase().includes(citationSearch.toLowerCase()) || c.title?.toLowerCase().includes(citationSearch.toLowerCase())), [allCitations, citationSearch]);
+  const citationsByPrompt = useMemo(() => { const map: Record<string, typeof allCitations> = {}; filteredAuditResults.forEach(r => { const promptCitations: typeof allCitations = []; r.model_results.forEach(mr => { mr.citations.forEach(c => { promptCitations.push({ ...c, count: 1, prompts: [r.prompt_text] }); }); }); if (promptCitations.length > 0) map[r.prompt_id] = promptCitations; }); return map; }, [filteredAuditResults]);
+  const exportCitations = () => { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `citations-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); };
 
   const handleAddPrompt = async () => { if (newPrompt.trim()) { await addCustomPrompt(newPrompt.trim()); setNewPrompt(""); } };
   const handleBulkAdd = () => { if (bulkPrompts.trim()) { addMultiplePrompts(bulkPrompts.split("\n").filter(l => l.trim().length > 3)); setBulkPrompts(""); setBulkPromptsOpen(false); } };
@@ -188,25 +234,38 @@ export default function ClientDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      <aside className={cn("bg-white border-r border-gray-200 flex flex-col fixed h-full z-20 transition-all duration-300", sidebarCollapsed ? "w-0 -translate-x-full" : "w-56")}>
-        <div className="p-4 border-b border-gray-100">
+      <aside className={cn("bg-white border-r border-gray-200 flex flex-col fixed h-full z-20 transition-all duration-300 shadow-sm overflow-hidden", sidebarCollapsed ? "w-0 opacity-0" : "w-56 opacity-100")}>
+        <div className="p-4 border-b border-gray-100 flex-shrink-0">
           <DropdownMenu>
-            <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2"><div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span></div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400" /></button></DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-52">{clients.map(c => (<DropdownMenuItem key={c.id} onClick={() => switchClient(c)} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-5 w-5 rounded flex items-center justify-center" style={{ backgroundColor: c.primary_color }}><span className="text-white text-xs font-bold">{c.brand_name.charAt(0)}</span></div><span>{c.brand_name}</span></div>{c.id === selectedClient?.id && <CheckCircle className="h-4 w-4 text-green-500" />}</DropdownMenuItem>))}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setAddClientOpen(true)}><Plus className="h-4 w-4 mr-2" /> Add Brand</DropdownMenuItem></DropdownMenuContent>
+            <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors"><div className="h-8 w-8 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span></div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" /></button></DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-52">{clients.map(c => (<DropdownMenuItem key={c.id} onClick={() => switchClient(c)} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-5 w-5 rounded flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: c.primary_color }}><span className="text-white text-xs font-bold">{c.brand_name.charAt(0)}</span></div><span className="truncate">{c.brand_name}</span></div>{c.id === selectedClient?.id && <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />}</DropdownMenuItem>))}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setAddClientOpen(true)}><Plus className="h-4 w-4 mr-2 flex-shrink-0" /> Add Brand</DropdownMenuItem></DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <nav className="flex-1 p-3 overflow-y-auto">
-          <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-3 mb-2">General</div>
-          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Sparkles }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-1 transition-colors", activeTab === item.id ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-50")}><item.icon className="h-4 w-4" />{item.label}{item.badge && <span className="ml-auto text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
-          <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-3 mb-2 mt-6">Project</div>
-          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Settings className="h-4 w-4" /> Settings</button>
-          <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Building2 className="h-4 w-4" /> Brands</button>
-          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"><Tag className="h-4 w-4" /> Tags</button>
-          <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-3 mb-2 mt-6">Company</div>
-          <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 mb-1"><Key className="h-4 w-4" /> API Keys</button>
-          <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"><CreditCard className="h-4 w-4" /> Billing</button>
+        <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">General</div>
+          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Sparkles }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
+          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
+          <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
+          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 text-left transition-all"><Tag className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Tags</span></button>
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Company</div>
+          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Key className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">API Keys</span></button>
+          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 text-left transition-all"><CreditCard className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Billing</span></button>
         </nav>
-        <div className="p-3 border-t border-gray-100"><div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3 mb-3"><div className="text-xs font-medium text-gray-500 mb-1">API Cost</div><div className="text-lg font-bold text-gray-900">${totalCost.toFixed(4)}</div><div className="text-xs text-gray-400 mt-1">{auditResults.length} audits run</div></div><button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50"><HelpCircle className="h-4 w-4" /> Help</button></div>
+        <div className="p-3 border-t border-gray-100 flex-shrink-0">
+          <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-4 mb-3 shadow-lg overflow-hidden">
+            <div className="text-xs font-medium text-gray-400 mb-1">API Cost</div>
+            <div className="text-xl font-bold text-white truncate">${totalCost.toFixed(4)}</div>
+            <div className="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-400 flex-shrink-0 animate-pulse"></span>
+              <span className="truncate">{auditResults.length} audits run</span>
+            </div>
+          </div>
+          <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 text-left transition-colors">
+            <HelpCircle className="h-4 w-4 flex-shrink-0 text-gray-400" />
+            <span className="flex-1 truncate">Help & Support</span>
+          </button>
+        </div>
       </aside>
 
       <main className={cn("flex-1 min-h-screen transition-all duration-300", sidebarCollapsed ? "ml-0" : "ml-56")}>
@@ -226,9 +285,9 @@ export default function ClientDashboard() {
           </div>
         </header>
         {error && <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2 text-sm"><AlertTriangle className="h-4 w-4" /> {error}</div>}
-        <div className="p-6">{activeTab === "overview" && <OverviewTab />}{activeTab === "prompts" && <PromptsTab />}{activeTab === "citations" && <CitationsTab />}{activeTab === "sources" && <SourcesTab />}{activeTab === "content" && <ContentTab />}</div>
+        <div className="p-6">{activeTab === "overview" && OverviewTab()}{activeTab === "prompts" && PromptsTab()}{activeTab === "citations" && CitationsTab()}{activeTab === "sources" && SourcesTab()}{activeTab === "content" && ContentTab()}</div>
       </main>
-      <SettingsSheet /><AddClientDialog /><EditClientDialog /><ManageBrandsDialog /><BulkPromptsDialog /><PromptDetailDialog /><ImportDialog />
+      {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{ImportDialog()}
       <input ref={fileInputRef} type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileImport} />
     </div>
   );
@@ -236,12 +295,51 @@ export default function ClientDashboard() {
   function OverviewTab() {
     const overallVisibility = filteredAuditResults.length > 0 ? Math.round(filteredAuditResults.reduce((sum, r) => sum + r.summary.share_of_voice, 0) / filteredAuditResults.length) : 0;
     return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-4 gap-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-4"><div className="flex items-center justify-between"><div className="text-sm text-gray-500">Overall Visibility</div><Eye className="h-4 w-4 text-gray-400" /></div><div className="mt-2 flex items-baseline gap-2"><span className="text-3xl font-bold text-gray-900">{overallVisibility}%</span><TrendIndicator value={0} /></div></div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4"><div className="flex items-center justify-between"><div className="text-sm text-gray-500">Total Prompts</div><MessageSquare className="h-4 w-4 text-gray-400" /></div><div className="mt-2 flex items-baseline gap-2"><span className="text-3xl font-bold text-gray-900">{prompts.length}</span><span className="text-sm text-gray-400">unlimited</span></div></div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4"><div className="flex items-center justify-between"><div className="text-sm text-gray-500">Citations Found</div><Link2 className="h-4 w-4 text-gray-400" /></div><div className="mt-2 flex items-baseline gap-2"><span className="text-3xl font-bold text-gray-900">{allCitations.length}</span><span className="text-sm text-gray-400">{domainStats.length} domains</span></div></div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4"><div className="flex items-center justify-between"><div className="text-sm text-gray-500">API Cost</div><CreditCard className="h-4 w-4 text-gray-400" /></div><div className="mt-2 flex items-baseline gap-2"><span className="text-3xl font-bold text-gray-900">${totalCost.toFixed(2)}</span><span className="text-sm text-gray-400">{filteredAuditResults.length} audits</span></div></div>
+      <div className="space-y-6 fade-in">
+        <div className="grid grid-cols-4 gap-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Overall Visibility</div>
+              <div className="p-2.5 bg-green-50 rounded-lg"><Eye className="h-5 w-5 text-green-600" /></div>
+            </div>
+            <div className="mt-4 flex items-baseline gap-2">
+              <span className="text-4xl font-bold text-gray-950">{overallVisibility}%</span>
+              <TrendIndicator value={0} />
+            </div>
+            <div className="mt-3 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-green-400 to-green-600 rounded-full transition-all duration-500" style={{ width: `${overallVisibility}%` }} /></div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Prompts</div>
+              <div className="p-2.5 bg-blue-50 rounded-lg"><MessageSquare className="h-5 w-5 text-blue-600" /></div>
+            </div>
+            <div className="mt-4 flex items-baseline gap-2">
+              <span className="text-4xl font-bold text-gray-950">{prompts.filter(p => p.is_active !== false).length}</span>
+              <span className="text-sm text-gray-500 font-medium">active</span>
+            </div>
+            <div className="mt-3 text-xs font-medium text-gray-400">{pendingPrompts} pending • {prompts.filter(p => p.is_active === false).length} archived</div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Citations Found</div>
+              <div className="p-2.5 bg-purple-50 rounded-lg"><Link2 className="h-5 w-5 text-purple-600" /></div>
+            </div>
+            <div className="mt-4 flex items-baseline gap-2">
+              <span className="text-4xl font-bold text-gray-950">{allCitations.length}</span>
+              <span className="text-sm text-gray-500 font-medium">citations</span>
+            </div>
+            <div className="mt-3 text-xs font-medium text-gray-400">{domainStats.length} unique domains referenced</div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">API Cost</div>
+              <div className="p-2.5 bg-amber-50 rounded-lg"><CreditCard className="h-5 w-5 text-amber-600" /></div>
+            </div>
+            <div className="mt-4 flex items-baseline gap-2">
+              <span className="text-4xl font-bold text-gray-950">${totalCost.toFixed(2)}</span>
+            </div>
+            <div className="mt-3 text-xs font-medium text-gray-400">{filteredAuditResults.length} audits completed</div>
+          </div>
         </div>
         <div className="grid grid-cols-5 gap-6">
           <div className="col-span-3 bg-white rounded-xl border border-gray-200 p-5">
@@ -251,12 +349,62 @@ export default function ClientDashboard() {
           </div>
           <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Brand Visibility</h3></div>
-            <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><BrandLogo name={c.name} size={20} /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
+            <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><Building2 className="h-5 w-5 text-gray-400" /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
           </div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Globe className="h-4 w-4 text-gray-400" /> Top Sources</h3><p className="text-xs text-gray-500 mt-0.5">Most cited domains across all models</p></div><button onClick={() => setActiveTab("sources")} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">View All <ChevronRight className="h-3.5 w-3.5" /></button></div>
-          <div className="grid grid-cols-3 gap-6"><div className="flex flex-col items-center justify-center"><DonutChart value={allCitations.length} size={140} /><div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-4 text-xs">{Object.entries(DOMAIN_TYPES).slice(0, 6).map(([k, t]) => (<div key={k} className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: t.dot }} /><span className="text-gray-600">{t.label}</span></div>))}</div></div><div className="col-span-2"><table className="w-full"><thead><tr className="text-xs text-gray-500 border-b border-gray-100"><th className="text-left pb-2 font-medium">Domain</th><th className="text-right pb-2 font-medium">Citations</th><th className="text-right pb-2 font-medium">Prompts</th><th className="text-right pb-2 font-medium">Type</th></tr></thead><tbody className="text-sm">{domainStats.slice(0, 6).map((s, i) => { const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; return (<tr key={i} className="border-b border-gray-50"><td className="py-2.5"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} alt="" className="h-4 w-4 rounded" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /><span className="text-gray-900">{s.domain}</span></div></td><td className="py-2.5 text-right text-gray-600">{s.count}</td><td className="py-2.5 text-right text-gray-600">{s.promptCount}</td><td className="py-2.5 text-right"><span className={cn("px-2 py-0.5 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td></tr>); })}{domainStats.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-gray-500">Run audits to see source data</td></tr>}</tbody></table></div></div>
+          <div className="grid grid-cols-3 gap-6">
+            <div className="flex flex-col items-center justify-center">
+              <DonutChart value={allCitations.length} size={160} segments={typeSegments} />
+              <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 mt-4 text-xs">
+                {typeSegments.slice(0, 6).map((seg) => {
+                  const t = DOMAIN_TYPES[seg.type] || DOMAIN_TYPES.other;
+                  const pct = allCitations.length > 0 ? Math.round((seg.count / allCitations.length) * 100) : 0;
+                  return (
+                    <div key={seg.type} className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t.dot }} />
+                      <span className="text-gray-700 font-medium">{t.label}</span>
+                      <span className="text-gray-400">({pct}%)</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="col-span-2 overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                    <th className="text-left py-3 pl-2">Domain</th>
+                    <th className="text-right py-3">Citations</th>
+                    <th className="text-right py-3">Prompts</th>
+                    <th className="text-right py-3 pr-2">Type</th>
+                  </tr>
+                </thead>
+                <tbody className="text-sm divide-y divide-gray-50">
+                  {domainStats.slice(0, 6).map((s, i) => {
+                    const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other;
+                    return (
+                      <tr key={i} className="group hover:bg-gray-50 transition-colors">
+                        <td className="py-3 pl-2">
+                          <div className="flex items-center gap-2">
+                            <img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} alt="" className="h-4 w-4 rounded opacity-70 group-hover:opacity-100 transition-opacity" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                            <span className="text-gray-900 font-medium">{s.domain}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 text-right text-gray-600 font-medium">{s.count}</td>
+                        <td className="py-3 text-right text-gray-500">{s.promptCount}</td>
+                        <td className="py-3 text-right pr-2">
+                          <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border border-opacity-20", t.bg, t.color)}>{t.label}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {domainStats.length === 0 && <tr><td colSpan={4} className="py-8 text-center text-gray-500 italic">Run audits to see source data</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
         <div>
           <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><MessageSquare className="h-4 w-4 text-gray-400" /> Recent Audits</h3><div className="flex items-center gap-2"><span className="text-sm text-gray-500">{selectedClient?.brand_name} mentioned</span><button onClick={() => setShowBrandOnly(!showBrandOnly)} className={cn("relative w-10 h-5 rounded-full transition-colors", showBrandOnly ? "bg-blue-500" : "bg-gray-200")}><span className={cn("absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform", showBrandOnly ? "translate-x-5" : "translate-x-0.5")} /></button></div></div>
@@ -272,68 +420,409 @@ export default function ClientDashboard() {
     const runPromptIds = new Set(auditResults.map(r => r.prompt_id));
     const suggestedCount = prompts.filter(p => p.is_active !== false && !runPromptIds.has(p.id)).length;
     const inactiveCount = prompts.filter(p => p.is_active === false).length;
+    const isInactiveView = promptsTabView === "inactive";
+
     return (
       <div className="space-y-4">
+        {/* Header with Tabs */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2"><div className="flex items-center bg-gray-100 rounded-lg p-1"><button onClick={() => setPromptsTabView("active")} className={cn("px-3 py-1.5 rounded-md text-sm font-medium transition-colors", promptsTabView === "active" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>Active <span className="ml-1 text-xs text-gray-400">({activeCount})</span></button><button onClick={() => setPromptsTabView("suggested")} className={cn("px-3 py-1.5 rounded-md text-sm font-medium transition-colors", promptsTabView === "suggested" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>Pending <span className="ml-1 text-xs text-orange-500">({suggestedCount})</span></button><button onClick={() => setPromptsTabView("inactive")} className={cn("px-3 py-1.5 rounded-md text-sm font-medium transition-colors", promptsTabView === "inactive" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>Inactive <span className="ml-1 text-xs text-gray-400">({inactiveCount})</span></button></div></div>
-          <div className="flex items-center gap-3"><span className="text-sm text-gray-500">{prompts.length} total prompts</span><Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button></div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center bg-gray-100 rounded-lg p-1">
+              <button onClick={() => setPromptsTabView("active")} className={cn("px-4 py-2 rounded-md text-sm font-medium transition-all", promptsTabView === "active" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>
+                <span className="flex items-center gap-2">Active <span className={cn("px-1.5 py-0.5 rounded text-xs", promptsTabView === "active" ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500")}>{activeCount}</span></span>
+              </button>
+              <button onClick={() => setPromptsTabView("suggested")} className={cn("px-4 py-2 rounded-md text-sm font-medium transition-all", promptsTabView === "suggested" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>
+                <span className="flex items-center gap-2">Pending <span className={cn("px-1.5 py-0.5 rounded text-xs", suggestedCount > 0 ? "bg-orange-100 text-orange-600" : "bg-gray-200 text-gray-500")}>{suggestedCount}</span></span>
+              </button>
+              <button onClick={() => setPromptsTabView("inactive")} className={cn("px-4 py-2 rounded-md text-sm font-medium transition-all", promptsTabView === "inactive" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>
+                <span className="flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archived <span className="px-1.5 py-0.5 rounded text-xs bg-gray-200 text-gray-500">{inactiveCount}</span></span>
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-500">{prompts.length} total prompts</span>
+            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+          </div>
         </div>
-        <div className="flex items-center gap-3"><div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search prompts..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-white border-gray-200" /></div><Button variant="outline" onClick={exportToCSV}><Download className="h-4 w-4 mr-1" /> Export</Button></div>
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full"><thead className="bg-gray-50 border-b border-gray-200"><tr><th className="w-10 px-4 py-3"><Checkbox /></th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider"><button className="flex items-center gap-1 hover:text-gray-700">Prompt <ArrowUpDown className="h-3 w-3" /></button></th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Visibility</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Position</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Models</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Citations</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-28">Actions</th></tr></thead>
-            <tbody className="divide-y divide-gray-100">{filteredPrompts.map((p) => { const r = getPromptResult(p.id); const isLoading = loadingPromptId === p.id; const vis = r?.summary.share_of_voice || 0; const pos = r?.summary.average_rank; const cit = r?.summary.total_citations || 0; return (<tr key={p.id} className="hover:bg-gray-50"><td className="px-4 py-3"><Checkbox /></td><td className="px-4 py-3"><div className="flex items-center gap-2"><span className="text-gray-900 text-sm">{p.prompt_text}</span>{p.niche_level && <Badge variant="outline" className="text-xs">{p.niche_level === "super_niche" ? "Super Niche" : p.niche_level === "niche" ? "Niche" : "Broad"}</Badge>}</div></td><td className="px-4 py-3 text-center"><span className={cn("text-sm font-medium", vis > 0 ? "text-green-600" : "text-gray-400")}>{r ? `${vis}%` : "--"}</span></td><td className="px-4 py-3 text-center text-gray-500">{pos ? `#${pos}` : "--"}</td><td className="px-4 py-3"><div className="flex items-center justify-center gap-1">{r?.model_results.slice(0, 4).map((mr, i) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return Logo ? <Logo key={i} className="h-4 w-4" style={{ color: mr.brand_mentioned ? color : "#d1d5db" }} /> : null; })}{!r && <span className="text-xs text-gray-400">Not run</span>}</div></td><td className="px-4 py-3 text-center">{cit > 0 ? <Badge variant="secondary">{cit}</Badge> : <span className="text-gray-400">--</span>}</td><td className="px-4 py-3"><div className="flex items-center justify-center gap-1"><Button variant="ghost" size="sm" onClick={() => setSelectedPromptDetail(p.id)} className="h-7 px-2 text-gray-500 hover:text-gray-700"><Eye className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600">{isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}</Button><Button variant="ghost" size="sm" onClick={() => deletePrompt(p.id)} className="h-7 px-2 text-gray-500 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></Button></div></td></tr>); })}</tbody>
+
+        {/* Info banner for archived view */}
+        {isInactiveView && inactiveCount > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+            <div className="p-2 bg-amber-100 rounded-lg"><Archive className="h-5 w-5 text-amber-600" /></div>
+            <div>
+              <h4 className="font-medium text-amber-900">Archived Prompts</h4>
+              <p className="text-sm text-amber-700 mt-0.5">These prompts are archived but their data is preserved. You can restore them anytime by clicking the restore button.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Search & Export */}
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input placeholder="Search prompts..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-white border-gray-200" />
+          </div>
+          <Button variant="outline" onClick={exportToCSV}><Download className="h-4 w-4 mr-1" /> Export</Button>
+        </div>
+
+        {/* Table */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+          <table className="w-full">
+            <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200">
+              <tr>
+                <th className="w-12 px-6 py-4 text-left"><Checkbox /></th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Prompt <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
+                </th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Visibility</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Position</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Models</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Citations</th>
+                <th className="px-6 py-4 text-end text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredPrompts.map((p) => {
+                const r = getPromptResult(p.id);
+                const isLoading = loadingPromptId === p.id;
+                const vis = r?.summary.share_of_voice || 0;
+                const pos = r?.summary.average_rank;
+                const cit = r?.summary.total_citations || 0;
+                const isInactive = p.is_active === false;
+
+                return (
+                  <tr key={p.id} className={cn("hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0", isInactive && "opacity-60")}>
+                    <td className="px-6 py-4"><Checkbox /></td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        {isInactive && <Archive className="h-4 w-4 text-gray-400 flex-shrink-0" />}
+                        <span className={cn("text-sm font-medium", isInactive ? "text-gray-500" : "text-gray-900")}>{p.prompt_text}</span>
+                        {p.niche_level && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 uppercase tracking-wide flex-shrink-0 bg-gray-50 text-gray-600 border-gray-200">{p.niche_level === "super_niche" ? "Super Niche" : p.niche_level === "niche" ? "Niche" : "Broad"}</Badge>}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={cn("text-base font-bold", vis > 0 ? "text-green-600" : "text-gray-300")}>{r ? `${vis}%` : "—"}</span>
+                    </td>
+                    <td className="px-6 py-4 text-center text-gray-500 font-medium">{pos ? `#${pos}` : "—"}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-center gap-1.5">
+                        {r?.model_results.slice(0, 4).map((mr, i) => {
+                          const Logo = MODEL_LOGOS[mr.model]?.Logo;
+                          const color = MODEL_LOGOS[mr.model]?.color || "#666";
+                          return Logo ? <div key={i} className="transition-transform group-hover:scale-110"><Logo className="h-4 w-4" style={{ color: mr.brand_mentioned ? color : "#e5e7eb" }} /></div> : null;
+                        })}
+                        {!r && <span className="text-xs text-gray-400 italic">Not run</span>}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-center">{cit > 0 ? <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">{cit}</Badge> : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-center gap-1">
+                        {isInactive ? (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => reactivatePrompt(p.id)} className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Restore prompt">
+                              <RotateCcw className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setSelectedPromptDetail(p.id)} className="h-7 px-2 text-gray-500 hover:text-gray-700" title="View details">
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => setSelectedPromptDetail(p.id)} className="h-7 px-2 text-gray-500 hover:text-gray-700" title="View details">
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Run audit">
+                              {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => deletePrompt(p.id)} className="h-7 px-2 text-gray-500 hover:text-red-600" title="Archive prompt">
+                              <Archive className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
           </table>
-          {filteredPrompts.length === 0 && (<div className="p-12 text-center"><MessageSquare className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">{promptsTabView === "suggested" ? "All prompts have been run!" : promptsTabView === "inactive" ? "No inactive prompts" : "No prompts yet. Add your first prompt to get started."}</p></div>)}
+          {filteredPrompts.length === 0 && (
+            <div className="p-16 text-center">
+              {promptsTabView === "suggested" ? (
+                <>
+                  <CheckCircle className="h-12 w-12 mx-auto mb-4 text-green-300" />
+                  <p className="text-gray-600 font-medium">All prompts have been run!</p>
+                  <p className="text-sm text-gray-500 mt-1">Great job keeping up with your audits.</p>
+                </>
+              ) : promptsTabView === "inactive" ? (
+                <>
+                  <Archive className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-600 font-medium">No archived prompts</p>
+                  <p className="text-sm text-gray-500 mt-1">Archived prompts will appear here. Their data is preserved for tracking.</p>
+                </>
+              ) : (
+                <>
+                  <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-600 font-medium">No prompts yet</p>
+                  <p className="text-sm text-gray-500 mt-1">Add your first prompt to get started with audits.</p>
+                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
   function SourcesTab() {
-    const [sourceSearch, setSourceSearch] = useState("");
-    const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
-    const filteredDomainStats = useMemo(() => !sourceSearch ? domainStats : domainStats.filter(s => s.domain.toLowerCase().includes(sourceSearch.toLowerCase())), [domainStats, sourceSearch]);
-    const gapDomains = useMemo(() => { if (!selectedClient) return []; const brandDomains = new Set<string>(); const competitorDomains = new Map<string, Set<string>>(); filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { const response = mr.raw_response?.toLowerCase() || ""; const hasBrand = mr.brand_mentioned; mr.citations.forEach(c => { if (hasBrand) brandDomains.add(c.domain); selectedClient.competitors.forEach(comp => { if (response.includes(comp.toLowerCase())) { if (!competitorDomains.has(c.domain)) competitorDomains.set(c.domain, new Set()); competitorDomains.get(c.domain)!.add(comp); } }); }); }); }); return Array.from(competitorDomains.entries()).filter(([domain]) => !brandDomains.has(domain)).map(([domain, competitors]) => ({ domain, competitors: Array.from(competitors) })).slice(0, 20); }, [selectedClient, filteredAuditResults]);
-    const displayedStats = sourcesGapView === "gap" ? gapDomains.map(g => { const stat = domainStats.find(s => s.domain === g.domain); return stat ? { ...stat, gapCompetitors: g.competitors } : null; }).filter(Boolean) : filteredDomainStats;
+
+
     return (
       <div className="space-y-6">
-        <div className="flex items-center gap-2"><button onClick={() => setSourcesView("domains")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "domains" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>Domains</button><button onClick={() => setSourcesView("urls")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "urls" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>URLs</button></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3"><div className="p-2 bg-blue-100 rounded-lg"><Globe className="h-5 w-5 text-blue-600" /></div><div><h4 className="font-medium text-blue-900">What are Sources?</h4><p className="text-sm text-blue-700 mt-0.5">Sources are the origin websites where AI models pull facts from. These are the domains that the AI references when generating responses - the places where the information comes from.</p></div></div>
+        <div className="flex items-center gap-2"><button onClick={() => setSourcesView("domains")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "domains" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>Domains ({domainStats.length})</button><button onClick={() => setSourcesView("urls")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "urls" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>URLs ({allCitations.length})</button></div>
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">Source Usage by Domain</h3><div className="flex items-center gap-4 text-xs">{domainStats.slice(0, 5).map((s, i) => (<div key={i} className="flex items-center gap-1.5"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} alt="" className="h-3.5 w-3.5 rounded" /><span className="text-gray-600">{s.domain}</span></div>))}</div></div>
           <div className="h-48 flex items-end gap-2 border-b border-gray-100 pb-4">{domainStats.slice(0, 15).map((s, i) => { const max = Math.max(...domainStats.slice(0, 15).map(x => x.count), 1); const h = (s.count / max) * 100; const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; return (<div key={i} className="flex-1 flex flex-col items-center gap-1 group cursor-pointer" onClick={() => setExpandedDomain(expandedDomain === s.domain ? null : s.domain)}><div className="w-full rounded-t hover:opacity-80 transition-opacity relative" style={{ height: `${Math.max(h, 4)}%`, backgroundColor: t.dot, minHeight: 4 }}><div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">{s.domain}: {s.count}</div></div><span className="text-xs text-gray-500">{s.count}</span></div>); })}</div>
           <div className="flex items-center justify-end gap-4 mt-4 text-xs">{Object.entries(DOMAIN_TYPES).slice(0, 6).map(([k, t]) => (<div key={k} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.dot }} /><span className="text-gray-600">{t.label}</span></div>))}</div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3"><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search domains..." value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportToCSV}><Download className="h-3.5 w-3.5 mr-1" /> Export</Button></div></div>
-          {sourcesGapView === "gap" && (<div className="px-4 py-3 bg-orange-50 border-b border-orange-100"><p className="text-sm text-orange-700"><AlertTriangle className="h-4 w-4 inline mr-1" />These domains cite your competitors but not your brand.</p></div>)}
-          <table className="w-full"><thead className="bg-gray-50 border-b border-gray-100"><tr><th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase w-12">#</th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase"><button className="flex items-center gap-1"><Globe className="h-3 w-3" /> Source <ArrowUpDown className="h-3 w-3" /></button></th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th><th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Citations</th><th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">Prompts</th>{sourcesGapView === "gap" && <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Competitors</th>}<th className="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase">Avg/Audit</th></tr></thead>
-            <tbody className="divide-y divide-gray-50">{(displayedStats as typeof domainStats).map((s, i) => { const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; const isExpanded = expandedDomain === s.domain; return (<><tr key={i} className={cn("hover:bg-gray-50 cursor-pointer", isExpanded && "bg-blue-50")} onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}><td className="px-5 py-3 text-sm text-gray-400">{i + 1}</td><td className="px-4 py-3"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=20`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ccc"><circle cx="12" cy="12" r="10"/></svg>'; }} /><a href={`https://${s.domain}`} target="_blank" rel="noopener noreferrer" className="text-sm text-gray-900 hover:text-blue-600">{s.domain}</a><ChevronRight className={cn("h-4 w-4 text-gray-400 transition-transform", isExpanded && "rotate-90")} /></div></td><td className="px-4 py-3"><span className={cn("px-2.5 py-1 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td><td className="px-4 py-3 text-right text-sm text-gray-600">{s.count}</td><td className="px-4 py-3 text-right text-sm text-gray-600">{s.promptCount}</td>{sourcesGapView === "gap" && (<td className="px-4 py-3"><div className="flex items-center gap-1 flex-wrap">{((s as any).gapCompetitors || []).slice(0, 3).map((comp: string, j: number) => (<span key={j} className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 border border-red-200 rounded text-xs text-red-700 font-medium"><BrandLogo name={comp} size={12} />{comp}</span>))}{((s as any).gapCompetitors || []).length > 3 && <span className="text-xs text-gray-500">+{((s as any).gapCompetitors || []).length - 3}</span>}</div></td>)}<td className="px-5 py-3 text-right text-sm text-gray-600">{s.avg}</td></tr>{isExpanded && s.prompts && (<tr><td colSpan={sourcesGapView === "gap" ? 7 : 6} className="px-5 py-3 bg-gray-50"><div className="text-xs text-gray-500 mb-2">Prompts citing this source:</div><div className="flex flex-wrap gap-2">{s.prompts.slice(0, 10).map((prompt, j) => (<Badge key={j} variant="secondary" className="text-xs max-w-xs truncate">{prompt}</Badge>))}{s.prompts.length > 10 && <Badge variant="outline" className="text-xs">+{s.prompts.length - 10} more</Badge>}</div></td></tr>)}</>); })}</tbody>
-          </table>
-          {displayedStats.length === 0 && (<div className="p-12 text-center"><Globe className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">{sourcesGapView === "gap" ? "No gap opportunities found" : "No source data yet. Run audits to collect data."}</p></div>)}
+          <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3">{sourcesView === "domains" && <><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></>}{sourcesView === "urls" && <span className="text-sm font-medium text-gray-700">All URLs ({allCitations.length})</span>}</div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder={sourcesView === "urls" ? "Search URLs..." : "Search domains..."} value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportSources}><Download className="h-3.5 w-3.5 mr-1" /> Export {sourcesView === "domains" ? "Domains" : "URLs"}</Button></div></div>
+          {sourcesGapView === "gap" && sourcesView === "domains" && (<div className="px-4 py-3 bg-orange-50 border-b border-orange-100"><p className="text-sm text-orange-700"><AlertTriangle className="h-4 w-4 inline mr-1" />These domains cite your competitors but not your brand.</p></div>)}
+          {sourcesView === "domains" ? (
+            <div className="max-h-[600px] overflow-y-auto">
+              <table className="w-full relative">
+                <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-16">#</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
+                      <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Source <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
+                    </th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Type</th>
+                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Citations</th>
+                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Prompts</th>
+                    {sourcesGapView === "gap" && <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Competitors</th>}
+                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Avg/Audit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(displayedStats as typeof domainStats).map((s, i) => {
+                    const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other;
+                    const isExpanded = expandedDomain === s.domain;
+                    const domainCitations = allCitations.filter(c => c.domain === s.domain);
+                    return (
+                      <React.Fragment key={i}>
+                        <tr className={cn("hover:bg-gray-50 cursor-pointer transition-colors group", isExpanded && "bg-blue-50/50")} onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}>
+                          <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="p-1 bg-white rounded border border-gray-100 shadow-sm">
+                                <img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=32`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ccc"><circle cx="12" cy="12" r="10"/></svg>'; }} />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <a href={`https://${s.domain}`} target="_blank" rel="noopener noreferrer" className="text-base font-semibold text-gray-900 hover:text-blue-600 hover:underline decoration-blue-300 underline-offset-2" onClick={(e) => e.stopPropagation()}>{s.domain}</a>
+                                <ChevronRight className={cn("h-4 w-4 text-gray-400 transition-transform duration-200", isExpanded && "rotate-90 text-blue-500")} />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4"><span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span></td>
+                          <td className="px-6 py-4 text-right text-base font-medium text-gray-700">{s.count}</td>
+                          <td className="px-6 py-4 text-right text-sm text-gray-500">{s.promptCount}</td>
+                          {sourcesGapView === "gap" && (
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {((s as any).gapCompetitors || []).slice(0, 3).map((comp: string, j: number) => (
+                                  <span key={j} className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 border border-red-200 rounded text-xs text-red-700 font-medium whitespace-nowrap"><Building2 className="h-3 w-3" />{comp}</span>
+                                ))}
+                                {((s as any).gapCompetitors || []).length > 3 && (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button onClick={(e) => e.stopPropagation()} className="text-xs text-gray-500 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-gray-200">
+                                        +{(s as any).gapCompetitors.length - 3}
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent onClick={(e) => e.stopPropagation()} align="start" className="w-48">
+                                      <div className="px-2 py-1.5 text-xs font-semibold text-gray-500">Other Competitors</div>
+                                      <DropdownMenuSeparator />
+                                      {((s as any).gapCompetitors || []).slice(3).map((comp: string, k: number) => (
+                                        <div key={k} className="px-2 py-1.5 text-sm flex items-center gap-2">
+                                          <Building2 className="h-3.5 w-3.5 text-gray-400" />
+                                          <span>{comp}</span>
+                                        </div>
+                                      ))}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                          <td className="px-6 py-4 text-right text-sm text-gray-600 font-mono">{s.avg}</td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="bg-gray-50/50">
+                            <td colSpan={sourcesGapView === "gap" ? 7 : 6} className="px-0 py-0 border-b border-gray-200">
+                              <div className="p-6 bg-gray-50/50 space-y-6 animate-in slide-in-from-top-2 duration-200">
+                                <div>
+                                  <div className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                    <div className="p-1 bg-blue-100 rounded text-blue-600"><Link2 className="h-3.5 w-3.5" /></div>
+                                    All Citations from {s.domain} ({domainCitations.length})
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto pr-2">
+                                    {domainCitations.length > 0 ? domainCitations.map((c, j) => (
+                                      <div key={j} className="flex items-center gap-4 p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-200 hover:shadow-sm transition-all group/card">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-sm font-medium text-gray-900 truncate group-hover/card:text-blue-600 transition-colors">{c.title || c.url}</div>
+                                          <div className="text-xs text-gray-500 truncate mt-0.5">{c.url}</div>
+                                        </div>
+                                        <span className="px-2.5 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-full border border-gray-200">{c.count}x</span>
+                                        <a href={c.url} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" onClick={(e) => e.stopPropagation()}>
+                                          <ExternalLink className="h-4 w-4" />
+                                        </a>
+                                      </div>
+                                    )) : <p className="text-sm text-gray-500 italic">No individual URLs tracked for this domain</p>}
+                                  </div>
+                                </div>
+                                {s.prompts && s.prompts.length > 0 && (
+                                  <div>
+                                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Cited in prompts ({s.prompts.length})</div>
+                                    <div className="flex flex-wrap gap-2">
+                                      {s.prompts.slice(0, 8).map((prompt, j) => (
+                                        <Badge key={j} variant="secondary" className="text-xs max-w-xs truncate bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors px-2 py-1">{prompt}</Badge>
+                                      ))}
+                                      {s.prompts.length > 8 && <Badge variant="outline" className="text-xs bg-white text-gray-500">+{s.prompts.length - 8} more</Badge>}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="max-h-[600px] overflow-y-auto">
+              <table className="w-full relative">
+                <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-16">#</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
+                      <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group"><Link2 className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /> URL <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
+                    </th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-48">Domain</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-32">Type</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Count</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredUrlCitations.map((c, i) => {
+                    const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other;
+                    return (
+                      <tr key={i} className="hover:bg-gray-50 transition-colors group">
+                        <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded opacity-70" />
+                            <div className="min-w-0 max-w-lg">
+                              <div className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600 transition-colors">{c.title || c.url}</div>
+                              <div className="text-xs text-gray-500 truncate mt-0.5">{c.url}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{c.domain}</td>
+                        <td className="px-6 py-4"><span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span></td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 bg-blue-50 text-blue-700 text-sm font-bold rounded-full">{c.count}</span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Open URL">
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {displayedStats.length === 0 && sourcesView === "domains" && (<div className="p-12 text-center"><Globe className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">{sourcesGapView === "gap" ? "No gap opportunities found" : "No source data yet. Run audits to collect data."}</p></div>)}
+          {filteredUrlCitations.length === 0 && sourcesView === "urls" && (<div className="p-12 text-center"><Link2 className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No URLs yet. Run audits to collect data.</p></div>)}
+          {sourcesView === "urls" && filteredUrlCitations.length > 0 && <div className="p-3 text-center text-sm text-gray-500 border-t bg-gray-50">Showing all {filteredUrlCitations.length} URLs</div>}
+          {sourcesView === "domains" && displayedStats.length > 0 && <div className="p-3 text-center text-sm text-gray-500 border-t bg-gray-50">Showing all {displayedStats.length} domains</div>}
         </div>
       </div>
     );
   }
 
   function CitationsTab() {
-    const [citationSearch, setCitationSearch] = useState("");
-    const [selectedCitation, setSelectedCitation] = useState<string | null>(null);
-    const filteredCitations = useMemo(() => !citationSearch ? allCitations : allCitations.filter(c => c.url.toLowerCase().includes(citationSearch.toLowerCase()) || c.domain.toLowerCase().includes(citationSearch.toLowerCase()) || c.title?.toLowerCase().includes(citationSearch.toLowerCase())), [allCitations, citationSearch]);
-    const citationsByPrompt = useMemo(() => { const map: Record<string, typeof allCitations> = {}; filteredAuditResults.forEach(r => { const promptCitations: typeof allCitations = []; r.model_results.forEach(mr => { mr.citations.forEach(c => { promptCitations.push({ ...c, count: 1, prompts: [r.prompt_text] }); }); }); if (promptCitations.length > 0) map[r.prompt_id] = promptCitations; }); return map; }, [filteredAuditResults]);
+
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between"><div className="flex items-center gap-4"><h2 className="text-lg font-semibold text-gray-900">All Citations</h2><Badge variant="outline">{allCitations.length} total</Badge></div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search citations..." value={citationSearch} onChange={(e) => setCitationSearch(e.target.value)} className="pl-9 w-64" /></div><Button variant="outline" size="sm" onClick={exportToCSV}><Download className="h-4 w-4 mr-1" /> Export</Button></div></div>
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 flex items-start gap-3"><div className="p-2 bg-purple-100 rounded-lg"><Link2 className="h-5 w-5 text-purple-600" /></div><div><h4 className="font-medium text-purple-900">What are Citations?</h4><p className="text-sm text-purple-700 mt-0.5">Citations are the specific URLs that AI shows to prove its responses. They're the evidence that the AI uses to back up what it says - citation-backed responses mean the answer is traceable.</p></div></div>
+        <div className="flex items-center justify-between"><div className="flex items-center gap-4"><h2 className="text-lg font-semibold text-gray-900">All Citations</h2><Badge variant="outline">{allCitations.length} total</Badge></div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search citations..." value={citationSearch} onChange={(e) => setCitationSearch(e.target.value)} className="pl-9 w-64" /></div><Button variant="outline" size="sm" onClick={exportCitations}><Download className="h-4 w-4 mr-1" /> Export Citations</Button></div></div>
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2 bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <table className="w-full"><thead className="bg-gray-50 border-b border-gray-200"><tr><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">URL</th><th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase w-32">Domain</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-20">Count</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-24">Type</th><th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase w-20">Actions</th></tr></thead>
-              <tbody className="divide-y divide-gray-100">{filteredCitations.slice(0, 50).map((c, i) => { const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other; return (<tr key={i} className={cn("hover:bg-gray-50 cursor-pointer", selectedCitation === c.url && "bg-blue-50")} onClick={() => setSelectedCitation(c.url)}><td className="px-4 py-3"><div className="flex items-center gap-2"><img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded" /><div className="min-w-0"><div className="text-sm text-gray-900 truncate max-w-md">{c.title || c.url}</div><div className="text-xs text-gray-500 truncate max-w-md">{c.url}</div></div></div></td><td className="px-4 py-3 text-sm text-gray-600">{c.domain}</td><td className="px-4 py-3 text-center"><span className="inline-flex items-center justify-center min-w-[28px] px-2 py-1 bg-blue-100 text-blue-800 text-sm font-bold rounded-full">{c.count}</span></td><td className="px-4 py-3 text-center"><span className={cn("px-2 py-0.5 rounded text-xs font-medium", t.bg, t.color)}>{t.label}</span></td><td className="px-4 py-3 text-center"><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700" onClick={(e) => e.stopPropagation()}><ExternalLink className="h-4 w-4" /></a></td></tr>); })}</tbody>
-            </table>
+            <div className="max-h-[600px] overflow-y-auto">
+              <table className="w-full relative">
+                <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-16">#</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
+                      <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">URL <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
+                    </th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-48">Domain</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Count</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Type</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredCitations.map((c, i) => {
+                    const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other;
+                    return (
+                      <tr key={i} className={cn("hover:bg-gray-50 transition-colors group cursor-pointer border-b border-gray-50 last:border-0", selectedCitation === c.url && "bg-blue-50/50")} onClick={() => setSelectedCitation(c.url)}>
+                        <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="p-1 bg-white rounded border border-gray-100 shadow-sm flex-shrink-0">
+                              <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" className="h-4 w-4 rounded opacity-80" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ccc"><circle cx="12" cy="12" r="10"/></svg>'; }} />
+                            </div>
+                            <div className="min-w-0 max-w-lg">
+                              <div className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600 transition-colors">{c.title || c.url}</div>
+                              <div className="text-xs text-gray-500 truncate mt-0.5">{c.url}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{c.domain}</td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 bg-blue-50 text-blue-700 text-sm font-bold rounded-full border border-blue-100">{c.count}</span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" onClick={(e) => e.stopPropagation()} title="Open URL">
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
             {filteredCitations.length === 0 && (<div className="p-12 text-center"><Link2 className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No citations yet. Run audits to collect citation data.</p></div>)}
-            {filteredCitations.length > 50 && <div className="p-3 text-center text-sm text-gray-500 border-t">Showing 50 of {filteredCitations.length} citations</div>}
+            {filteredCitations.length > 0 && <div className="p-3 text-center text-sm text-gray-500 border-t bg-gray-50">Showing all {filteredCitations.length} citations</div>}
           </div>
           <div className="space-y-4">
-            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-4">Citations by Prompt</h3><div className="space-y-3 max-h-96 overflow-y-auto">{Object.entries(citationsByPrompt).map(([promptId, citations]) => { const prompt = prompts.find(p => p.id === promptId); const result = filteredAuditResults.find(r => r.prompt_id === promptId); return (<div key={promptId} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer border border-gray-200" onClick={() => setSelectedPromptDetail(promptId)}><div className="text-sm font-medium text-gray-900 line-clamp-2">{prompt?.prompt_text || result?.prompt_text}</div><div className="flex items-center gap-3 mt-2"><div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(citations.length * 10, 100)}%` }} /></div><span className="text-xs font-medium text-gray-700 whitespace-nowrap">{citations.length} domains</span></div></div>); })}{Object.keys(citationsByPrompt).length === 0 && <p className="text-sm text-gray-500 text-center py-4">No citations collected yet</p>}</div></div>
-            {selectedCitation && (<div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Citation Details</h3>{(() => { const c = allCitations.find(x => x.url === selectedCitation); if (!c) return null; return (<div className="space-y-3"><div><Label className="text-xs text-gray-500">Title</Label><p className="text-sm text-gray-900">{c.title || "No title"}</p></div><div><Label className="text-xs text-gray-500">URL</Label><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all">{c.url}</a></div><div><Label className="text-xs text-gray-500">Domain</Label><p className="text-sm text-gray-900">{c.domain}</p></div><div><Label className="text-xs text-gray-500">Cited in {c.prompts.length} prompt(s)</Label><div className="mt-1 space-y-1">{c.prompts.slice(0, 5).map((p, i) => <p key={i} className="text-xs text-gray-600 truncate">{p}</p>)}</div></div><Button variant="outline" size="sm" className="w-full" onClick={() => navigator.clipboard.writeText(c.url)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy URL</Button></div>); })()}</div>)}
+            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-4">Citations by Prompt</h3><div className="space-y-3 max-h-96 overflow-y-auto">{Object.entries(citationsByPrompt).map(([promptId, citations]) => { const prompt = prompts.find(p => p.id === promptId); const result = filteredAuditResults.find(r => r.prompt_id === promptId); return (<div key={promptId} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer border border-gray-200" onClick={() => setSelectedPromptDetail(promptId)}><div className="text-sm font-medium text-gray-900 line-clamp-2">{prompt?.prompt_text || result?.prompt_text}</div><div className="flex items-center gap-3 mt-2"><div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(citations.length * 10, 100)}%` }} /></div><span className="text-xs font-medium text-gray-700 whitespace-nowrap">{citations.length} citations</span></div></div>); })}{Object.keys(citationsByPrompt).length === 0 && <p className="text-sm text-gray-500 text-center py-4">No citations collected yet</p>}</div></div>
+            {selectedCitation && (<div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Citation Details</h3>{(() => { const c = allCitations.find(x => x.url === selectedCitation); if (!c) return null; return (<div className="space-y-3"><div><Label className="text-xs text-gray-500">Title</Label><p className="text-sm text-gray-900">{c.title || "No title"}</p></div><div><Label className="text-xs text-gray-500">URL</Label><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all">{c.url}</a></div><div><Label className="text-xs text-gray-500">Domain</Label><p className="text-sm text-gray-900">{c.domain}</p></div><div><Label className="text-xs text-gray-500">Cited in {c.prompts.length} prompt(s)</Label><div className="mt-1 space-y-1">{c.prompts.slice(0, 5).map((p, i) => <p key={i} className="text-xs text-gray-600 truncate">{p}</p>)}{c.prompts.length > 5 && <p className="text-xs text-blue-600 font-medium">+{c.prompts.length - 5} more prompts</p>}</div></div><Button variant="outline" size="sm" className="w-full" onClick={() => navigator.clipboard.writeText(c.url)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy URL</Button></div>); })()}</div>)}
           </div>
         </div>
       </div>
@@ -348,7 +837,7 @@ export default function ClientDashboard() {
           <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-6">
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="article">Article</SelectItem><SelectItem value="listicle">Listicle (Top 10)</SelectItem><SelectItem value="comparison">Comparison Guide</SelectItem><SelectItem value="guide">How-To Guide</SelectItem><SelectItem value="faq">FAQ Section</SelectItem></SelectContent></Select></div></div>
-              <div className="p-4 bg-gray-50 rounded-lg"><Label className="text-sm font-medium">Content will include:</Label><div className="mt-3 flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><BrandLogo name={c} size={14} />{c}</span>)}</div></div>
+              <div className="p-4 bg-gray-50 rounded-lg"><Label className="text-sm font-medium">Content will include:</Label><div className="mt-3 flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><Building2 className="h-3.5 w-3.5" />{c}</span>)}</div></div>
               <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : <><Sparkles className="h-4 w-4 mr-2" /> Generate Content</>}</Button>
               {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="prose prose-sm max-w-none p-4 bg-gray-50 rounded-lg border max-h-[500px] overflow-y-auto"><pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans">{generatedContent}</pre></div></div>)}
             </div>
@@ -392,7 +881,7 @@ export default function ClientDashboard() {
               <div className="flex flex-wrap gap-2 mb-2">
                 {selectedClient?.competitors.map((c, i) => (
                   <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-900 font-medium">
-                    <BrandLogo name={c} size={16} />
+                    <Building2 className="h-4 w-4 text-gray-400" />
                     <span>{c}</span>
                     <button onClick={() => updateCompetitors(selectedClient.competitors.filter((_, j) => j !== i))} className="ml-1 text-gray-500 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
                   </span>
@@ -451,20 +940,20 @@ export default function ClientDashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium text-gray-700">Brand Name *</Label>
-                <Input 
-                  placeholder="e.g., Acme Corp" 
-                  value={newClientForm.name} 
-                  onChange={(e) => setNewClientForm(prev => ({ ...prev, name: e.target.value }))} 
-                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500" 
+                <Input
+                  placeholder="e.g., Acme Corp"
+                  value={newClientForm.name}
+                  onChange={(e) => setNewClientForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
               <div>
                 <Label className="text-sm font-medium text-gray-700">Display Name</Label>
-                <Input 
-                  placeholder="e.g., Acme" 
-                  value={newClientForm.brand_name} 
-                  onChange={(e) => setNewClientForm(prev => ({ ...prev, brand_name: e.target.value }))} 
-                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500" 
+                <Input
+                  placeholder="e.g., Acme"
+                  value={newClientForm.brand_name}
+                  onChange={(e) => setNewClientForm(prev => ({ ...prev, brand_name: e.target.value }))}
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -498,11 +987,11 @@ export default function ClientDashboard() {
             </div>
             <div>
               <Label className="text-sm font-medium text-gray-700">Competitors (comma-separated)</Label>
-              <Input 
-                placeholder="e.g., Nike, Adidas, Puma" 
-                value={newClientForm.competitors} 
-                onChange={(e) => setNewClientForm(prev => ({ ...prev, competitors: e.target.value }))} 
-                className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500" 
+              <Input
+                placeholder="e.g., Nike, Adidas, Puma"
+                value={newClientForm.competitors}
+                onChange={(e) => setNewClientForm(prev => ({ ...prev, competitors: e.target.value }))}
+                className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
               />
               <p className="mt-1 text-xs text-gray-500">Enter competitor brand names separated by commas</p>
             </div>
@@ -510,26 +999,26 @@ export default function ClientDashboard() {
               <div>
                 <Label className="text-sm font-medium text-gray-700">Brand Color</Label>
                 <div className="mt-1.5 flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={newClientForm.primary_color} 
-                    onChange={(e) => setNewClientForm(prev => ({ ...prev, primary_color: e.target.value }))} 
+                  <input
+                    type="color"
+                    value={newClientForm.primary_color}
+                    onChange={(e) => setNewClientForm(prev => ({ ...prev, primary_color: e.target.value }))}
                     className="h-10 w-14 rounded border border-gray-300 cursor-pointer"
                   />
-                  <Input 
-                    value={newClientForm.primary_color} 
-                    onChange={(e) => setNewClientForm(prev => ({ ...prev, primary_color: e.target.value }))} 
-                    className="flex-1 bg-white border-gray-300 text-gray-900 font-mono text-sm" 
+                  <Input
+                    value={newClientForm.primary_color}
+                    onChange={(e) => setNewClientForm(prev => ({ ...prev, primary_color: e.target.value }))}
+                    className="flex-1 bg-white border-gray-300 text-gray-900 font-mono text-sm"
                   />
                 </div>
               </div>
               <div>
                 <Label className="text-sm font-medium text-gray-700">Logo URL (optional)</Label>
-                <Input 
-                  placeholder="https://example.com/logo.png" 
-                  value={newClientForm.logo_url} 
-                  onChange={(e) => setNewClientForm(prev => ({ ...prev, logo_url: e.target.value }))} 
-                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500" 
+                <Input
+                  placeholder="https://example.com/logo.png"
+                  value={newClientForm.logo_url}
+                  onChange={(e) => setNewClientForm(prev => ({ ...prev, logo_url: e.target.value }))}
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -554,18 +1043,18 @@ export default function ClientDashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium text-gray-700">Brand Name *</Label>
-                <Input 
-                  value={editClientForm.name} 
-                  onChange={(e) => setEditClientForm(prev => ({ ...prev, name: e.target.value }))} 
-                  className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500" 
+                <Input
+                  value={editClientForm.name}
+                  onChange={(e) => setEditClientForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
               <div>
                 <Label className="text-sm font-medium text-gray-700">Display Name</Label>
-                <Input 
-                  value={editClientForm.brand_name} 
-                  onChange={(e) => setEditClientForm(prev => ({ ...prev, brand_name: e.target.value }))} 
-                  className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500" 
+                <Input
+                  value={editClientForm.brand_name}
+                  onChange={(e) => setEditClientForm(prev => ({ ...prev, brand_name: e.target.value }))}
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -599,37 +1088,37 @@ export default function ClientDashboard() {
             </div>
             <div>
               <Label className="text-sm font-medium text-gray-700">Competitors (comma-separated)</Label>
-              <Input 
-                placeholder="e.g., Nike, Adidas, Puma" 
-                value={editClientForm.competitors} 
-                onChange={(e) => setEditClientForm(prev => ({ ...prev, competitors: e.target.value }))} 
-                className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400" 
+              <Input
+                placeholder="e.g., Nike, Adidas, Puma"
+                value={editClientForm.competitors}
+                onChange={(e) => setEditClientForm(prev => ({ ...prev, competitors: e.target.value }))}
+                className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium text-gray-700">Brand Color</Label>
                 <div className="mt-1.5 flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={editClientForm.primary_color} 
-                    onChange={(e) => setEditClientForm(prev => ({ ...prev, primary_color: e.target.value }))} 
+                  <input
+                    type="color"
+                    value={editClientForm.primary_color}
+                    onChange={(e) => setEditClientForm(prev => ({ ...prev, primary_color: e.target.value }))}
                     className="h-10 w-14 rounded border border-gray-300 cursor-pointer"
                   />
-                  <Input 
-                    value={editClientForm.primary_color} 
-                    onChange={(e) => setEditClientForm(prev => ({ ...prev, primary_color: e.target.value }))} 
-                    className="flex-1 bg-white border-gray-300 text-gray-900 font-mono text-sm" 
+                  <Input
+                    value={editClientForm.primary_color}
+                    onChange={(e) => setEditClientForm(prev => ({ ...prev, primary_color: e.target.value }))}
+                    className="flex-1 bg-white border-gray-300 text-gray-900 font-mono text-sm"
                   />
                 </div>
               </div>
               <div>
                 <Label className="text-sm font-medium text-gray-700">Logo URL (optional)</Label>
-                <Input 
-                  placeholder="https://example.com/logo.png" 
-                  value={editClientForm.logo_url} 
-                  onChange={(e) => setEditClientForm(prev => ({ ...prev, logo_url: e.target.value }))} 
-                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400" 
+                <Input
+                  placeholder="https://example.com/logo.png"
+                  value={editClientForm.logo_url}
+                  onChange={(e) => setEditClientForm(prev => ({ ...prev, logo_url: e.target.value }))}
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
                 />
               </div>
             </div>
@@ -697,7 +1186,148 @@ export default function ClientDashboard() {
     if (!result && !prompt) return null;
     const allPromptCitations = result?.model_results.flatMap(mr => mr.citations.map(c => ({ ...c, model: mr.model_name }))) || [];
     const uniqueCitations = Array.from(new Map(allPromptCitations.map(c => [c.url, c])).values());
-    return (<Dialog open={!!selectedPromptDetail} onOpenChange={() => setSelectedPromptDetail(null)}><DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle className="text-lg pr-8">{prompt?.prompt_text || result?.prompt_text}</DialogTitle></DialogHeader>{result ? (<div className="space-y-4"><div className="grid grid-cols-4 gap-4"><div className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-2xl font-bold text-gray-900">{result.summary.share_of_voice}%</div><div className="text-xs text-gray-500">Visibility</div></div><div className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-2xl font-bold text-gray-900">{result.summary.average_rank ? `#${result.summary.average_rank}` : "--"}</div><div className="text-xs text-gray-500">Avg Rank</div></div><div className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-2xl font-bold text-gray-900">{result.summary.total_citations}</div><div className="text-xs text-gray-500">Citations</div></div><div className="bg-gray-50 rounded-lg p-3 text-center"><div className="text-2xl font-bold text-gray-900">${result.summary.total_cost.toFixed(4)}</div><div className="text-xs text-gray-500">Cost</div></div></div><div className="flex items-center gap-2 border-b"><button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px", detailTab === "models" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700")}>Model Results</button><button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px", detailTab === "citations" ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700")}>Citations ({uniqueCitations.length})</button></div>{detailTab === "models" && (<div className="space-y-3">{result.model_results.map((mr, i) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return (<div key={i} className="border rounded-lg p-4"><div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2">{Logo && <Logo className="h-5 w-5" style={{ color }} />}<span className="font-medium">{mr.model_name}</span></div><div className="flex items-center gap-2">{mr.brand_mentioned ? <Badge className="bg-green-100 text-green-700">Visible</Badge> : <Badge variant="outline" className="text-gray-500">Not Visible</Badge>}{mr.brand_rank && <Badge variant="outline">#{mr.brand_rank}</Badge>}<Badge variant="secondary">{mr.citations.length} citations</Badge></div></div>{mr.raw_response && <div className="mt-2 p-3 bg-gray-50 rounded text-sm text-gray-700 max-h-40 overflow-y-auto whitespace-pre-wrap">{mr.raw_response.substring(0, 800)}{mr.raw_response.length > 800 && "..."}</div>}{mr.citations.length > 0 && (<div className="mt-3 pt-3 border-t"><div className="text-xs font-medium text-gray-500 mb-2">Sources cited:</div><div className="grid grid-cols-2 gap-2">{mr.citations.slice(0, 6).map((c, j) => (<a key={j} href={c.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 bg-gray-50 rounded hover:bg-gray-100 text-xs"><img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4" /><span className="truncate text-gray-700">{c.title || c.domain}</span><ExternalLink className="h-3 w-3 text-gray-400 flex-shrink-0" /></a>))}{mr.citations.length > 6 && <div className="text-xs text-gray-400 p-2">+{mr.citations.length - 6} more</div>}</div></div>)}</div>); })}</div>)}{detailTab === "citations" && (<div className="space-y-2">{uniqueCitations.length === 0 ? (<div className="text-center py-8 text-gray-500"><Link2 className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p>No citations found for this prompt</p></div>) : (uniqueCitations.map((c, i) => { const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other; const modelsUsing = allPromptCitations.filter(x => x.url === c.url).map(x => x.model); return (<div key={i} className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50"><img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=20`} alt="" className="h-5 w-5 mt-0.5 rounded" /><div className="flex-1 min-w-0"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-900 hover:text-blue-600 line-clamp-1">{c.title || c.url}</a><p className="text-xs text-gray-500 truncate">{c.url}</p></div><span className={cn("px-2 py-0.5 rounded text-xs font-medium flex-shrink-0", t.bg, t.color)}>{t.label}</span></div><div className="flex items-center gap-2 mt-2"><span className="text-xs text-gray-500">Cited by:</span>{[...new Set(modelsUsing)].map((m, j) => <Badge key={j} variant="outline" className="text-xs">{m}</Badge>)}</div></div><div className="flex gap-1"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => navigator.clipboard.writeText(c.url)}><Copy className="h-3.5 w-3.5" /></Button><a href={c.url} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="sm" className="h-7 w-7 p-0"><ExternalLink className="h-3.5 w-3.5" /></Button></a></div></div>); }))}</div>)}</div>) : (<div className="text-center py-8 text-gray-500"><MessageSquare className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p>No results yet. Run this prompt to see analysis.</p><Button className="mt-4" onClick={() => { if (prompt) runSinglePrompt(prompt.id); setSelectedPromptDetail(null); }}>Run Now</Button></div>)}</DialogContent></Dialog>);
+    return (
+      <Dialog open={!!selectedPromptDetail} onOpenChange={() => setSelectedPromptDetail(null)}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto bg-white">
+          <DialogHeader className="pb-4 border-b">
+            <DialogTitle className="text-xl font-semibold text-gray-900 pr-8 leading-tight">{prompt?.prompt_text || result?.prompt_text}</DialogTitle>
+          </DialogHeader>
+          {result ? (
+            <div className="space-y-6 pt-4">
+              {/* Stats Cards */}
+              <div className="grid grid-cols-4 gap-4">
+                <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 text-center">
+                  <div className="text-3xl font-bold text-green-700">{result.summary.share_of_voice}%</div>
+                  <div className="text-sm font-medium text-green-600 mt-1">Visibility</div>
+                </div>
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 text-center">
+                  <div className="text-3xl font-bold text-blue-700">{result.summary.average_rank ? `#${result.summary.average_rank}` : "--"}</div>
+                  <div className="text-sm font-medium text-blue-600 mt-1">Avg Rank</div>
+                </div>
+                <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-4 text-center">
+                  <div className="text-3xl font-bold text-purple-700">{result.summary.total_citations}</div>
+                  <div className="text-sm font-medium text-purple-600 mt-1">Citations</div>
+                </div>
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 text-center">
+                  <div className="text-3xl font-bold text-amber-700">${result.summary.total_cost.toFixed(4)}</div>
+                  <div className="text-sm font-medium text-amber-600 mt-1">Cost</div>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+                <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
+                <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>All Citations ({uniqueCitations.length})</button>
+              </div>
+
+              {/* Model Results Tab */}
+              {detailTab === "models" && (
+                <div className="space-y-4">
+                  {result.model_results.map((mr, i) => {
+                    const Logo = MODEL_LOGOS[mr.model]?.Logo;
+                    const color = MODEL_LOGOS[mr.model]?.color || "#666";
+                    return (
+                      <div key={i} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        {/* Model Header */}
+                        <div className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-100">
+                          <div className="flex items-center gap-3">
+                            {Logo && <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-100"><Logo className="h-5 w-5" style={{ color }} /></div>}
+                            <span className="font-semibold text-gray-900">{mr.model_name}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {mr.brand_mentioned ? (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium"><CheckCircle className="h-4 w-4" /> Visible</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-sm font-medium">Not Visible</span>
+                            )}
+                            {mr.brand_rank && <span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">#{mr.brand_rank}</span>}
+                            <span className="px-2.5 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">{mr.citations.length} citations</span>
+                          </div>
+                        </div>
+
+                        {/* Response Preview */}
+                        {mr.raw_response && (
+                          <div className="p-4 border-b border-gray-100">
+                            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">AI Response</div>
+                            <div className="p-3 bg-gray-50 rounded-lg text-sm text-gray-700 max-h-32 overflow-y-auto leading-relaxed">{mr.raw_response.substring(0, 600)}{mr.raw_response.length > 600 && "..."}</div>
+                          </div>
+                        )}
+
+                        {/* Citations */}
+                        {mr.citations.length > 0 && (
+                          <div className="p-4">
+                            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Sources Cited ({mr.citations.length})</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {mr.citations.slice(0, 6).map((c, j) => (
+                                <a key={j} href={c.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 p-2.5 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:border-gray-300 transition-colors group">
+                                  <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded flex-shrink-0" />
+                                  <span className="text-sm text-gray-700 truncate flex-1 group-hover:text-gray-900">{c.title || c.domain}</span>
+                                  <ExternalLink className="h-3.5 w-3.5 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
+                                </a>
+                              ))}
+                            </div>
+                            {mr.citations.length > 6 && (
+                              <button onClick={() => setDetailTab("citations")} className="mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
+                                View all {mr.citations.length} citations <ChevronRight className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Citations Tab */}
+              {detailTab === "citations" && (
+                <div className="space-y-3">
+                  {uniqueCitations.length === 0 ? (
+                    <div className="text-center py-12 bg-gray-50 rounded-xl border border-gray-200">
+                      <Link2 className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                      <p className="text-gray-500 font-medium">No citations found for this prompt</p>
+                    </div>
+                  ) : (
+                    uniqueCitations.map((c, i) => {
+                      const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other;
+                      const modelsUsing = allPromptCitations.filter(x => x.url === c.url).map(x => x.model);
+                      return (
+                        <div key={i} className="flex items-start gap-4 p-4 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow">
+                          <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=24`} alt="" className="h-6 w-6 mt-0.5 rounded" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-base font-medium text-gray-900 hover:text-blue-600 line-clamp-1">{c.title || c.url}</a>
+                                <p className="text-sm text-gray-500 truncate mt-0.5">{c.url}</p>
+                              </div>
+                              <span className={cn("px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0", t.bg, t.color)}>{t.label}</span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-3">
+                              <span className="text-xs text-gray-500 font-medium">Cited by:</span>
+                              {[...new Set(modelsUsing)].map((m, j) => <span key={j} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs font-medium">{m}</span>)}
+                            </div>
+                          </div>
+                          <div className="flex gap-1.5">
+                            <button onClick={() => navigator.clipboard.writeText(c.url)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"><Copy className="h-4 w-4" /></button>
+                            <a href={c.url} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><ExternalLink className="h-4 w-4" /></a>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-12 bg-gray-50 rounded-xl my-4">
+              <MessageSquare className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+              <p className="text-gray-600 font-medium mb-4">No results yet. Run this prompt to see analysis.</p>
+              <Button size="lg" onClick={() => { if (prompt) runSinglePrompt(prompt.id); setSelectedPromptDetail(null); }} className="bg-gray-900 hover:bg-gray-800"><Play className="h-4 w-4 mr-2" /> Run Now</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    );
   }
 
   function ImportDialog() {

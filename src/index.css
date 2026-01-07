@@ -4,48 +4,26 @@
 
 @layer base {
   :root {
-    --background: 240 10% 4%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 10%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 10%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 142 76% 36%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 5% 26%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 5% 26%;
-    --muted-foreground: 240 5% 65%;
-    --accent: 240 5% 26%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62% 30%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5% 26%;
-    --input: 240 5% 26%;
-    --ring: 142 76% 36%;
-    --radius: 0.5rem;
-  }
-
-  .light {
-    --background: 0 0% 98%;
-    --foreground: 240 10% 4%;
+    --background: 220 14% 96%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 4%;
+    --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 4%;
-    --primary: 221 83% 53%;
-    --primary-foreground: 0 0% 98%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 222 47% 11%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 220 14% 96%;
-    --secondary-foreground: 240 10% 4%;
+    --secondary-foreground: 222 47% 11%;
     --muted: 220 14% 96%;
     --muted-foreground: 220 9% 46%;
     --accent: 220 14% 96%;
-    --accent-foreground: 240 10% 4%;
+    --accent-foreground: 222 47% 11%;
     --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive-foreground: 0 0% 100%;
     --border: 220 13% 91%;
     --input: 220 13% 91%;
-    --ring: 221 83% 53%;
+    --ring: 222 47% 11%;
+    --radius: 0.625rem;
   }
 }
 
@@ -53,49 +31,293 @@
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  }
+
+  html {
+    scroll-behavior: smooth;
   }
 }
 
-/* Custom scrollbar */
+/* ===== SCROLLBAR STYLING ===== */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: hsl(var(--muted));
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
+  background: #cbd5e1;
   border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground));
+  background: #94a3b8;
 }
 
-/* Table styles */
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+/* ===== TABLE STYLING ===== */
 table {
   border-collapse: collapse;
+  width: 100%;
 }
 
-/* Badge hover effects */
+table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid #f3f4f6;
+}
+
+table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+table tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+/* ===== CARD & CONTAINER POLISH ===== */
+.card-elevated {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.card-elevated:hover {
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+}
+
+.card-interactive {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.card-interactive:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px 0 rgb(0 0 0 / 0.08);
+}
+
+/* ===== BUTTON POLISH ===== */
+button:not([type="text"]):not([role="textbox"]),
+[role="button"] {
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:active:not(:disabled):not([type="text"]),
+[role="button"]:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* ===== BADGE STYLING ===== */
+.badge-interactive {
+  transition: all 0.15s ease;
+}
+
 .badge-interactive:hover {
-  transform: scale(1.02);
-  transition: transform 0.15s ease;
+  transform: scale(1.03);
 }
 
-/* Progress bar animation */
+/* ===== PROGRESS BAR ANIMATION ===== */
 .progress-bar {
-  transition: width 0.5s ease-out;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Card hover effect */
-.card-hover:hover {
-  background-color: hsl(var(--accent));
-  transition: background-color 0.2s ease;
+/* ===== INPUT FOCUS STYLES ===== */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(59 130 246 / 0.15);
+}
+
+/* ===== LINK STYLING ===== */
+a {
+  transition: color 0.15s ease;
+}
+
+/* ===== TOOLTIP STYLING ===== */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 4px 8px;
+  background: #1f2937;
+  color: white;
+  font-size: 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
+/* ===== DIALOG/MODAL POLISH ===== */
+[role="dialog"] {
+  animation: dialogEnter 0.2s ease-out;
+}
+
+@keyframes dialogEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ===== SIDEBAR STYLING ===== */
+.sidebar-link {
+  position: relative;
+  transition: all 0.15s ease;
+}
+
+.sidebar-link::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  background: #3b82f6;
+  border-radius: 0 2px 2px 0;
+  transition: height 0.2s ease;
+}
+
+.sidebar-link.active::before {
+  height: 60%;
+}
+
+/* ===== LOADING SKELETON ===== */
+.skeleton {
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ===== STAT CARD GLOW ===== */
+.stat-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100px;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.stat-card:hover::after {
+  opacity: 1;
+}
+
+/* ===== FADE IN ANIMATION ===== */
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== ICON BUTTON ===== */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.icon-button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* ===== TABLE ROW HIGHLIGHT ===== */
+tbody tr:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.01);
+}
+
+/* ===== CHIP/TAG STYLING ===== */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 9999px;
+  transition: all 0.15s ease;
+}
+
+/* ===== FOCUS VISIBLE ===== */
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* ===== SELECTION COLOR ===== */
+::selection {
+  background-color: rgba(59, 130, 246, 0.2);
+}
+
+/* ===== SMOOTH TRANSITIONS FOR LAYOUT ===== */
+/* Sidebar transitions only - not for content that contains forms */
+aside {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
 }

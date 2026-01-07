@@ -104,8 +104,8 @@ export const AI_MODELS: AIModel[] = [
   { id: "google_serp", name: "Google SERP", provider: "DataForSEO", color: "#22c55e", costPerQuery: 0.002 },
 ];
 
-export type PromptCategory = 
-  | "custom" | "imported" | "generated" | "niche" | "super_niche" 
+export type PromptCategory =
+  | "custom" | "imported" | "generated" | "niche" | "super_niche"
   | "brand" | "competitor" | "location" | "feature";
 
 export interface Client {
@@ -180,11 +180,11 @@ export interface DashboardSummary {
 
 export interface ModelStats { visible: number; total: number; cost: number; }
 export interface CompetitorGapItem { name: string; mentions: number; percentage: number; }
-export interface SourceItem { domain: string; count: number; prompts: string[]; }
+export interface SourceItem { domain: string; count: number; prompts: string[]; type: string; promptCount: number; avg: number; }
 export interface Insights { status: "high" | "medium" | "low"; statusText: string; recommendations: string[]; }
 
 // Industry presets
-export const INDUSTRY_PRESETS: Record<string, { 
+export const INDUSTRY_PRESETS: Record<string, {
   competitors: string[]; prompts: string[]; nichePrompts: string[]; superNichePrompts: string[];
 }> = {
   "Dating/Matrimony": {
@@ -338,23 +338,49 @@ export function useClientDashboard() {
         });
       });
     });
+
+    // Helper function to classify domain type
+    const classifyDomain = (domain: string): string => {
+      const d = domain.toLowerCase();
+      if (d.includes("reddit") || d.includes("quora") || d.includes("youtube")) return "ugc";
+      if (d.includes("forbes") || d.includes("techcrunch") || d.includes("wired")) return "editorial";
+      if (d.includes("wikipedia")) return "reference";
+      if (d.includes(".gov") || d.includes(".edu")) return "institutional";
+      if (d.includes("apple") || d.includes("google") || d.includes("microsoft")) return "corporate";
+      return "other";
+    };
+
+    const total = auditResults.length || 1;
     return Object.entries(sources)
-      .map(([domain, data]) => ({ domain, count: data.count, prompts: Array.from(data.prompts) }))
+      .map(([domain, data]) => ({
+        domain,
+        count: data.count,
+        prompts: Array.from(data.prompts),
+        type: classifyDomain(domain),
+        promptCount: data.prompts.size,
+        avg: Math.round((data.count / total) * 10) / 10
+      }))
       .sort((a, b) => b.count - a.count);
   }, [auditResults]);
 
   const getInsights = useCallback((): Insights => {
     const sov = summary?.overall_sov || 0;
     if (sov >= 50) {
-      return { status: "high", statusText: `High visibility at ${sov}%`,
-        recommendations: ["Maintain current content strategy", "Monitor competitor movements", "Expand to new keywords"] };
+      return {
+        status: "high", statusText: `High visibility at ${sov}%`,
+        recommendations: ["Maintain current content strategy", "Monitor competitor movements", "Expand to new keywords"]
+      };
     } else if (sov >= 20) {
-      return { status: "medium", statusText: `Medium visibility at ${sov}%`,
-        recommendations: ["Increase brand mentions in authoritative sources", "Improve ranking in AI-generated lists", "Create more targeted content"] };
+      return {
+        status: "medium", statusText: `Medium visibility at ${sov}%`,
+        recommendations: ["Increase brand mentions in authoritative sources", "Improve ranking in AI-generated lists", "Create more targeted content"]
+      };
     }
-    return { status: "low", statusText: `Low visibility at ${sov}%`,
+    return {
+      status: "low", statusText: `Low visibility at ${sov}%`,
       recommendations: ["Increase brand mentions in authoritative sources", "Improve ranking in AI-generated lists",
-        `Monitor ${selectedClient?.competitors[0] || "competitor"}'s presence`, "Focus on niche and super-niche keywords"] };
+        `Monitor ${selectedClient?.competitors[0] || "competitor"}'s presence`, "Focus on niche and super-niche keywords"]
+    };
   }, [summary, selectedClient]);
 
   const costBreakdown = useCallback(() => {
@@ -432,7 +458,7 @@ export function useClientDashboard() {
       brand_tags: clientData.brand_tags || [clientData.brand_name || clientData.name || ""],
       competitors: clientData.competitors || INDUSTRY_PRESETS[clientData.industry || "Custom"]?.competitors || [],
     };
-    
+
     // Save to Supabase first
     try {
       const { error: insertError } = await supabase.from("clients").insert({
@@ -443,7 +469,7 @@ export function useClientDashboard() {
       });
       if (insertError) console.error("Supabase insert error:", insertError);
     } catch (err) { console.log("Supabase insert failed:", err); }
-    
+
     const newClients = [...clients, newClient];
     setClients(newClients);
     saveToStorage(STORAGE_KEYS.CLIENTS, newClients);
@@ -453,9 +479,9 @@ export function useClientDashboard() {
   const updateClient = useCallback(async (clientId: string, updates: Partial<Client>): Promise<Client | null> => {
     const clientIndex = clients.findIndex(c => c.id === clientId);
     if (clientIndex === -1) return null;
-    
+
     const updatedClient = { ...clients[clientIndex], ...updates };
-    
+
     // Save to Supabase first
     try {
       const { error: updateError } = await supabase.from("clients").update({
@@ -466,7 +492,7 @@ export function useClientDashboard() {
       }).eq("id", clientId);
       if (updateError) console.error("Supabase update error:", updateError);
     } catch (err) { console.log("Supabase update failed:", err); }
-    
+
     const newClients = [...clients];
     newClients[clientIndex] = updatedClient;
     setClients(newClients);
@@ -477,11 +503,11 @@ export function useClientDashboard() {
 
   const deleteClient = useCallback(async (clientId: string): Promise<boolean> => {
     if (clients.length <= 1) return false;
-    
+
     try {
       await supabase.from("clients").delete().eq("id", clientId);
     } catch (err) { console.log("Supabase delete failed:", err); }
-    
+
     const newClients = clients.filter(c => c.id !== clientId);
     setClients(newClients);
     saveToStorage(STORAGE_KEYS.CLIENTS, newClients);
@@ -492,7 +518,7 @@ export function useClientDashboard() {
   const switchClient = useCallback(async (client: Client) => {
     setSelectedClient(client);
     saveToStorage(STORAGE_KEYS.SELECTED_CLIENT, client.id);
-    
+
     // Load prompts from Supabase first
     try {
       const { data: promptsData } = await supabase
@@ -514,7 +540,7 @@ export function useClientDashboard() {
       const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
       setPrompts(storedPrompts[client.id] || []);
     }
-    
+
     // Load results from Supabase
     try {
       const { data: resultsData } = await supabase
@@ -540,7 +566,7 @@ export function useClientDashboard() {
         return;
       }
     } catch { /* fallback to localStorage */ }
-    
+
     const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
     const clientResults = storedResults[client.id] || [];
     setAuditResults(clientResults);
@@ -579,12 +605,12 @@ export function useClientDashboard() {
     if (!selectedClient) return null;
     const nicheLevel = detectNicheLevel(promptText);
     const detectedCategory = category || (nicheLevel === "super_niche" ? "super_niche" : nicheLevel === "niche" ? "niche" : "custom");
-    
+
     const newPrompt: Prompt = {
       id: crypto.randomUUID(), client_id: selectedClient.id, prompt_text: promptText,
       category: detectedCategory, is_custom: true, is_active: true, niche_level: nicheLevel,
     };
-    
+
     // Save to Supabase first
     try {
       const { error: insertError } = await supabase.from("forzeo_prompts").insert({
@@ -593,7 +619,7 @@ export function useClientDashboard() {
       });
       if (insertError) console.error("Supabase prompt insert error:", insertError);
     } catch (err) { console.log("Supabase prompt insert failed:", err); }
-    
+
     const newPrompts = [...prompts, newPrompt];
     setPrompts(newPrompts);
     const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
@@ -612,7 +638,7 @@ export function useClientDashboard() {
         is_custom: true, is_active: true, niche_level: nicheLevel,
       };
     });
-    
+
     // Save to Supabase
     try {
       const { error: insertError } = await supabase.from("forzeo_prompts").insert(
@@ -623,7 +649,7 @@ export function useClientDashboard() {
       );
       if (insertError) console.error("Supabase bulk insert error:", insertError);
     } catch (err) { console.log("Supabase bulk insert failed:", err); }
-    
+
     const allPrompts = [...prompts, ...newPrompts];
     setPrompts(allPrompts);
     const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
@@ -646,30 +672,76 @@ export function useClientDashboard() {
 
   const deletePrompt = useCallback(async (promptId: string) => {
     if (!selectedClient) return;
-    
-    // Delete prompt from database (keep audit results for historical tracking)
+
+    // Soft delete - mark prompt as inactive in database (keep for tracking)
     try {
-      await supabase.from("forzeo_prompts").delete().eq("id", promptId);
-    } catch (err) { console.log("Supabase delete prompt failed:", err); }
-    
-    // Update local prompts state
-    const newPrompts = prompts.filter(p => p.id !== promptId);
-    setPrompts(newPrompts);
+      await supabase.from("forzeo_prompts").update({ is_active: false }).eq("id", promptId);
+    } catch (err) { console.log("Supabase soft delete prompt failed:", err); }
+
+    // Update local prompts state - mark as inactive instead of removing
+    const updatedPrompts = prompts.map(p => p.id === promptId ? { ...p, is_active: false } : p);
+    setPrompts(updatedPrompts);
     const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-    storedPrompts[selectedClient.id] = newPrompts;
+    storedPrompts[selectedClient.id] = updatedPrompts;
     saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
-    
-    // Update local audit results state (remove from UI but keep in DB)
-    const newResults = auditResults.filter(r => r.prompt_id !== promptId);
-    setAuditResults(newResults);
-    const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-    storedResults[selectedClient.id] = newResults;
-    saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
-    
+
+    // Keep audit results in local storage for historical tracking
+    // Only update the summary to reflect active prompts
+    const activeResults = auditResults.filter(r => {
+      const prompt = updatedPrompts.find(p => p.id === r.prompt_id);
+      return prompt?.is_active !== false;
+    });
+
+    // Note: We don't remove audit results from storage - they stay for historical tracking
+    // We only update the UI to show active prompts
+    setAuditResults(activeResults);
+
     // Recalculate summary based on remaining active prompts
-    if (newResults.length === 0) {
+    if (activeResults.length === 0) {
       setSummary(null);
     } else {
+      let totalSov = 0, totalCitations = 0, totalCost = 0, rankSum = 0, rankCount = 0;
+      for (const r of activeResults) {
+        totalSov += r.summary.share_of_voice;
+        totalCitations += r.summary.total_citations;
+        totalCost += r.summary.total_cost;
+        if (r.summary.average_rank) { rankSum += r.summary.average_rank; rankCount++; }
+      }
+      setSummary({
+        total_prompts: activeResults.length,
+        overall_sov: Math.round(totalSov / activeResults.length),
+        average_rank: rankCount > 0 ? Math.round((rankSum / rankCount) * 10) / 10 : null,
+        total_citations: totalCitations,
+        total_cost: totalCost,
+      });
+    }
+  }, [selectedClient, prompts, auditResults]);
+
+  const reactivatePrompt = useCallback(async (promptId: string) => {
+    if (!selectedClient) return;
+
+    // Reactivate prompt in database
+    try {
+      await supabase.from("forzeo_prompts").update({ is_active: true }).eq("id", promptId);
+    } catch (err) { console.log("Supabase reactivate prompt failed:", err); }
+
+    // Update local prompts state - mark as active
+    const updatedPrompts = prompts.map(p => p.id === promptId ? { ...p, is_active: true } : p);
+    setPrompts(updatedPrompts);
+    const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+    storedPrompts[selectedClient.id] = updatedPrompts;
+    saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+
+    // Restore audit results for this prompt to the UI
+    const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+    const allStoredResults = storedResults[selectedClient.id] || [];
+    const promptResult = allStoredResults.find(r => r.prompt_id === promptId);
+
+    if (promptResult && !auditResults.find(r => r.prompt_id === promptId)) {
+      const newResults = [...auditResults, promptResult];
+      setAuditResults(newResults);
+
+      // Recalculate summary
       let totalSov = 0, totalCitations = 0, totalCost = 0, rankSum = 0, rankCount = 0;
       for (const r of newResults) {
         totalSov += r.summary.share_of_voice;
@@ -689,21 +761,21 @@ export function useClientDashboard() {
 
   const clearAllPrompts = useCallback(async () => {
     if (!selectedClient) return;
-    
+
     // Delete all prompts from database (keep audit results for historical tracking)
     try {
       await supabase.from("forzeo_prompts").delete().eq("client_id", selectedClient.id);
     } catch (err) { console.log("Supabase clear prompts failed:", err); }
-    
+
     // Clear local state (audit results stay in DB for tracking)
     setPrompts([]);
     setAuditResults([]);
     setSummary(null);
-    
+
     const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
     storedPrompts[selectedClient.id] = [];
     saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
-    
+
     const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
     storedResults[selectedClient.id] = [];
     saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
@@ -789,10 +861,10 @@ export function useClientDashboard() {
     if (!selectedClient) return;
     const prompt = prompts.find(p => p.id === promptId);
     if (!prompt) return;
-    
+
     // Check if there's an existing result (for re-run)
     const existingResultIndex = auditResults.findIndex(r => r.prompt_id === promptId);
-    
+
     setLoadingPromptId(promptId);
     setError(null);
 
@@ -811,7 +883,7 @@ export function useClientDashboard() {
           id: data.data.id || crypto.randomUUID(), prompt_id: prompt.id, prompt_text: prompt.prompt_text,
           model_results: data.data.model_results, summary: data.data.summary, created_at: data.data.timestamp,
         };
-        
+
         let newResults: AuditResult[];
         if (existingResultIndex >= 0) {
           // Replace existing result (re-run)
@@ -821,7 +893,7 @@ export function useClientDashboard() {
           // Add new result
           newResults = [...auditResults, result];
         }
-        
+
         setAuditResults(newResults);
         const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
         storedResults[selectedClient.id] = newResults;
@@ -848,8 +920,8 @@ export function useClientDashboard() {
     for (const r of auditResults) {
       const prompt = prompts.find(p => p.id === r.prompt_id);
       rows.push([r.prompt_text, prompt?.category || "custom", prompt?.niche_level || "broad",
-        `${r.summary.share_of_voice}%`, r.summary.average_rank?.toString() || "-",
-        r.summary.total_citations.toString(), `$${r.summary.total_cost.toFixed(4)}`]);
+      `${r.summary.share_of_voice}%`, r.summary.average_rank?.toString() || "-",
+      r.summary.total_citations.toString(), `$${r.summary.total_cost.toFixed(4)}`]);
     }
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -863,8 +935,10 @@ export function useClientDashboard() {
 
   const exportPrompts = useCallback(() => {
     if (!selectedClient) return;
-    const data = { client: selectedClient.name, exported_at: new Date().toISOString(),
-      prompts: prompts.map(p => ({ text: p.prompt_text, category: p.category, niche_level: p.niche_level })) };
+    const data = {
+      client: selectedClient.name, exported_at: new Date().toISOString(),
+      prompts: prompts.map(p => ({ text: p.prompt_text, category: p.category, niche_level: p.niche_level }))
+    };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -881,7 +955,7 @@ export function useClientDashboard() {
     const sources = getTopSources().slice(0, 10);
     const ins = getInsights();
     const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    
+
     let report = `FORZEO GEO VISIBILITY REPORT\n${"=".repeat(60)}\n\n`;
     report += `Client: ${selectedClient.name}\nBrand: ${selectedClient.brand_name}\n`;
     report += `Industry: ${selectedClient.industry}\nRegion: ${selectedClient.target_region}\nDate: ${date}\n\n`;
@@ -899,7 +973,7 @@ export function useClientDashboard() {
     gap.forEach((c, idx) => { report += `${idx + 1}. ${c.name.padEnd(25)} ${c.percentage}% (${c.mentions})\n`; });
     report += `\nTOP SOURCES\n${"-".repeat(40)}\n`;
     sources.forEach((s, idx) => { report += `${idx + 1}. ${s.domain.padEnd(40)} ${s.count}\n`; });
-    
+
     const blob = new Blob([report], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1084,26 +1158,26 @@ export function useClientDashboard() {
     // State
     clients, selectedClient, prompts, auditResults, summary, costBreakdown,
     selectedModels, loading, loadingPromptId, error,
-    
+
     // Client management
     addClient, updateClient, deleteClient, switchClient, setSelectedModels,
     updateBrandTags, updateCompetitors,
-    
+
     // Audit
     runFullAudit, runSinglePrompt, clearResults,
-    
+
     // Prompts
-    addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, clearAllPrompts,
-    
+    addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, reactivatePrompt, clearAllPrompts,
+
     // Export/Import
     exportToCSV, exportPrompts, exportFullReport, importData,
-    
+
     // AI features
     generatePromptsFromKeywords, generateContent,
-    
+
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,
-    
+
     // Constants
     INDUSTRY_PRESETS, LOCATION_CODES,
   };
