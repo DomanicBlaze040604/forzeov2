@@ -3,7 +3,7 @@
  */
 import { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +61,7 @@ export default function ClientDashboard() {
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, addClient, updateClient, deleteClient, switchClient, setSelectedModels, runFullAudit, runSinglePrompt, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content">("overview");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [newPrompt, setNewPrompt] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -187,7 +188,7 @@ export default function ClientDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      <aside className="w-56 bg-white border-r border-gray-200 flex flex-col fixed h-full z-20">
+      <aside className={cn("bg-white border-r border-gray-200 flex flex-col fixed h-full z-20 transition-all duration-300", sidebarCollapsed ? "w-0 -translate-x-full" : "w-56")}>
         <div className="p-4 border-b border-gray-100">
           <DropdownMenu>
             <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2"><div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span></div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400" /></button></DropdownMenuTrigger>
@@ -208,10 +209,10 @@ export default function ClientDashboard() {
         <div className="p-3 border-t border-gray-100"><div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3 mb-3"><div className="text-xs font-medium text-gray-500 mb-1">API Cost</div><div className="text-lg font-bold text-gray-900">${totalCost.toFixed(4)}</div><div className="text-xs text-gray-400 mt-1">{auditResults.length} audits run</div></div><button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50"><HelpCircle className="h-4 w-4" /> Help</button></div>
       </aside>
 
-      <main className="flex-1 ml-56 min-h-screen">
+      <main className={cn("flex-1 min-h-screen transition-all duration-300", sidebarCollapsed ? "ml-0" : "ml-56")}>
         <header className="bg-white border-b border-gray-200 px-6 py-3 sticky top-0 z-10">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3"><h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-gray-400" />{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "citations" ? "Citations" : activeTab === "content" ? "Content Generator" : "Sources"}</h1>{(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs">Filtered</Badge>}</div>
+            <div className="flex items-center gap-3"><button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>{sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button><h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-gray-400" />{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "citations" ? "Citations" : activeTab === "content" ? "Content Generator" : "Sources"}</h1>{(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs">Filtered</Badge>}</div>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
                 <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white shadow-sm text-gray-900"><div className="h-4 w-4 rounded flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white text-[10px] font-bold">{selectedClient?.brand_name?.charAt(0)}</span></div>{selectedClient?.brand_name}</button>
