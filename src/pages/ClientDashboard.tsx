@@ -1226,6 +1226,16 @@ export default function ClientDashboard() {
                   {result.model_results.map((mr, i) => {
                     const Logo = MODEL_LOGOS[mr.model]?.Logo;
                     const color = MODEL_LOGOS[mr.model]?.color || "#666";
+
+                    // Competitor Analysis
+                    const responseText = mr.raw_response?.toLowerCase() || "";
+                    const competitorMentions = (selectedClient?.competitors || []).map(comp => {
+                      const matches = responseText.match(new RegExp(comp.toLowerCase(), "gi"));
+                      return { name: comp, count: matches ? matches.length : 0 };
+                    }).filter(c => c.count > 0).sort((a, b) => b.count - a.count);
+
+                    const topCompetitor = competitorMentions[0];
+
                     return (
                       <div key={i} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                         {/* Model Header */}
@@ -1249,7 +1259,31 @@ export default function ClientDashboard() {
                         {mr.raw_response && (
                           <div className="p-4 border-b border-gray-100">
                             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">AI Response</div>
-                            <div className="p-3 bg-gray-50 rounded-lg text-sm text-gray-700 max-h-32 overflow-y-auto leading-relaxed">{mr.raw_response.substring(0, 600)}{mr.raw_response.length > 600 && "..."}</div>
+                            <div className="p-3 bg-gray-50 rounded-lg text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{mr.raw_response}</div>
+
+                            {/* Competitor Mentions Block */}
+                            {(topCompetitor || competitorMentions.length > 0) && (
+                              <div className="mt-4 pt-3 border-t border-gray-200">
+                                <div className="flex flex-col gap-3">
+                                  {topCompetitor && (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-gray-400 font-medium uppercase">Top mentioned:</span>
+                                      <Badge variant="outline" className="text-yellow-600 bg-yellow-50 border-yellow-200">{topCompetitor.name}</Badge>
+                                    </div>
+                                  )}
+                                  {competitorMentions.length > 0 && (
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-xs text-gray-400 font-medium uppercase">Competitors mentioned:</span>
+                                      {competitorMentions.map((comp, k) => (
+                                        <Badge key={k} variant="secondary" className="text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-200">
+                                          {comp.name} ({comp.count}x)
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -1257,8 +1291,8 @@ export default function ClientDashboard() {
                         {mr.citations.length > 0 && (
                           <div className="p-4">
                             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Sources Cited ({mr.citations.length})</div>
-                            <div className="grid grid-cols-2 gap-2">
-                              {mr.citations.slice(0, 6).map((c, j) => (
+                            <div className="grid grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+                              {mr.citations.map((c, j) => (
                                 <a key={j} href={c.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 p-2.5 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:border-gray-300 transition-colors group">
                                   <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded flex-shrink-0" />
                                   <span className="text-sm text-gray-700 truncate flex-1 group-hover:text-gray-900">{c.title || c.domain}</span>
@@ -1266,11 +1300,6 @@ export default function ClientDashboard() {
                                 </a>
                               ))}
                             </div>
-                            {mr.citations.length > 6 && (
-                              <button onClick={() => setDetailTab("citations")} className="mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
-                                View all {mr.citations.length} citations <ChevronRight className="h-4 w-4" />
-                              </button>
-                            )}
                           </div>
                         )}
                       </div>
