@@ -3,7 +3,7 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useClientDashboard, AI_MODELS } from "@/hooks/useClientDashboard";
 import { MODEL_LOGOS } from "@/components/ModelLogos";
+import { VisibilityGraphs } from "@/components/VisibilityGraphs";
+import { ScheduleManager } from "@/components/ScheduleManager";
+import { UniversalImport } from "@/components/UniversalImport";
+import { CampaignsList } from "@/components/CampaignsList";
+import { CampaignDetail } from "@/components/CampaignDetail";
+import { SignalsDashboard } from "@/components/SignalsDashboard";
 
 const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; dot: string }> = {
   ugc: { label: "UGC", color: "text-cyan-700", bg: "bg-cyan-100", dot: "#06b6d4" },
@@ -78,9 +84,10 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, addClient, updateClient, deleteClient, switchClient, setSelectedModels, runFullAudit, runSinglePrompt, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, addClient, updateClient, deleteClient, switchClient, setSelectedModels, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns">("overview");
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [newPrompt, setNewPrompt] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -94,10 +101,15 @@ export default function ClientDashboard() {
   const [newCompetitor, setNewCompetitor] = useState("");
   const [bulkPromptsOpen, setBulkPromptsOpen] = useState(false);
   const [bulkPrompts, setBulkPrompts] = useState("");
+  const [promptSentiment, setPromptSentiment] = useState<string>("Neutral");
+  const [promptFocus, setPromptFocus] = useState<string>("General");
+  const [selectedPromptCompetitors, setSelectedPromptCompetitors] = useState<string[]>([]);
   const [keywordsInput, setKeywordsInput] = useState("");
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [runCampaignOpen, setRunCampaignOpen] = useState(false);
+  const [campaignName, setCampaignName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [contentTopic, setContentTopic] = useState("");
   const [contentType, setContentType] = useState("article");
@@ -190,7 +202,23 @@ export default function ClientDashboard() {
 
   const handleAddPrompt = async () => { if (newPrompt.trim()) { await addCustomPrompt(newPrompt.trim()); setNewPrompt(""); } };
   const handleBulkAdd = () => { if (bulkPrompts.trim()) { addMultiplePrompts(bulkPrompts.split("\n").filter(l => l.trim().length > 3)); setBulkPrompts(""); setBulkPromptsOpen(false); } };
-  const handleGeneratePrompts = async () => { if (!keywordsInput.trim()) return; setGeneratingPrompts(true); try { const g = await generatePromptsFromKeywords(keywordsInput); if (g?.length) { addMultiplePrompts(g); setKeywordsInput(""); } } finally { setGeneratingPrompts(false); } };
+  const handleGeneratePrompts = async () => {
+    if (!keywordsInput.trim()) return;
+    setGeneratingPrompts(true);
+    try {
+      const g = await generatePromptsFromKeywords(keywordsInput, {
+        sentiment: promptSentiment,
+        focus: promptFocus,
+        competitors: selectedPromptCompetitors
+      });
+      if (g?.length) {
+        addMultiplePrompts(g);
+        setKeywordsInput("");
+      }
+    } finally {
+      setGeneratingPrompts(false);
+    }
+  };
   const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType); if (c) setGeneratedContent(c); } finally { setGeneratingContent(false); } };
   const handleImport = () => { if (importText.trim()) { importData(importText); setImportText(""); setImportDialogOpen(false); } };
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = (ev) => importData(ev.target?.result as string); r.readAsText(f); } };
@@ -232,6 +260,47 @@ export default function ClientDashboard() {
   const dateRangeLabel = dateRangeFilter === "7d" ? "Last 7 days" : dateRangeFilter === "30d" ? "Last 30 days" : dateRangeFilter === "90d" ? "Last 90 days" : "All Time";
   const modelFilterLabel = modelFilter.length === 0 ? "All Models" : modelFilter.length === 1 ? AI_MODELS.find(m => m.id === modelFilter[0])?.name : `${modelFilter.length} Models`;
 
+  const handleRunCampaign = async () => {
+    if (!campaignName.trim()) return;
+    const activePromptIds = prompts.filter(p => p.is_active !== false).map(p => p.id);
+    await runCampaign(campaignName, activePromptIds);
+    setCampaignName("");
+    setRunCampaignOpen(false);
+    setActiveTab("campaigns"); // Switch to campaigns tab to see progress
+  };
+
+  const RunCampaignDialog = () => (
+    <Dialog open={runCampaignOpen} onOpenChange={setRunCampaignOpen}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Run Massive Campaign</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label>Campaign Name</Label>
+              <Input
+                value={campaignName}
+                onChange={(e) => setCampaignName(e.target.value)}
+                placeholder="e.g. Q1 Competitor Audit"
+              />
+              <p className="text-sm text-gray-500">
+                This will run all {prompts.filter(p => p.is_active !== false).length} active prompts as a single campaign.
+              </p>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={() => setRunCampaignOpen(false)} variant="outline">Cancel</Button>
+          <Button onClick={handleRunCampaign} disabled={!campaignName.trim() || loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}
+            Start Campaign
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
       <aside className={cn("bg-white border-r border-gray-200 flex flex-col fixed h-full z-20 transition-all duration-300 shadow-sm overflow-hidden", sidebarCollapsed ? "w-0 opacity-0" : "w-56 opacity-100")}>
@@ -243,7 +312,7 @@ export default function ClientDashboard() {
         </div>
         <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">General</div>
-          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Sparkles }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
+          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Sparkles }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Wand2 }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
@@ -271,7 +340,7 @@ export default function ClientDashboard() {
       <main className={cn("flex-1 min-h-screen transition-all duration-300", sidebarCollapsed ? "ml-0" : "ml-56")}>
         <header className="bg-white border-b border-gray-200 px-6 py-3 sticky top-0 z-10">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3"><button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>{sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button><h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-gray-400" />{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "citations" ? "Citations" : activeTab === "content" ? "Content Generator" : "Sources"}</h1>{(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs">Filtered</Badge>}</div>
+            <div className="flex items-center gap-3"><button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>{sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button><h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-gray-400" />{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "analytics" ? "Visibility Analytics" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "signals" ? "Fresh Signal Intelligence" : activeTab === "campaigns" ? "Campaign Runs" : activeTab === "citations" ? "Citations" : activeTab === "content" ? "Content Generator" : "Sources"}</h1>{(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs">Filtered</Badge>}</div>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
                 <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white shadow-sm text-gray-900"><div className="h-4 w-4 rounded flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white text-[10px] font-bold">{selectedClient?.brand_name?.charAt(0)}</span></div>{selectedClient?.brand_name}</button>
@@ -285,9 +354,33 @@ export default function ClientDashboard() {
           </div>
         </header>
         {error && <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2 text-sm"><AlertTriangle className="h-4 w-4" /> {error}</div>}
-        <div className="p-6">{activeTab === "overview" && OverviewTab()}{activeTab === "prompts" && PromptsTab()}{activeTab === "citations" && CitationsTab()}{activeTab === "sources" && SourcesTab()}{activeTab === "content" && ContentTab()}</div>
+        <div className="p-6">
+          {activeTab === "overview" && OverviewTab()}
+          {activeTab === "prompts" && PromptsTab()}
+          {activeTab === "analytics" && selectedClient && <VisibilityGraphs clientId={selectedClient.id} brandName={selectedClient.brand_name} />}
+          {activeTab === "schedules" && selectedClient && <ScheduleManager clientId={selectedClient.id} prompts={prompts} selectedModels={selectedModels} />}
+          {activeTab === "signals" && selectedClient && <SignalsDashboard clientId={selectedClient.id} brandName={selectedClient.brand_name} />}
+          {activeTab === "campaigns" && selectedClient && (
+            <div className="animate-in fade-in">
+              {selectedCampaignId ? (
+                <CampaignDetail
+                  campaignId={selectedCampaignId}
+                  onBack={() => setSelectedCampaignId(null)}
+                />
+              ) : (
+                <CampaignsList
+                  clientId={selectedClient.id}
+                  onSelectCampaign={setSelectedCampaignId}
+                />
+              )}
+            </div>
+          )}
+          {activeTab === "citations" && CitationsTab()}
+          {activeTab === "sources" && SourcesTab()}
+          {activeTab === "content" && ContentTab()}
+        </div>
       </main>
-      {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{ImportDialog()}
+      {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{ImportDialog()}{RunCampaignDialog()}
       <input ref={fileInputRef} type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileImport} />
     </div>
   );
@@ -411,6 +504,10 @@ export default function ClientDashboard() {
           <div className="grid grid-cols-3 gap-4">{recentPrompts.filter(r => !showBrandOnly || r.summary.share_of_voice > 0).slice(0, 9).map((r, i) => (<div key={i} onClick={() => setSelectedPromptDetail(r.prompt_id)} className="bg-white rounded-xl border border-gray-200 p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer"><h4 className="font-medium text-gray-900 text-sm line-clamp-2 mb-2">{r.prompt_text}</h4><p className="text-xs text-gray-500 line-clamp-2 mb-3">{r.model_results[0]?.raw_response?.substring(0, 100) || "No response"}...</p><div className="flex items-center justify-between"><div className="flex items-center gap-1">{r.model_results.slice(0, 4).map((mr, j) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return Logo ? (<div key={j} className={cn("p-1 rounded", mr.brand_mentioned ? "bg-green-50" : "bg-gray-50")}><Logo className="h-3.5 w-3.5" style={{ color: mr.brand_mentioned ? color : "#9ca3af" }} /></div>) : null; })}</div><span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(r.created_at).toLocaleDateString()}</span></div></div>))}</div>
           {recentPrompts.length === 0 && (<div className="bg-white rounded-xl border border-gray-200 p-12 text-center"><MessageSquare className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No recent audits. Run some prompts to see results here.</p></div>)}
         </div>
+        {/* Import Section */}
+        <div className="mt-6">
+          {selectedClient && <UniversalImport clientId={selectedClient.id} onImportComplete={() => window.location.reload()} />}
+        </div>
       </div>
     );
   }
@@ -440,6 +537,9 @@ export default function ClientDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <Button onClick={() => setRunCampaignOpen(true)} variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-800">
+              <Play className="h-4 w-4 mr-2" /> Run Campaign
+            </Button>
             <span className="text-sm text-gray-500">{prompts.length} total prompts</span>
             <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
           </div>
@@ -1176,7 +1276,76 @@ export default function ClientDashboard() {
 
 
   function BulkPromptsDialog() {
-    return (<Dialog open={bulkPromptsOpen} onOpenChange={setBulkPromptsOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Add Prompts</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div><div><Label>Multiple Prompts (one per line)</Label><Textarea placeholder={"Best dating apps in India\nDating apps with verification\nSafe dating apps for women"} value={bulkPrompts} onChange={(e) => setBulkPrompts(e.target.value)} rows={6} className="mt-1" /></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or generate with AI</span></div></div><div><Label>Generate from Keywords</Label><div className="flex gap-2 mt-1"><Input placeholder="dating apps, verification, safety" value={keywordsInput} onChange={(e) => setKeywordsInput(e.target.value)} /><Button onClick={handleGeneratePrompts} disabled={generatingPrompts}>{generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate"}</Button></div></div></div><DialogFooter><Button variant="outline" onClick={() => { setImportDialogOpen(true); setBulkPromptsOpen(false); }}>Import File</Button><Button onClick={handleBulkAdd} disabled={!bulkPrompts.trim()}>Add {bulkPrompts.split("\n").filter(l => l.trim().length > 3).length} Prompts</Button></DialogFooter></DialogContent></Dialog>);
+    return (<Dialog open={bulkPromptsOpen} onOpenChange={setBulkPromptsOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Add Prompts</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div><div><Label>Multiple Prompts (one per line)</Label><Textarea placeholder={"Best dating apps in India\nDating apps with verification\nSafe dating apps for women"} value={bulkPrompts} onChange={(e) => setBulkPrompts(e.target.value)} rows={6} className="mt-1" /></div>      <div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or generate with AI</span></div></div>
+
+      {/* Generator Options */}
+      <div className="bg-gray-50/50 p-4 rounded-lg border border-gray-100 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-gray-500 uppercase tracking-wider">Tone</Label>
+            <Select value={promptSentiment} onValueChange={setPromptSentiment}>
+              <SelectTrigger className="bg-white h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Neutral">Neutral (Standard)</SelectItem>
+                <SelectItem value="Positive">Positive (Validation)</SelectItem>
+                <SelectItem value="Negative">Negative (Crisis)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-gray-500 uppercase tracking-wider">Focus</Label>
+            <Select value={promptFocus} onValueChange={setPromptFocus}>
+              <SelectTrigger className="bg-white h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="General">General Visibility</SelectItem>
+                <SelectItem value="Feature">Features & Pricing</SelectItem>
+                <SelectItem value="Competitor">Competitor Comparison</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {promptFocus === "Competitor" && selectedClient?.competitors && selectedClient.competitors.length > 0 && (
+          <div className="space-y-2">
+            <Label className="text-xs text-gray-500 uppercase tracking-wider">Include Competitors</Label>
+            <div className="flex flex-wrap gap-2">
+              {selectedClient.competitors.map((comp) => (
+                <div key={comp} className="flex items-center space-x-2 bg-white px-2 py-1 rounded border border-gray-200">
+                  <Checkbox
+                    id={`comp-${comp}`}
+                    checked={selectedPromptCompetitors.includes(comp)}
+                    onCheckedChange={(checked) => {
+                      if (checked) setSelectedPromptCompetitors([...selectedPromptCompetitors, comp]);
+                      else setSelectedPromptCompetitors(selectedPromptCompetitors.filter(c => c !== comp));
+                    }}
+                    className="h-3.5 w-3.5"
+                  />
+                  <label htmlFor={`comp-${comp}`} className="text-sm cursor-pointer select-none text-gray-700">{comp}</label>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <Label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Seed Keywords</Label>
+          <div className="flex gap-2">
+            <Input
+              placeholder="dating apps, verification, safety"
+              value={keywordsInput}
+              onChange={(e) => setKeywordsInput(e.target.value)}
+              className="bg-white"
+            />
+            <Button onClick={handleGeneratePrompts} disabled={generatingPrompts}>
+              {generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-purple-200" />}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Import File Button moved to allow spacing */}
+      {/* Replaced logic ends here, existing import logic follows in footer usually? No, I am replacing the content inside the space-y-4 div of BulkPromptsDialog */}
+    </div><DialogFooter><Button variant="outline" onClick={() => { setImportDialogOpen(true); setBulkPromptsOpen(false); }}>Import File</Button><Button onClick={handleBulkAdd} disabled={!bulkPrompts.trim()}>Add {bulkPrompts.split("\n").filter(l => l.trim().length > 3).length} Prompts</Button></DialogFooter></DialogContent></Dialog>);
   }
 
   function PromptDetailDialog() {

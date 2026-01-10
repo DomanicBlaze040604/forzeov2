@@ -277,9 +277,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_results(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_results(client_id, prompt_category);
 CREATE INDEX IF NOT EXISTS idx_audit_sov ON audit_results(client_id, share_of_voice DESC);
 
--- Partial index for recent audits (last 30 days)
-CREATE INDEX IF NOT EXISTS idx_audit_recent ON audit_results(client_id, created_at DESC) 
-  WHERE created_at > NOW() - INTERVAL '30 days';
+-- Note: Partial indexes with NOW() are not supported in Supabase
+-- Use application-level filtering for recent audits instead
 
 -- ============================================
 -- CITATIONS
@@ -343,8 +342,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_org ON api_usage(organization_id);
 CREATE INDEX IF NOT EXISTS idx_usage_date ON api_usage(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_usage_api ON api_usage(api_name);
 
--- Monthly usage summary index
-CREATE INDEX IF NOT EXISTS idx_usage_monthly ON api_usage(organization_id, date_trunc('month', created_at));
+-- Note: date_trunc is not IMMUTABLE, use application-level aggregation instead
 
 -- ============================================
 -- AUDIT LOG

@@ -184,6 +184,7 @@ interface ModelResult {
 
 interface AuditRequest {
   client_id?: string;
+  campaign_id?: string;
   prompt_id?: string;
   prompt_text: string;
   prompt_category?: string;
@@ -258,9 +259,9 @@ function extractDomain(url: string): string {
  */
 function extractUrlsFromText(text: string): Citation[] {
   if (!text) return [];
-  
+
   const citations: Citation[] = [];
-  
+
   // Match URLs in various formats
   const urlPatterns = [
     // Standard URLs with http/https
@@ -270,23 +271,23 @@ function extractUrlsFromText(text: string): Citation[] {
     // Domain mentions like "example.com" or "site.org"
     /(?:^|\s)([a-zA-Z0-9][a-zA-Z0-9-]*\.(?:com|org|net|io|co|ai|dev|app|edu|gov|info)[^\s<>"{}|\\^`\[\]]*)/gi,
   ];
-  
+
   const foundUrls = new Set<string>();
-  
+
   for (const pattern of urlPatterns) {
     const matches = text.matchAll(pattern);
     for (const match of matches) {
       let url = match[1] || match[0];
       url = url.trim();
-      
+
       // Clean up URL
       url = url.replace(/[.,;:!?)]+$/, ''); // Remove trailing punctuation
-      
+
       // Add protocol if missing
       if (!url.startsWith('http')) {
         url = 'https://' + url;
       }
-      
+
       // Validate URL
       try {
         const parsed = new URL(url);
@@ -296,7 +297,7 @@ function extractUrlsFromText(text: string): Citation[] {
           const domain = parsed.hostname.toLowerCase();
           if (domain.length < 5) continue; // Skip very short domains
         }
-        
+
         if (!foundUrls.has(url)) {
           foundUrls.add(url);
           citations.push({
@@ -312,17 +313,17 @@ function extractUrlsFromText(text: string): Citation[] {
       }
     }
   }
-  
+
   // Also look for markdown-style links [text](url)
   const markdownLinks = text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g);
   for (const match of markdownLinks) {
     const title = match[1];
     let url = match[2];
-    
+
     if (!url.startsWith('http')) {
       url = 'https://' + url;
     }
-    
+
     try {
       const parsed = new URL(url);
       if (!foundUrls.has(url)) {
@@ -339,7 +340,7 @@ function extractUrlsFromText(text: string): Citation[] {
       // Invalid URL, skip
     }
   }
-  
+
   return citations;
 }
 
@@ -349,22 +350,22 @@ function extractUrlsFromText(text: string): Citation[] {
  */
 function analyzeSentiment(context: string): "positive" | "neutral" | "negative" {
   const lower = context.toLowerCase();
-  
+
   const positiveWords = [
     "best", "top", "excellent", "recommended", "leading", "trusted",
     "popular", "great", "amazing", "reliable", "safe", "premium",
     "innovative", "award", "favorite", "preferred", "quality"
   ];
-  
+
   const negativeWords = [
     "avoid", "poor", "worst", "bad", "unreliable", "scam", "fake",
     "terrible", "issues", "problems", "complaints", "disappointing",
     "overpriced", "slow", "buggy", "unsafe"
   ];
-  
+
   const posCount = positiveWords.filter(w => lower.includes(w)).length;
   const negCount = negativeWords.filter(w => lower.includes(w)).length;
-  
+
   if (posCount > negCount) return "positive";
   if (negCount > posCount) return "negative";
   return "neutral";
@@ -388,12 +389,12 @@ function parseBrandData(
   if (!response) {
     return { mentioned: false, count: 0, rank: null, sentiment: "neutral", matchedTerms: [] };
   }
-  
+
   const lower = response.toLowerCase();
   const allTerms = [brandName, ...brandTags].filter(Boolean);
   let totalCount = 0;
   const matchedTerms: string[] = [];
-  
+
   // Count all mentions of brand and tags
   for (const term of allTerms) {
     if (!term) continue;
@@ -409,7 +410,7 @@ function parseBrandData(
       matchedTerms.push(term);
     }
   }
-  
+
   // Find rank in numbered lists (e.g., "1. Brand", "2) Brand")
   let rank: number | null = null;
   const lines = response.split("\n");
@@ -426,7 +427,7 @@ function parseBrandData(
       if (rank) break;
     }
   }
-  
+
   // Analyze sentiment around first mention
   let sentiment: "positive" | "neutral" | "negative" = "neutral";
   for (const term of allTerms) {
@@ -439,7 +440,7 @@ function parseBrandData(
       break;
     }
   }
-  
+
   return {
     mentioned: totalCount > 0,
     count: totalCount,
@@ -454,22 +455,22 @@ function parseBrandData(
  */
 function parseCompetitors(response: string, competitors: string[]): CompetitorMention[] {
   if (!response || !competitors.length) return [];
-  
+
   const lower = response.toLowerCase();
   const results: CompetitorMention[] = [];
-  
+
   for (const comp of competitors) {
     const compLower = comp.toLowerCase();
     let count = 0;
     let idx = 0;
-    
+
     while ((idx = lower.indexOf(compLower, idx)) !== -1) {
       count++;
       idx++;
     }
-    
+
     if (count === 0) continue;
-    
+
     // Find rank in numbered lists
     let rank: number | null = null;
     for (const line of response.split("\n")) {
@@ -479,14 +480,14 @@ function parseCompetitors(response: string, competitors: string[]): CompetitorMe
         break;
       }
     }
-    
+
     // Analyze sentiment
     const firstIdx = lower.indexOf(compLower);
     const context = response.substring(
       Math.max(0, firstIdx - 50),
       Math.min(response.length, firstIdx + comp.length + 50)
     );
-    
+
     results.push({
       name: comp,
       count,
@@ -494,7 +495,7 @@ function parseCompetitors(response: string, competitors: string[]): CompetitorMe
       sentiment: analyzeSentiment(context)
     });
   }
-  
+
   return results.sort((a, b) => b.count - a.count);
 }
 
@@ -504,17 +505,17 @@ function parseCompetitors(response: string, competitors: string[]): CompetitorMe
  */
 function findWinnerBrand(response: string, brandName: string, competitors: string[]): string {
   if (!response) return "";
-  
+
   let winner = "";
   let maxCount = 0;
   let topRank = 999;
-  
+
   for (const brand of [brandName, ...competitors]) {
     const data = parseBrandData(response, brand);
-    
+
     // Rank #1 always wins
     if (data.rank === 1) return brand;
-    
+
     // Otherwise: most mentions wins, rank breaks ties
     if (data.count > maxCount || (data.count === maxCount && (data.rank || 999) < topRank)) {
       maxCount = data.count;
@@ -522,7 +523,7 @@ function findWinnerBrand(response: string, brandName: string, competitors: strin
       winner = brand;
     }
   }
-  
+
   return winner;
 }
 
@@ -539,12 +540,12 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
   status_code?: number;
 }> {
   console.log(`[DataForSEO] POST ${endpoint}`);
-  
+
   if (!DATAFORSEO_LOGIN || !DATAFORSEO_PASSWORD) {
     console.error("[DataForSEO] Missing credentials!");
     return { error: "DataForSEO credentials not configured" };
   }
-  
+
   try {
     const response = await fetch(`${DATAFORSEO_API}${endpoint}`, {
       method: "POST",
@@ -554,12 +555,12 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
       },
       body: JSON.stringify(body),
     });
-    
+
     const text = await response.text();
-    
+
     if (!response.ok) {
       console.error(`[DataForSEO] HTTP ${response.status}: ${text.substring(0, 300)}`);
-      
+
       // Handle specific error codes
       const errorMessages: Record<number, string> = {
         402: "DataForSEO account needs credits - please top up your balance",
@@ -567,20 +568,20 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
         404: "DataForSEO endpoint not found - API may have changed",
         429: "Rate limit exceeded - please try again later",
       };
-      
+
       return {
         error: errorMessages[response.status] || `HTTP ${response.status}`,
         status_code: response.status
       };
     }
-    
+
     const data = JSON.parse(text);
-    
+
     if (data.status_code !== 20000) {
       console.error(`[DataForSEO] API Error: ${data.status_message}`);
       return { error: data.status_message, status_code: data.status_code };
     }
-    
+
     return { data };
   } catch (err) {
     console.error(`[DataForSEO] Exception: ${err}`);
@@ -604,7 +605,7 @@ async function getGoogleSERP(
 }> {
   console.log("[Google SERP] Querying...");
   const startTime = Date.now();
-  
+
   const result = await callDataForSEO("/serp/google/organic/live/advanced", [{
     keyword: prompt,
     location_code: locationCode,
@@ -612,13 +613,13 @@ async function getGoogleSERP(
     device: "desktop",
     depth: 20,
   }]);
-  
+
   const responseTime = Date.now() - startTime;
-  
+
   if (result.error) {
     return { success: false, response: "", citations: [], cost: 0, error: result.error, response_time_ms: responseTime };
   }
-  
+
   const data = result.data as { tasks?: Array<{ result?: Array<{ items?: unknown[] }>; cost?: number }> };
   const task = data?.tasks?.[0];
   const taskResult = task?.result?.[0];
@@ -631,10 +632,10 @@ async function getGoogleSERP(
     domain?: string;
     rank_absolute?: number;
   }>;
-  
+
   const parts: string[] = [];
   const citations: Citation[] = [];
-  
+
   // Process featured snippets first
   for (const item of items) {
     if (item.type === "featured_snippet") {
@@ -650,7 +651,7 @@ async function getGoogleSERP(
       }
     }
   }
-  
+
   // Process organic results
   for (const item of items) {
     if (item.type === "organic" && item.url) {
@@ -663,16 +664,16 @@ async function getGoogleSERP(
       });
     }
   }
-  
+
   // Build response text
   parts.push("\n=== Top Search Results ===");
   citations.slice(0, 10).forEach((c, i) => {
     parts.push(`${i + 1}. ${c.title}\n   ${c.snippet || ""}`);
   });
-  
+
   const response = parts.join("\n\n").trim();
   console.log(`[Google SERP] Got ${response.length} chars, ${citations.length} citations, cost: ${cost}`);
-  
+
   return { success: response.length > 0, response, citations, cost, response_time_ms: responseTime };
 }
 
@@ -692,7 +693,7 @@ async function getGoogleAIOverview(
 }> {
   console.log("[Google AI Overview] Querying...");
   const startTime = Date.now();
-  
+
   const result = await callDataForSEO("/serp/google/organic/live/advanced", [{
     keyword: prompt,
     location_code: locationCode,
@@ -700,13 +701,13 @@ async function getGoogleAIOverview(
     device: "desktop",
     depth: 10,
   }]);
-  
+
   const responseTime = Date.now() - startTime;
-  
+
   if (result.error) {
     return { success: false, response: "", citations: [], cost: 0, error: result.error, response_time_ms: responseTime };
   }
-  
+
   const data = result.data as { tasks?: Array<{ result?: Array<{ items?: unknown[] }>; cost?: number }> };
   const task = data?.tasks?.[0];
   const taskResult = task?.result?.[0];
@@ -720,10 +721,10 @@ async function getGoogleAIOverview(
     domain?: string;
     rank_absolute?: number;
   }>;
-  
+
   let response = "";
   const citations: Citation[] = [];
-  
+
   // Look for AI overview or featured snippet
   for (const item of items) {
     if (item.type === "ai_overview" && item.items) {
@@ -754,7 +755,7 @@ async function getGoogleAIOverview(
       }
     }
   }
-  
+
   // Fallback to top organic results if no AI overview
   if (!response) {
     const organicItems = items.filter(i => i.type === "organic").slice(0, 5);
@@ -771,10 +772,10 @@ async function getGoogleAIOverview(
       }
     }
   }
-  
+
   response = response.trim();
   console.log(`[Google AI Overview] Got ${response.length} chars, ${citations.length} citations, cost: ${cost}`);
-  
+
   return { success: response.length > 0, response, citations, cost, response_time_ms: responseTime };
 }
 
@@ -804,7 +805,7 @@ async function getLLMMentions(
 }> {
   console.log(`[LLM Mentions] Searching: "${keyword.substring(0, 50)}..." | Brand: ${brandName}`);
   const startTime = Date.now();
-  
+
   const requestBody = [{
     language_name: "English",
     location_code: locationCode,
@@ -815,10 +816,10 @@ async function getLLMMentions(
     platform: "google",
     limit: 10,
   }];
-  
+
   const result = await callDataForSEO("/ai_optimization/llm_mentions/search/live", requestBody);
   const responseTime = Date.now() - startTime;
-  
+
   const results = new Map<string, {
     answer: string;
     sources: Citation[];
@@ -827,12 +828,12 @@ async function getLLMMentions(
     brand_mention_count: number;
     ai_search_volume: number;
   }>();
-  
+
   if (result.error) {
     console.error(`[LLM Mentions] Error: ${result.error}`);
     return { success: false, results, cost: 0, error: result.error, response_time_ms: responseTime };
   }
-  
+
   const data = result.data as { tasks?: Array<{ result?: Array<{ items?: unknown[] }>; cost?: number }> };
   const task = data?.tasks?.[0];
   const cost = task?.cost || 0;
@@ -843,22 +844,22 @@ async function getLLMMentions(
     ai_search_volume?: number;
     sources?: Array<{ url?: string; title?: string; domain?: string; position?: number; snippet?: string }>;
   }>;
-  
+
   console.log(`[LLM Mentions] Got ${rawItems.length} items, cost: ${cost}`);
-  
+
   const allTerms = [brandName, targetDomain, ...brandTags].filter(Boolean).map(t => t.toLowerCase());
-  
+
   if (rawItems.length > 0) {
     // Combine all answers
     let combinedAnswer = "";
     const allSources: Citation[] = [];
     let totalVolume = 0;
-    
+
     for (const item of rawItems) {
       const answer = item.answer || "";
       combinedAnswer += `Q: ${item.question || keyword}\nA: ${answer}\n\n`;
       totalVolume += item.ai_search_volume || 0;
-      
+
       // Parse sources
       const sources = (item.sources || []).map((s, idx) => ({
         url: s.url || "",
@@ -869,12 +870,12 @@ async function getLLMMentions(
       }));
       allSources.push(...sources);
     }
-    
+
     // Check brand mentions
     const answerLower = combinedAnswer.toLowerCase();
     let brandMentioned = false;
     let brandMentionCount = 0;
-    
+
     for (const term of allTerms) {
       if (!term) continue;
       let idx = 0;
@@ -884,7 +885,7 @@ async function getLLMMentions(
         idx++;
       }
     }
-    
+
     // Check if brand is cited
     const brandCited = allSources.some(s =>
       allTerms.some(term =>
@@ -892,7 +893,7 @@ async function getLLMMentions(
         s.url.toLowerCase().includes(term)
       )
     );
-    
+
     // Create results for each LLM model
     for (const modelId of LLM_MODEL_IDS) {
       results.set(modelId, {
@@ -905,7 +906,7 @@ async function getLLMMentions(
       });
     }
   }
-  
+
   return { success: results.size > 0, results, cost, response_time_ms: responseTime };
 }
 
@@ -935,7 +936,7 @@ async function getLiveLLMResponse(
 }> {
   console.log(`[LIVE LLM/${model}] Querying real-time...`);
   const startTime = Date.now();
-  
+
   // Map model IDs to DataForSEO endpoints and model names
   const modelConfig: Record<string, { endpoint: string; modelName: string }> = {
     chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", modelName: "gpt-4.1-mini" },
@@ -943,17 +944,17 @@ async function getLiveLLMResponse(
     claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-sonnet-4-0" },
     perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", modelName: "sonar-pro" },
   };
-  
+
   const config = modelConfig[model];
   if (!config) {
     return { success: false, response: "", tokens: 0, cost: 0, latency_ms: 0, error: `Unknown model: ${model}` };
   }
-  
+
   // Retry logic with exponential backoff
   const maxRetries = 3;
   let lastError = "";
   let totalCost = 0;
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
       // Exponential backoff: 2s, 4s, 8s
@@ -961,36 +962,45 @@ async function getLiveLLMResponse(
       console.log(`[LIVE LLM/${model}] Retry ${attempt + 1}/${maxRetries}, waiting ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
-    
+
     // Use the correct endpoint and parameters
     // Enhance prompt to get specific recommendations with sources/URLs
     const enhancedPrompt = `${prompt}
 
 Important: Please provide specific recommendations with actual business names, websites, or sources. Include URLs where possible. Do not ask clarifying questions - provide direct answers with specific options.`;
-    
-    const result = await callDataForSEO(config.endpoint, [{
+
+    const payload: any = {
       user_prompt: enhancedPrompt,
       model_name: config.modelName,
       max_output_tokens: 1000,
       temperature: 0.7,
-    }]);
-    
+    };
+
+    // If retrying due to Invalid Field error, strip optional params
+    if (attempt > 0 && lastError.includes("Invalid Field")) {
+      console.log(`[LIVE LLM/${model}] Retrying with minimal payload (stripping optional params)`);
+      delete payload.max_output_tokens;
+      delete payload.temperature;
+    }
+
+    const result = await callDataForSEO(config.endpoint, [payload]);
+
     const latency = Date.now() - startTime;
-    
+
     if (result.error) {
       lastError = result.error;
       console.error(`[LIVE LLM/${model}] Attempt ${attempt + 1} error: ${result.error}`);
-      
+
       // Don't retry on auth/credit errors
       if (result.status_code === 401 || result.status_code === 402) {
         return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: latency, error: result.error };
       }
       continue;
     }
-    
-    const data = result.data as { 
-      tasks?: Array<{ 
-        result?: Array<{ 
+
+    const data = result.data as {
+      tasks?: Array<{
+        result?: Array<{
           input_tokens?: number;
           output_tokens?: number;
           items?: Array<{
@@ -1000,25 +1010,25 @@ Important: Please provide specific recommendations with actual business names, w
               text?: string;
             }>;
           }>;
-        }>; 
+        }>;
         cost?: number;
         status_code?: number;
         status_message?: string;
-      }> 
+      }>
     };
-    
+
     const task = data?.tasks?.[0];
     const taskResult = task?.result?.[0];
     const cost = task?.cost || 0;
     totalCost += cost;
-    
+
     // Check task status
     if (task?.status_code && task.status_code !== 20000) {
       lastError = task.status_message || `Task failed with code ${task.status_code}`;
       console.error(`[LIVE LLM/${model}] Task error: ${lastError}`);
       continue;
     }
-    
+
     // Extract text from items -> sections
     let responseText = "";
     if (taskResult?.items) {
@@ -1032,17 +1042,17 @@ Important: Please provide specific recommendations with actual business names, w
         }
       }
     }
-    
+
     if (!responseText) {
       lastError = "No live LLM response returned - empty response";
       console.error(`[LIVE LLM/${model}] Attempt ${attempt + 1}: No response text found`);
       continue;
     }
-    
+
     const totalTokens = (taskResult?.input_tokens || 0) + (taskResult?.output_tokens || 0);
-    
+
     console.log(`[LIVE LLM/${model}] Got ${responseText.length} chars, ${totalTokens} tokens, ${latency}ms, cost: $${cost}`);
-    
+
     return {
       success: true,
       response: responseText,
@@ -1051,17 +1061,17 @@ Important: Please provide specific recommendations with actual business names, w
       latency_ms: latency,
     };
   }
-  
+
   // All retries failed
   const latency = Date.now() - startTime;
   console.error(`[LIVE LLM/${model}] All ${maxRetries} attempts failed: ${lastError}`);
-  return { 
-    success: false, 
-    response: "", 
-    tokens: 0, 
-    cost: totalCost, 
-    latency_ms: latency, 
-    error: `DataForSEO LIVE failed after ${maxRetries} attempts: ${lastError}` 
+  return {
+    success: false,
+    response: "",
+    tokens: 0,
+    cost: totalCost,
+    latency_ms: latency,
+    error: `DataForSEO LIVE failed after ${maxRetries} attempts: ${lastError}`
   };
 }
 
@@ -1077,50 +1087,50 @@ function extractImplicitCitations(
   competitors: string[]
 ): Citation[] {
   console.log(`[extractImplicitCitations] CALLED with text length: ${text?.length || 0}`);
-  
+
   if (!text) {
     console.log(`[extractImplicitCitations] No text provided, returning empty`);
     return [];
   }
-  
+
   const citations: Citation[] = [];
   const foundBrands = new Set<string>();
   const lower = text.toLowerCase();
-  
+
   console.log(`[extractImplicitCitations] Brand: ${brandName}, Tags: [${brandTags.join(', ')}], Competitors: [${competitors.join(', ')}]`);
-  
+
   // Check for brand mentions
   const allBrands = [brandName, ...brandTags, ...competitors].filter(Boolean);
   console.log(`[extractImplicitCitations] All brands to check: [${allBrands.join(', ')}]`);
-  
+
   for (const brand of allBrands) {
     if (!brand || brand.length < 2) continue;
     const brandLower = brand.toLowerCase();
-    
+
     const found = lower.includes(brandLower);
     console.log(`[extractImplicitCitations] Checking "${brand}" (${brandLower}): found=${found}`);
-    
+
     if (found && !foundBrands.has(brandLower)) {
       foundBrands.add(brandLower);
-      
+
       // Try to construct a likely URL for the brand
       const cleanBrand = brand.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const likelyDomain = `${cleanBrand}.com`;
-      
+
       console.log(`[extractImplicitCitations] Adding citation for: ${brand} -> ${likelyDomain}`);
-      
+
       citations.push({
         url: `https://${likelyDomain}`,
         title: brand,
         domain: likelyDomain,
         position: citations.length + 1,
         snippet: `Mentioned in AI response`,
-        is_brand_source: brandLower === brandName.toLowerCase() || 
-                         brandTags.some(t => t.toLowerCase() === brandLower),
+        is_brand_source: brandLower === brandName.toLowerCase() ||
+          brandTags.some(t => t.toLowerCase() === brandLower),
       });
     }
   }
-  
+
   console.log(`[extractImplicitCitations] Total citations from brands: ${citations.length}`);
   return citations;
 }
@@ -1156,7 +1166,7 @@ async function getLiveLLMWithValidation(
   console.log(`[LIVE LLM Validation] Brand: ${brandName}`);
   console.log(`[LIVE LLM Validation] Tags: ${JSON.stringify(brandTags)}`);
   console.log(`[LIVE LLM Validation] Competitors: ${JSON.stringify(competitors)}`);
-  
+
   const results = new Map<string, {
     response: string;
     tokens: number;
@@ -1166,32 +1176,32 @@ async function getLiveLLMWithValidation(
     brand_mention_count: number;
     citations: Citation[];
   }>();
-  
+
   let totalCost = 0;
   const responses: string[] = [];
-  
+
   // Query models sequentially with longer delays to avoid rate limits
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
-    
+
     // Add longer delay between queries (2.5s)
     if (i > 0) {
       await new Promise(resolve => setTimeout(resolve, 2500));
     }
-    
+
     const result = await getLiveLLMResponse(prompt, model);
     totalCost += result.cost;
-    
+
     if (result.success) {
       const brandData = parseBrandData(result.response, brandName, brandTags);
-      
+
       console.log(`[LIVE LLM/${model}] Response received, length: ${result.response.length}`);
       console.log(`[LIVE LLM/${model}] Brand data: mentioned=${brandData.mentioned}, count=${brandData.count}`);
-      
+
       // Always extract both URL citations AND implicit citations from brand mentions
       const urlCitations = extractUrlsFromText(result.response);
       console.log(`[LIVE LLM/${model}] URL citations extracted: ${urlCitations.length}`);
-      
+
       const implicitCitations = extractImplicitCitations(
         result.response,
         brandName,
@@ -1199,11 +1209,11 @@ async function getLiveLLMWithValidation(
         competitors
       );
       console.log(`[LIVE LLM/${model}] Implicit citations extracted: ${implicitCitations.length}`);
-      
+
       // Merge citations, avoiding duplicates (URLs take priority)
       const seenDomains = new Set<string>();
       const extractedCitations: Citation[] = [];
-      
+
       // Add URL citations first
       for (const c of urlCitations) {
         const domainLower = c.domain.toLowerCase();
@@ -1212,7 +1222,7 @@ async function getLiveLLMWithValidation(
           extractedCitations.push(c);
         }
       }
-      
+
       // Add implicit citations that aren't duplicates
       for (const c of implicitCitations) {
         const domainLower = c.domain.toLowerCase();
@@ -1221,9 +1231,9 @@ async function getLiveLLMWithValidation(
           extractedCitations.push(c);
         }
       }
-      
+
       console.log(`[LIVE LLM/${model}] Total merged citations: ${extractedCitations.length}`);
-      
+
       results.set(model, {
         response: result.response,
         tokens: result.tokens,
@@ -1233,39 +1243,39 @@ async function getLiveLLMWithValidation(
         brand_mention_count: brandData.count,
         citations: extractedCitations,
       });
-      
+
       responses.push(result.response);
     }
   }
-  
+
   // Check agreement between models
   let agreement: "high" | "medium" | "low" = "low";
-  
+
   if (responses.length >= 2) {
     // Extract key terms from each response
     const keyTerms = responses.map(r => {
       const words = r.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
       return new Set(words.slice(0, 30));
     });
-    
+
     // Check overlap between responses
     let overlapCount = 0;
     const firstTerms = keyTerms[0];
-    
+
     for (let i = 1; i < keyTerms.length; i++) {
       const overlap = [...firstTerms].filter(term => keyTerms[i].has(term)).length;
       if (overlap >= 5) overlapCount++;
     }
-    
+
     if (overlapCount >= keyTerms.length - 1) {
       agreement = "high";
     } else if (overlapCount >= 1) {
       agreement = "medium";
     }
   }
-  
+
   console.log(`[LIVE LLM Validation] Got ${results.size}/${models.length} responses, agreement: ${agreement}`);
-  
+
   return {
     success: results.size > 0,
     results,
@@ -1293,10 +1303,10 @@ async function getSerperSERP(
   if (!SERPER_API_KEY) {
     return { success: false, response: "", citations: [], cost: 0, error: "SERPER_API_KEY not configured" };
   }
-  
+
   console.log("[Serper] Querying...");
   const startTime = Date.now();
-  
+
   try {
     const response = await fetch("https://google.serper.dev/search", {
       method: "POST",
@@ -1310,19 +1320,19 @@ async function getSerperSERP(
         num: 10,
       }),
     });
-    
+
     const responseTime = Date.now() - startTime;
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[Serper] Error: ${response.status} - ${errorText.substring(0, 200)}`);
       return { success: false, response: "", citations: [], cost: 0.001, error: `Serper API error: ${response.status}`, response_time_ms: responseTime };
     }
-    
+
     const data = await response.json();
     const parts: string[] = [];
     const citations: Citation[] = [];
-    
+
     // Process answer box / featured snippet
     if (data.answerBox) {
       parts.push(`=== Featured Answer ===\n${data.answerBox.snippet || data.answerBox.answer || ""}`);
@@ -1336,12 +1346,12 @@ async function getSerperSERP(
         });
       }
     }
-    
+
     // Process knowledge graph
     if (data.knowledgeGraph?.description) {
       parts.push(`=== Knowledge Graph ===\n${data.knowledgeGraph.description}`);
     }
-    
+
     // Process organic results
     if (data.organic && Array.isArray(data.organic)) {
       parts.push("\n=== Top Search Results ===");
@@ -1358,13 +1368,13 @@ async function getSerperSERP(
         }
       });
     }
-    
+
     const responseText = parts.join("\n\n").trim();
     console.log(`[Serper] Got ${responseText.length} chars, ${citations.length} citations`);
-    
+
     // Serper costs ~$0.001 per query
     return { success: responseText.length > 0, response: responseText, citations, cost: 0.001, response_time_ms: responseTime };
-    
+
   } catch (err) {
     console.error(`[Serper] Exception: ${err}`);
     return { success: false, response: "", citations: [], cost: 0, error: String(err), response_time_ms: Date.now() - startTime };
@@ -1388,10 +1398,10 @@ async function queryGemini(
   if (!GEMINI_API_KEY) {
     return { success: false, response: "", cost: 0, error: "GEMINI_API_KEY not configured" };
   }
-  
+
   console.log("[Gemini] Querying...");
   const startTime = Date.now();
-  
+
   try {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -1411,23 +1421,23 @@ async function queryGemini(
         }),
       }
     );
-    
+
     const responseTime = Date.now() - startTime;
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[Gemini] Error: ${response.status} - ${errorText.substring(0, 200)}`);
       return { success: false, response: "", cost: 0, error: `Gemini API error: ${response.status}`, response_time_ms: responseTime };
     }
-    
+
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    
+
     console.log(`[Gemini] Got ${text.length} chars`);
-    
+
     // Gemini Flash is very cheap, ~$0.0001 per query
     return { success: text.length > 0, response: text, cost: 0.0001, response_time_ms: responseTime };
-    
+
   } catch (err) {
     console.error(`[Gemini] Exception: ${err}`);
     return { success: false, response: "", cost: 0, error: String(err), response_time_ms: Date.now() - startTime };
@@ -1449,10 +1459,10 @@ async function queryChatGPT(
   if (!OPENAI_API_KEY) {
     return { success: false, response: "", cost: 0, error: "OPENAI_API_KEY not configured" };
   }
-  
+
   console.log("[ChatGPT] Querying...");
   const startTime = Date.now();
-  
+
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -1470,23 +1480,23 @@ async function queryChatGPT(
         temperature: 0.7,
       }),
     });
-    
+
     const responseTime = Date.now() - startTime;
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[ChatGPT] Error: ${response.status} - ${errorText.substring(0, 200)}`);
       return { success: false, response: "", cost: 0, error: `ChatGPT API error: ${response.status}`, response_time_ms: responseTime };
     }
-    
+
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content || "";
-    
+
     console.log(`[ChatGPT] Got ${text.length} chars`);
-    
+
     // GPT-4o-mini is ~$0.00015 per 1K input + $0.0006 per 1K output
     return { success: text.length > 0, response: text, cost: 0.001, response_time_ms: responseTime };
-    
+
   } catch (err) {
     console.error(`[ChatGPT] Exception: ${err}`);
     return { success: false, response: "", cost: 0, error: String(err), response_time_ms: Date.now() - startTime };
@@ -1508,10 +1518,10 @@ async function queryClaude(
   if (!ANTHROPIC_API_KEY) {
     return { success: false, response: "", cost: 0, error: "ANTHROPIC_API_KEY not configured" };
   }
-  
+
   console.log("[Claude] Querying...");
   const startTime = Date.now();
-  
+
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -1528,23 +1538,23 @@ async function queryClaude(
         ],
       }),
     });
-    
+
     const responseTime = Date.now() - startTime;
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[Claude] Error: ${response.status} - ${errorText.substring(0, 200)}`);
       return { success: false, response: "", cost: 0, error: `Claude API error: ${response.status}`, response_time_ms: responseTime };
     }
-    
+
     const data = await response.json();
     const text = data.content?.[0]?.text || "";
-    
+
     console.log(`[Claude] Got ${text.length} chars`);
-    
+
     // Claude Haiku is ~$0.00025 per 1K input + $0.00125 per 1K output
     return { success: text.length > 0, response: text, cost: 0.001, response_time_ms: responseTime };
-    
+
   } catch (err) {
     console.error(`[Claude] Exception: ${err}`);
     return { success: false, response: "", cost: 0, error: String(err), response_time_ms: Date.now() - startTime };
@@ -1569,24 +1579,24 @@ async function queryLLMDirect(
   // Use DataForSEO LIVE LLM API for all models
   if (["chatgpt", "gemini", "claude", "perplexity"].includes(modelId)) {
     const result = await getLiveLLMResponse(prompt, modelId as "chatgpt" | "gemini" | "claude" | "perplexity");
-    return { 
-      success: result.success, 
-      response: result.response, 
-      cost: result.cost, 
+    return {
+      success: result.success,
+      response: result.response,
+      cost: result.cost,
       error: result.error,
       response_time_ms: result.latency_ms,
-      source: "dataforseo_live" 
+      source: "dataforseo_live"
     };
   }
-  
+
   // Unknown model
-  return { 
-    success: false, 
-    response: "", 
-    cost: 0, 
+  return {
+    success: false,
+    response: "",
+    cost: 0,
     error: `Unsupported model: ${modelId}`,
     response_time_ms: 0,
-    source: "none" 
+    source: "none"
   };
 }
 
@@ -1624,7 +1634,7 @@ function createModelResult(
     costPerQuery: 0,
     isLLM: false
   };
-  
+
   // Use provided data or parse from response
   let brandMentioned = extraData?.brand_mentioned ?? false;
   let brandMentionCount = extraData?.brand_mention_count ?? 0;
@@ -1632,7 +1642,7 @@ function createModelResult(
   let matchedTerms: string[] = [];
   let brandRank: number | null = null;
   let brandSentiment: "positive" | "neutral" | "negative" = "neutral";
-  
+
   if (response && !extraData) {
     const brandData = parseBrandData(response, brandName, brandTags);
     brandMentioned = brandData.mentioned;
@@ -1646,7 +1656,7 @@ function createModelResult(
     brandSentiment = brandData.sentiment;
     matchedTerms = brandData.matchedTerms;
   }
-  
+
   // Check if brand domain is cited
   if (!isCited && brandDomain && citations.length > 0) {
     isCited = citations.some(c =>
@@ -1654,7 +1664,7 @@ function createModelResult(
       c.url.toLowerCase().includes(brandDomain.toLowerCase())
     );
   }
-  
+
   // Mark brand sources in citations
   const citationsWithBrandFlag = citations.map(c => ({
     ...c,
@@ -1663,16 +1673,16 @@ function createModelResult(
       c.url.toLowerCase().includes(brandDomain.toLowerCase())
     ) : false
   }));
-  
+
   const competitorData = response ? parseCompetitors(response, competitors) : [];
   const winnerBrand = response ? findWinnerBrand(response, brandName, competitors) : "";
-  
+
   // Determine authority type
   let authorityType: "authority" | "alternative" | "mentioned" = "mentioned";
   if (isCited) {
     authorityType = brandMentionCount > 2 ? "authority" : "alternative";
   }
-  
+
   return {
     model: modelId,
     model_name: config.name,
@@ -1711,30 +1721,30 @@ function createModelResult(
 function calculateVisibilityScore(results: ModelResult[]): number {
   let weightedSum = 0;
   let totalWeight = 0;
-  
+
   for (const result of results) {
     if (!result.success) continue;
-    
+
     const weight = result.weight || 1.0;
     totalWeight += weight;
-    
+
     let score = 0;
     if (result.brand_mentioned) {
       // Base score: cited = 100, mentioned = 50
       score = result.is_cited ? 100 : 50;
-      
+
       // Rank bonus: up to 30 points for rank #1
       if (result.brand_rank) {
         score += Math.max(0, 30 - (result.brand_rank - 1) * 10);
       }
-      
+
       // Mention count bonus: up to 20 points
       score += Math.min(20, result.brand_mention_count * 5);
     }
-    
+
     weightedSum += score * weight;
   }
-  
+
   return totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
 }
 
@@ -1745,20 +1755,20 @@ function calculateTrustIndex(results: ModelResult[]): number {
   let citedCount = 0;
   let authorityCount = 0;
   let total = 0;
-  
+
   for (const result of results) {
     if (!result.success) continue;
     total++;
     if (result.is_cited) citedCount++;
     if (result.authority_type === "authority") authorityCount++;
   }
-  
+
   if (total === 0) return 0;
-  
+
   // Trust = 60% citation rate + 40% authority rate
   const citationRate = (citedCount / total) * 100;
   const authorityRate = (authorityCount / total) * 100;
-  
+
   return Math.round(citationRate * 0.6 + authorityRate * 0.4);
 }
 
@@ -1783,7 +1793,7 @@ serve(async (req: Request) => {
   try {
     // Parse and validate request
     const body = await req.json() as AuditRequest;
-    
+
     const validationError = validateRequest(body);
     if (validationError) {
       return new Response(
@@ -1791,10 +1801,11 @@ serve(async (req: Request) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    
+
     // Sanitize inputs
     const {
       client_id,
+      campaign_id,
       prompt_id,
       prompt_text: rawPromptText,
       prompt_category = "custom",
@@ -1831,12 +1842,12 @@ serve(async (req: Request) => {
       promises.push((async () => {
         // Skip LLM Mentions API entirely - go straight to LIVE LLM for real-time responses
         console.log(`[GEO Audit] Using LIVE LLM API for all models: ${requestedLLMs.join(", ")}`);
-        
+
         // Filter to supported LIVE LLM models
-        const liveModels = requestedLLMs.filter(m => 
+        const liveModels = requestedLLMs.filter(m =>
           ["chatgpt", "gemini", "claude", "perplexity"].includes(m)
         ) as Array<"chatgpt" | "gemini" | "claude" | "perplexity">;
-        
+
         if (liveModels.length > 0) {
           // Query LIVE LLM with validation - real-time inference only
           const liveResult = await getLiveLLMWithValidation(
@@ -1846,24 +1857,24 @@ serve(async (req: Request) => {
             sanitizedCompetitors,
             liveModels
           );
-          
+
           totalCost += liveResult.totalCost;
-          
+
           for (const modelId of liveModels) {
             const modelData = liveResult.results.get(modelId);
-            
+
             if (modelData) {
               // Use extracted citations from the response text
               const citations = modelData.citations || [];
-              
+
               // Check if brand domain is cited
               const isCited = citations.some(c =>
                 [brand_name, targetDomain, ...sanitizedBrandTags].some(term =>
                   term && (c.domain.toLowerCase().includes(term.toLowerCase()) ||
-                          c.url.toLowerCase().includes(term.toLowerCase()))
+                    c.url.toLowerCase().includes(term.toLowerCase()))
                 )
               );
-              
+
               results.push(createModelResult(
                 modelId,
                 true,
@@ -1885,7 +1896,7 @@ serve(async (req: Request) => {
             } else {
               // LIVE LLM failed for this model
               console.log(`[GEO Audit] LIVE LLM failed for ${modelId}`);
-              
+
               results.push(createModelResult(
                 modelId,
                 false,
@@ -1909,15 +1920,15 @@ serve(async (req: Request) => {
       promises.push((async () => {
         const aiResult = await getGoogleAIOverview(prompt_text, location_code);
         totalCost += aiResult.cost;
-        
+
         const brandData = parseBrandData(aiResult.response, brand_name, sanitizedBrandTags);
         const isCited = aiResult.citations.some(c =>
           [brand_name, targetDomain, ...sanitizedBrandTags].some(term =>
             term && (c.domain.toLowerCase().includes(term.toLowerCase()) ||
-                    c.url.toLowerCase().includes(term.toLowerCase()))
+              c.url.toLowerCase().includes(term.toLowerCase()))
           )
         );
-        
+
         results.push(createModelResult(
           "google_ai_overview",
           aiResult.success,
@@ -1944,15 +1955,15 @@ serve(async (req: Request) => {
       promises.push((async () => {
         const serpResult = await getGoogleSERP(prompt_text, location_code);
         totalCost += serpResult.cost;
-        
+
         const brandData = parseBrandData(serpResult.response, brand_name, sanitizedBrandTags);
         const isCited = serpResult.citations.some(c =>
           [brand_name, targetDomain, ...sanitizedBrandTags].some(term =>
             term && (c.domain.toLowerCase().includes(term.toLowerCase()) ||
-                    c.url.toLowerCase().includes(term.toLowerCase()))
+              c.url.toLowerCase().includes(term.toLowerCase()))
           )
         );
-        
+
         results.push(createModelResult(
           "google_serp",
           serpResult.success,
@@ -1982,21 +1993,21 @@ serve(async (req: Request) => {
     const visibleCount = successfulResults.filter(r => r.brand_mentioned).length;
     const citedCount = successfulResults.filter(r => r.is_cited).length;
     const totalModels = successfulResults.length;
-    
+
     const shareOfVoice = totalModels > 0 ? Math.round((visibleCount / totalModels) * 100) : 0;
-    
+
     const rankedResults = successfulResults.filter(r => r.brand_rank);
     const avgRank = rankedResults.length > 0
       ? Math.round((rankedResults.reduce((sum, r) => sum + r.brand_rank!, 0) / rankedResults.length) * 10) / 10
       : null;
-    
+
     const visibilityScore = calculateVisibilityScore(results);
     const trustIndex = calculateTrustIndex(results);
 
     // Aggregate citations by domain
     const citationMap = new Map<string, { count: number; citation: Citation }>();
     const competitorAgg = new Map<string, { count: number; ranks: number[] }>();
-    
+
     for (const result of successfulResults) {
       for (const c of result.citations) {
         if (citationMap.has(c.domain)) {
@@ -2058,6 +2069,7 @@ serve(async (req: Request) => {
           .from("audit_results")
           .insert({
             client_id,
+            campaign_id,
             prompt_id,
             prompt_text,
             prompt_category,
@@ -2081,11 +2093,11 @@ serve(async (req: Request) => {
           })
           .select("id")
           .single();
-        
+
         if (!saveError && savedData) {
           saved_id = savedData.id;
           console.log(`[DB] Saved audit result: ${saved_id}`);
-          
+
           // Also save individual citations for fast queries
           const citationRecords = [];
           for (const result of successfulResults) {
@@ -2103,12 +2115,12 @@ serve(async (req: Request) => {
               });
             }
           }
-          
+
           if (citationRecords.length > 0) {
             const { error: citationError } = await supabase.from("forzeo_citations").insert(citationRecords);
             if (citationError) console.error("[DB] Citation save error:", citationError);
           }
-          
+
           // Log API usage
           const { error: usageError } = await supabase.from("forzeo_api_usage").insert({
             organization_id: null, // Would need to look up from client_id
@@ -2173,11 +2185,11 @@ serve(async (req: Request) => {
 
   } catch (error) {
     console.error("[GEO Audit] Error:", error);
-    
+
     // Sanitize error message for response
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     const safeErrorMessage = errorMessage.replace(/[<>]/g, "").substring(0, 200);
-    
+
     return new Response(JSON.stringify({
       success: false,
       error: safeErrorMessage,

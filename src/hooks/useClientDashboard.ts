@@ -910,6 +910,88 @@ export function useClientDashboard() {
     }
   }, [selectedClient, prompts, selectedModels, auditResults, updateSummary]);
 
+  const runCampaign = useCallback(async (name: string, promptIds: string[]) => {
+    if (!selectedClient || promptIds.length === 0) return;
+    setLoading(true);
+    setError(null);
+
+    // 1. Create Campaign
+    let campaignId = "";
+    try {
+      const { data: camp, error: campError } = await supabase
+        .from("campaigns")
+        .insert({
+          client_id: selectedClient.id,
+          name: name,
+          total_prompts: promptIds.length,
+          status: "running"
+        })
+        .select()
+        .single();
+      if (campError) throw new Error(campError.message);
+      campaignId = camp.id;
+    } catch (err) {
+      setError("Failed to create campaign: " + (err instanceof Error ? err.message : String(err)));
+      setLoading(false);
+      return;
+    }
+
+    // 2. Run Prompts
+    // We don't necessarily need to update local auditResults immediately if the Campaign View fetches its own data.
+    // But updating it keeps the "Analytics" tab fresh too.
+    const newResults: AuditResult[] = [...auditResults];
+
+    for (const promptId of promptIds) {
+      const prompt = prompts.find(p => p.id === promptId);
+      if (!prompt) continue;
+
+      setLoadingPromptId(promptId);
+
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke("geo-audit", {
+          body: {
+            client_id: selectedClient.id,
+            campaign_id: campaignId,
+            prompt_id: prompt.id,
+            prompt_text: prompt.prompt_text,
+            brand_name: selectedClient.brand_name,
+            brand_tags: selectedClient.brand_tags,
+            competitors: selectedClient.competitors,
+            location_code: selectedClient.location_code,
+            models: selectedModels,
+            niche_level: prompt.niche_level,
+            save_to_db: true,
+          },
+        });
+
+        if (!fnError && data?.success) {
+          const result: AuditResult = {
+            id: data.data.id || crypto.randomUUID(), prompt_id: prompt.id, prompt_text: prompt.prompt_text,
+            model_results: data.data.model_results, summary: data.data.summary, created_at: data.data.timestamp,
+          };
+          newResults.push(result);
+          // Update local state incremental
+          setAuditResults([...newResults]);
+        } else {
+          console.error("Campaign prompt failed:", fnError || data?.error);
+        }
+        await new Promise(r => setTimeout(r, 500)); // Rate limit buffer
+      } catch (err) {
+        console.error("Campaign run error:", err);
+      }
+    }
+
+    // Final state update
+    setAuditResults(newResults);
+    const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+    storedResults[selectedClient.id] = newResults;
+    saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
+    updateSummary(newResults);
+
+    setLoading(false);
+    setLoadingPromptId(null);
+  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary]);
+
   // ============================================
   // EXPORT/IMPORT FUNCTIONS
   // ============================================
@@ -1003,38 +1085,74 @@ export function useClientDashboard() {
   // AI GENERATION FUNCTIONS
   // ============================================
 
-  const generatePromptsFromKeywords = useCallback(async (keywords: string): Promise<string[]> => {
+  const generatePromptsFromKeywords = useCallback(async (keywords: string, options: { sentiment?: string; focus?: string; competitors?: string[] } = {}): Promise<string[]> => {
     if (!selectedClient) return [];
-    const prompt = `Generate 10 search prompts for AI visibility analysis.\n\nKeywords: ${keywords}\nBrand: ${selectedClient.brand_name}\nIndustry: ${selectedClient.industry}\nRegion: ${selectedClient.target_region}\n\nGenerate a mix of broad, niche, and super-niche prompts. Return only the prompts, one per line.`;
 
+    const { sentiment = "Neutral", focus = "General", competitors = [] } = options;
+    const competitorContext = competitors.length > 0 ? `Competitors to analyze against: ${competitors.join(", ")}` : "";
+
+    // Construct a more detailed prompt based on options
+    let systemInstruction = `You are an expert SEO and Brand Reputation Analyst. Generate 10 search prompts that real users would type into AI search engines (like Perplexity, SearchGPT, Google Gemini).`;
+
+    let userPrompt = `Generate 10 search prompts based on these keywords: "${keywords}"\n\nContext:\nBrand: ${selectedClient.brand_name}\nIndustry: ${selectedClient.industry}\nRegion: ${selectedClient.target_region}\n${competitorContext}\n\n`;
+
+    // Add Focus Logic
+    if (focus === "Competitor") {
+      userPrompt += `FOCUS: Generate prompts that directly compare ${selectedClient.brand_name} against its competitors. Examples: "Diff between ${selectedClient.brand_name} and ${competitors[0] || 'competitor'}", "Is ${selectedClient.brand_name} better than..."\n`;
+    } else if (focus === "Feature") {
+      userPrompt += `FOCUS: Generate prompts specific to features, pricing, and use-cases. Examples: "${selectedClient.brand_name} pricing", "${selectedClient.brand_name} for enterprise", "How to use..."\n`;
+    } else {
+      userPrompt += `FOCUS: Generate a mix of informational, navigational, and commercial investigation prompts.\n`;
+    }
+
+    // Add Sentiment Logic
+    if (sentiment === "Negative") {
+      userPrompt += `SENTIMENT SCENARIO: Generate "crisis" or "problem" searching prompts to test how the AI handles negative queries. Examples: "${selectedClient.brand_name} complaints", "${selectedClient.brand_name} reviews reddit", "Is ${selectedClient.brand_name} legit?", "Cancel ${selectedClient.brand_name} subscription".\n`;
+    } else if (sentiment === "Positive") {
+      userPrompt += `SENTIMENT SCENARIO: Generate prompts from highly interested buyers looking for validation. Examples: "Why is ${selectedClient.brand_name} the best?", "Success stories with ${selectedClient.brand_name}".\n`;
+    }
+
+    userPrompt += `\nOutput ONLY the 10 prompts, one per line. No numbering, no introductory text.`;
+
+    // 1. Try Supabase Edge Function first (if backend logic exists)
     try {
       const { data, error } = await supabase.functions.invoke("generate-content", {
-        body: { prompt, type: "prompts" },
+        body: { prompt: userPrompt, type: "prompts" },
       });
       if (!error && data?.response) {
         return data.response.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 10 && !l.startsWith("-") && !l.match(/^\d+\./));
       }
     } catch (err) { console.log("Generate prompts error:", err); }
 
-    // Fallback to direct Groq
+    // 2. Direct Groq Fallback (Primary method if desired)
     const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
     if (!groqApiKey) return [];
+
     try {
       const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "llama-3.1-8b-instant",
-          messages: [{ role: "system", content: "Generate search prompts, one per line." }, { role: "user", content: prompt }],
-          temperature: 0.7, max_tokens: 2048,
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: userPrompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 2048,
         }),
       });
+
       if (response.ok) {
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content || "";
-        return content.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 10);
+        // Clean up the output to ensure just lines of text
+        return content.split("\n")
+          .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").trim())
+          .filter((l: string) => l.length > 5);
       }
     } catch (err) { console.error("Groq error:", err); }
+
     return [];
   }, [selectedClient]);
 
@@ -1164,7 +1282,7 @@ export function useClientDashboard() {
     updateBrandTags, updateCompetitors,
 
     // Audit
-    runFullAudit, runSinglePrompt, clearResults,
+    runFullAudit, runSinglePrompt, runCampaign, clearResults,
 
     // Prompts
     addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, reactivatePrompt, clearAllPrompts,

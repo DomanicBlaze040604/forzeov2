@@ -8,7 +8,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Get environment variables
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://pqvyyziaczzgaythgpyc.supabase.co";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://bvmwnxargzlfheiwyget.supabase.co";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
 
 // Validate configuration
