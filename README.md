@@ -161,9 +161,9 @@ Groq's Llama 3.1 model powers intelligent content features:
 - ✅ **Enhanced Export** - Full report includes overall visibility summary + per-prompt insights
 
 ### v7.3 Features (Latest)
-- ✅ **AI-Powered Pinpoint Insights** - Groq API generates strategic recommendations combining local aggregation + AI analysis
+- ✅ **AI-Powered Pinpoint Insights** - Advanced AI generates strategic recommendations combining local aggregation + AI analysis
 - ✅ **Executive Summary** - AI-generated one-sentence visibility status with priority badge
-- ✅ **Strategic Recommendations** - 5 targeted, actionable recommendations from Groq
+- ✅ **Strategic Recommendations** - 5 targeted, actionable recommendations
 - ✅ **Key Actions** - Immediate, short-term, and long-term action items
 
 ### v6.1 Features (Consolidated & Polished)

@@ -1244,7 +1244,7 @@ export function useClientDashboard() {
       }
 
       if (aggRecs.length > 0) {
-        report += `TOP RECOMMENDATIONS\n${"-".repeat(40)}\n`;
+        report += `AI-POWERED STRATEGIC INSIGHTS (Aggregated)\n${"-".repeat(40)}\n`;
         aggRecs.forEach((rec, idx) => report += `${idx + 1}. ${rec}\n`);
         report += `\n`;
       }

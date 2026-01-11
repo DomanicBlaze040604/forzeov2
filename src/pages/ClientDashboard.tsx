@@ -1625,7 +1625,7 @@ export default function ClientDashboard() {
                   <Sparkles className="h-5 w-5 text-purple-600" />
                   AI-Powered Pinpoint Insights
                 </h3>
-                <p className="text-sm text-gray-500 mt-1">Strategic recommendations using Groq AI + aggregated data</p>
+                <p className="text-sm text-gray-500 mt-1">Strategic recommendations using Advanced AI + aggregated data</p>
               </div>
               <Button
                 onClick={handleGenerateAiInsights}
