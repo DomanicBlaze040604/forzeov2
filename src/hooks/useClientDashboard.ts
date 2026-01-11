@@ -1185,6 +1185,72 @@ export function useClientDashboard() {
     if (auditResults.length > 0) {
       report += `\n${"=".repeat(60)}\nAI VISIBILITY INSIGHTS & RECOMMENDATIONS\n${"=".repeat(60)}\n\n`;
 
+      // Overall Summary
+      const overallSov = auditResults.length > 0
+        ? Math.round(auditResults.reduce((sum, r) => sum + (r.summary?.share_of_voice || 0), 0) / auditResults.length)
+        : 0;
+      const overallPriority = overallSov < 30 ? 'HIGH' : overallSov < 60 ? 'MEDIUM' : 'LOW';
+      const highPriorityCount = auditResults.filter(r => (r.summary?.share_of_voice || 0) < 30).length;
+      const mediumPriorityCount = auditResults.filter(r => {
+        const sov = r.summary?.share_of_voice || 0;
+        return sov >= 30 && sov < 60;
+      }).length;
+      const lowPriorityCount = auditResults.filter(r => (r.summary?.share_of_voice || 0) >= 60).length;
+
+      report += `OVERALL VISIBILITY SUMMARY\n${"-".repeat(40)}\n`;
+      report += `Average Visibility: ${overallSov}%\n`;
+      report += `Overall Priority: ${overallPriority}\n`;
+      report += `Prompts by Priority:\n`;
+      report += `  • Critical (<30%): ${highPriorityCount}\n`;
+      report += `  • Needs Work (30-60%): ${mediumPriorityCount}\n`;
+      report += `  • Good (>60%): ${lowPriorityCount}\n\n`;
+
+      // Aggregated Recommendations
+      const aggRecs: string[] = [];
+      if (overallSov < 30) {
+        aggRecs.push(`Critical: Overall brand visibility is very low (${overallSov}%). Focus on building authoritative content across all target queries.`);
+      }
+
+      // Find top competitors mentioned across all audits
+      const allCompMentions: Record<string, number> = {};
+      auditResults.forEach(result => {
+        result.model_results.forEach(mr => {
+          const response = mr.raw_response?.toLowerCase() || '';
+          selectedClient.competitors.forEach(comp => {
+            const matches = response.match(new RegExp(comp.toLowerCase(), 'gi'));
+            if (matches) allCompMentions[comp] = (allCompMentions[comp] || 0) + matches.length;
+          });
+        });
+      });
+      const topComps = Object.entries(allCompMentions).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      if (topComps.length > 0) {
+        aggRecs.push(`Top competitors in AI responses: ${topComps.map(([name, count]) => `${name} (${count}x)`).join(', ')}. Analyze their content strategies.`);
+      }
+
+      // Find top cited domains
+      const allDomains: Record<string, number> = {};
+      auditResults.forEach(result => {
+        result.model_results.forEach(mr => {
+          mr.citations.forEach(c => allDomains[c.domain] = (allDomains[c.domain] || 0) + 1);
+        });
+      });
+      const topDoms = Object.entries(allDomains).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([d]) => d);
+      if (topDoms.length > 0) {
+        aggRecs.push(`High-value citation sources to target: ${topDoms.join(', ')}`);
+      }
+
+      if (highPriorityCount > 0) {
+        aggRecs.push(`${highPriorityCount} prompt${highPriorityCount > 1 ? 's' : ''} with critical visibility gaps require immediate attention.`);
+      }
+
+      if (aggRecs.length > 0) {
+        report += `TOP RECOMMENDATIONS\n${"-".repeat(40)}\n`;
+        aggRecs.forEach((rec, idx) => report += `${idx + 1}. ${rec}\n`);
+        report += `\n`;
+      }
+
+      report += `PER-PROMPT INSIGHTS\n${"-".repeat(40)}\n\n`;
+
       auditResults.forEach(result => {
         const sov = result.summary?.share_of_voice || 0;
         const rank = result.summary?.average_rank;
