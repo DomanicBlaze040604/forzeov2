@@ -86,7 +86,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 export default function ClientDashboard() {
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns" | "insights">("overview");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [newPrompt, setNewPrompt] = useState("");
@@ -313,7 +313,7 @@ export default function ClientDashboard() {
         </div>
         <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">General</div>
-          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Sparkles }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Wand2 }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
+          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "insights", label: "Insights", icon: Lightbulb }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Sparkles }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Wand2 }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
@@ -380,6 +380,7 @@ export default function ClientDashboard() {
           {activeTab === "citations" && CitationsTab()}
           {activeTab === "sources" && SourcesTab()}
           {activeTab === "content" && ContentTab()}
+          {activeTab === "insights" && InsightsTab()}
         </div>
       </main>
       {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{ImportDialog()}{RunCampaignDialog()}
@@ -1454,6 +1455,186 @@ export default function ClientDashboard() {
       {/* Import File Button moved to allow spacing */}
       {/* Replaced logic ends here, existing import logic follows in footer usually? No, I am replacing the content inside the space-y-4 div of BulkPromptsDialog */}
     </div><DialogFooter><Button variant="outline" onClick={() => { setImportDialogOpen(true); setBulkPromptsOpen(false); }}>Import File</Button><Button onClick={handleBulkAdd} disabled={!bulkPrompts.trim()}>Add {bulkPrompts.split("\n").filter(l => l.trim().length > 3).length} Prompts</Button></DialogFooter></DialogContent></Dialog>);
+  }
+
+  function InsightsTab() {
+    // Calculate overall visibility metrics
+    const overallSov = filteredAuditResults.length > 0
+      ? Math.round(filteredAuditResults.reduce((sum, r) => sum + (r.summary?.share_of_voice || 0), 0) / filteredAuditResults.length)
+      : 0;
+    const overallPriority = overallSov < 30 ? 'high' : overallSov < 60 ? 'medium' : 'low';
+
+    // Group prompts by priority
+    const highPriorityPrompts = filteredAuditResults.filter(r => (r.summary?.share_of_voice || 0) < 30);
+    const mediumPriorityPrompts = filteredAuditResults.filter(r => {
+      const sov = r.summary?.share_of_voice || 0;
+      return sov >= 30 && sov < 60;
+    });
+    const lowPriorityPrompts = filteredAuditResults.filter(r => (r.summary?.share_of_voice || 0) >= 60);
+
+    // Aggregate recommendations
+    const aggregatedRecommendations: string[] = [];
+
+    // Add overall recommendations based on data
+    if (overallSov < 30) {
+      aggregatedRecommendations.push(`Critical: Overall brand visibility is very low (${overallSov}%). Focus on building authoritative content across all target queries.`);
+    }
+
+    // Find top competitors mentioned
+    const allCompetitorMentions: Record<string, number> = {};
+    filteredAuditResults.forEach(result => {
+      result.model_results.forEach(mr => {
+        const response = mr.raw_response?.toLowerCase() || '';
+        selectedClient?.competitors.forEach(comp => {
+          const matches = response.match(new RegExp(comp.toLowerCase(), 'gi'));
+          if (matches) {
+            allCompetitorMentions[comp] = (allCompetitorMentions[comp] || 0) + matches.length;
+          }
+        });
+      });
+    });
+    const topCompetitors = Object.entries(allCompetitorMentions)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+    if (topCompetitors.length > 0) {
+      aggregatedRecommendations.push(`Top competitors appearing across audits: ${topCompetitors.map(([name, count]) => `${name} (${count}x)`).join(', ')}. Analyze their content strategies for differentiation opportunities.`);
+    }
+
+    // Find top cited domains across all audits
+    const allDomains: Record<string, number> = {};
+    filteredAuditResults.forEach(result => {
+      result.model_results.forEach(mr => {
+        mr.citations.forEach(c => {
+          allDomains[c.domain] = (allDomains[c.domain] || 0) + 1;
+        });
+      });
+    });
+    const topDomains = Object.entries(allDomains)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([domain]) => domain);
+    if (topDomains.length > 0) {
+      aggregatedRecommendations.push(`High-value citation sources to target: ${topDomains.join(', ')}. Build relationships and create content worthy of citation.`);
+    }
+
+    // Add Tavily-based insights
+    const tavilyInsights: string[] = [];
+    Object.values(tavilyResults).forEach((data: any) => {
+      if (data?.analysis?.insights) {
+        data.analysis.insights.forEach((insight: string) => {
+          if (!tavilyInsights.includes(insight)) {
+            tavilyInsights.push(insight);
+          }
+        });
+      }
+    });
+    if (tavilyInsights.length > 0) {
+      aggregatedRecommendations.push(`Web analysis insight: ${tavilyInsights[0]}`);
+    }
+
+    // High-priority prompts need attention
+    if (highPriorityPrompts.length > 0) {
+      aggregatedRecommendations.push(`${highPriorityPrompts.length} prompt${highPriorityPrompts.length > 1 ? 's' : ''} with critical visibility gaps require immediate content creation attention.`);
+    }
+
+    return (
+      <div className="space-y-6 animate-in fade-in">
+        {/* Overall Status Header */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "p-3 rounded-xl shadow-lg",
+                overallPriority === 'high' ? "bg-gradient-to-br from-red-500 to-rose-600" :
+                  overallPriority === 'medium' ? "bg-gradient-to-br from-amber-500 to-orange-600" :
+                    "bg-gradient-to-br from-green-500 to-emerald-600"
+              )}>
+                <Lightbulb className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">AI Visibility Insights</h2>
+                <p className="text-sm text-gray-500">Aggregated analysis across {filteredAuditResults.length} audited prompts</p>
+              </div>
+            </div>
+            <div className={cn(
+              "px-4 py-2 rounded-full font-semibold text-sm",
+              overallPriority === 'high' ? "bg-red-100 text-red-700" :
+                overallPriority === 'medium' ? "bg-amber-100 text-amber-700" :
+                  "bg-green-100 text-green-700"
+            )}>
+              Priority: {overallPriority.toUpperCase()}
+            </div>
+          </div>
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-blue-700">{overallSov}%</div>
+              <div className="text-sm font-medium text-blue-600 mt-1">Avg Visibility</div>
+            </div>
+            <div className="bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-red-700">{highPriorityPrompts.length}</div>
+              <div className="text-sm font-medium text-red-600 mt-1">Critical</div>
+            </div>
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-amber-700">{mediumPriorityPrompts.length}</div>
+              <div className="text-sm font-medium text-amber-600 mt-1">Needs Work</div>
+            </div>
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-green-700">{lowPriorityPrompts.length}</div>
+              <div className="text-sm font-medium text-green-600 mt-1">Good</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Aggregated Recommendations */}
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-amber-50 via-yellow-50 to-orange-50">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-amber-600" />
+              Top Recommendations
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">Actionable insights aggregated from all audits</p>
+          </div>
+          <div className="p-5 space-y-3">
+            {aggregatedRecommendations.length > 0 ? aggregatedRecommendations.map((rec, idx) => (
+              <div key={idx} className="flex items-start gap-3 p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-100 hover:border-amber-200 transition-colors">
+                <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-sm font-bold shadow-sm">
+                  {idx + 1}
+                </div>
+                <p className="text-sm text-gray-700 leading-relaxed">{rec}</p>
+              </div>
+            )) : (
+              <div className="text-center py-8 text-gray-500">
+                <Lightbulb className="h-10 w-10 mx-auto mb-3 text-gray-300" />
+                <p>Run audits to generate insights</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Priority Breakdown */}
+        {highPriorityPrompts.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-red-50 to-rose-50">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                Critical Visibility Gaps ({highPriorityPrompts.length})
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">Prompts with &lt;30% visibility requiring immediate attention</p>
+            </div>
+            <div className="p-4 space-y-2 max-h-64 overflow-y-auto">
+              {highPriorityPrompts.slice(0, 10).map((result, idx) => (
+                <div key={idx} className="flex items-center justify-between p-3 bg-red-50/50 rounded-lg border border-red-100 hover:bg-red-50 transition-colors cursor-pointer" onClick={() => setSelectedPromptDetail(result.prompt_id)}>
+                  <span className="text-sm text-gray-800 flex-1 truncate pr-4">{result.prompt_text}</span>
+                  <span className="text-sm font-semibold text-red-700 flex-shrink-0">{result.summary?.share_of_voice || 0}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   function PromptDetailDialog() {
