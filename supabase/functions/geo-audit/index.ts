@@ -2117,12 +2117,12 @@ serve(async (req: Request) => {
           }
 
           if (citationRecords.length > 0) {
-            const { error: citationError } = await supabase.from("forzeo_citations").insert(citationRecords);
+            const { error: citationError } = await supabase.from("citations").insert(citationRecords);
             if (citationError) console.error("[DB] Citation save error:", citationError);
           }
 
           // Log API usage
-          const { error: usageError } = await supabase.from("forzeo_api_usage").insert({
+          const { error: usageError } = await supabase.from("api_usage").insert({
             organization_id: null, // Would need to look up from client_id
             client_id,
             api_name: "geo_audit",

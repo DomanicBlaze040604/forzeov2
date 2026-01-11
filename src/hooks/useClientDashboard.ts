@@ -522,7 +522,7 @@ export function useClientDashboard() {
     // Load prompts from Supabase first
     try {
       const { data: promptsData } = await supabase
-        .from("forzeo_prompts").select("*").eq("client_id", client.id).eq("is_active", true);
+        .from("prompts").select("*").eq("client_id", client.id).eq("is_active", true);
       if (promptsData && promptsData.length > 0) {
         const mappedPrompts: Prompt[] = promptsData.map(p => ({
           id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
@@ -613,7 +613,7 @@ export function useClientDashboard() {
 
     // Save to Supabase first
     try {
-      const { error: insertError } = await supabase.from("forzeo_prompts").insert({
+      const { error: insertError } = await supabase.from("prompts").insert({
         id: newPrompt.id, client_id: newPrompt.client_id, prompt_text: newPrompt.prompt_text,
         category: newPrompt.category, is_custom: newPrompt.is_custom, is_active: newPrompt.is_active,
       });
@@ -641,7 +641,7 @@ export function useClientDashboard() {
 
     // Save to Supabase
     try {
-      const { error: insertError } = await supabase.from("forzeo_prompts").insert(
+      const { error: insertError } = await supabase.from("prompts").insert(
         newPrompts.map(p => ({
           id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
           category: p.category, is_custom: p.is_custom, is_active: p.is_active,
@@ -675,7 +675,7 @@ export function useClientDashboard() {
 
     // Soft delete - mark prompt as inactive in database (keep for tracking)
     try {
-      await supabase.from("forzeo_prompts").update({ is_active: false }).eq("id", promptId);
+      await supabase.from("prompts").update({ is_active: false }).eq("id", promptId);
     } catch (err) { console.log("Supabase soft delete prompt failed:", err); }
 
     // Update local prompts state - mark as inactive instead of removing
@@ -722,7 +722,7 @@ export function useClientDashboard() {
 
     // Reactivate prompt in database
     try {
-      await supabase.from("forzeo_prompts").update({ is_active: true }).eq("id", promptId);
+      await supabase.from("prompts").update({ is_active: true }).eq("id", promptId);
     } catch (err) { console.log("Supabase reactivate prompt failed:", err); }
 
     // Update local prompts state - mark as active
@@ -764,7 +764,7 @@ export function useClientDashboard() {
 
     // Delete all prompts from database (keep audit results for historical tracking)
     try {
-      await supabase.from("forzeo_prompts").delete().eq("client_id", selectedClient.id);
+      await supabase.from("prompts").delete().eq("client_id", selectedClient.id);
     } catch (err) { console.log("Supabase clear prompts failed:", err); }
 
     // Clear local state (audit results stay in DB for tracking)
@@ -1218,7 +1218,7 @@ export function useClientDashboard() {
       (async () => {
         try {
           const { data: promptsData } = await supabase
-            .from("forzeo_prompts").select("*").eq("client_id", selectedClient.id).eq("is_active", true);
+            .from("prompts").select("*").eq("client_id", selectedClient.id).eq("is_active", true);
           if (promptsData && promptsData.length > 0) {
             const mappedPrompts: Prompt[] = promptsData.map(p => ({
               id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
