@@ -230,6 +230,7 @@ const STORAGE_KEYS = {
   PROMPTS: "forzeo_prompts_v3",
   SELECTED_CLIENT: "forzeo_selected_client",
   SELECTED_MODELS: "forzeo_selected_models",
+  INCLUDE_TAVILY: "forzeo_include_tavily",
 };
 
 function loadFromStorage<T>(key: string, defaultValue: T): T {
@@ -280,6 +281,15 @@ export function useClientDashboard() {
   const [loading, setLoading] = useState(false);
   const [loadingPromptId, setLoadingPromptId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [includeTavily, setIncludeTavilyState] = useState<boolean>(
+    loadFromStorage(STORAGE_KEYS.INCLUDE_TAVILY, true)
+  );
+  const [tavilyResults, setTavilyResults] = useState<Record<string, unknown>>({});
+
+  const setIncludeTavily = useCallback((include: boolean) => {
+    setIncludeTavilyState(include);
+    saveToStorage(STORAGE_KEYS.INCLUDE_TAVILY, include);
+  }, []);
 
   const setSelectedModels = useCallback((models: string[]) => {
     setSelectedModelsState(models);
@@ -869,6 +879,7 @@ export function useClientDashboard() {
     setError(null);
 
     try {
+      // Run geo-audit
       const { data, error: fnError } = await supabase.functions.invoke("geo-audit", {
         body: {
           client_id: selectedClient.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
@@ -899,6 +910,35 @@ export function useClientDashboard() {
         storedResults[selectedClient.id] = newResults;
         saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
         updateSummary(newResults);
+
+        // Run Tavily search if enabled
+        if (includeTavily) {
+          try {
+            console.log("[Tavily] Running source analysis for prompt:", prompt.prompt_text.substring(0, 50));
+            const { data: tavilyData, error: tavilyError } = await supabase.functions.invoke("tavily-search", {
+              body: {
+                client_id: selectedClient.id,
+                prompt_id: prompt.id,
+                prompt_text: prompt.prompt_text,
+                brand_name: selectedClient.brand_name,
+                competitors: selectedClient.competitors,
+                search_depth: "advanced",
+                max_results: 20,
+                include_answer: true,
+                save_to_db: true,
+              },
+            });
+
+            if (!tavilyError && tavilyData?.success) {
+              console.log("[Tavily] Got", tavilyData.sources?.length || 0, "sources");
+              setTavilyResults(prev => ({ ...prev, [prompt.id]: tavilyData }));
+            } else {
+              console.warn("[Tavily] Search failed:", tavilyError || tavilyData?.error);
+            }
+          } catch (tavilyErr) {
+            console.error("[Tavily] Exception:", tavilyErr);
+          }
+        }
       } else {
         setError(fnError?.message || data?.error || "Audit failed");
       }
@@ -908,7 +948,7 @@ export function useClientDashboard() {
     } finally {
       setLoadingPromptId(null);
     }
-  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary]);
+  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
 
   const runCampaign = useCallback(async (name: string, promptIds: string[]) => {
     if (!selectedClient || promptIds.length === 0) return;
@@ -1275,10 +1315,10 @@ export function useClientDashboard() {
   return {
     // State
     clients, selectedClient, prompts, auditResults, summary, costBreakdown,
-    selectedModels, loading, loadingPromptId, error,
+    selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults,
 
     // Client management
-    addClient, updateClient, deleteClient, switchClient, setSelectedModels,
+    addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily,
     updateBrandTags, updateCompetitors,
 
     // Audit
