@@ -84,7 +84,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns">("overview");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
@@ -122,6 +122,7 @@ export default function ClientDashboard() {
   const [sourcesGapView, setSourcesGapView] = useState<"all" | "gap">("all");
   const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6", logo_url: "" });
   const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", primary_color: "#3b82f6", logo_url: "", competitors: "" });
+  const [isAutoFinding, setIsAutoFinding] = useState(false);
 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
@@ -1042,9 +1043,9 @@ export default function ClientDashboard() {
               <div>
                 <Label className="text-sm font-medium text-gray-700">Brand Name *</Label>
                 <Input
-                  placeholder="e.g., Acme Corp"
+                  placeholder="e.g., Nike"
                   value={newClientForm.name}
-                  onChange={(e) => setNewClientForm(prev => ({ ...prev, name: e.target.value }))}
+                  onChange={(e) => setNewClientForm(prev => ({ ...prev, name: e.target.value, brand_name: e.target.value }))}
                   className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
@@ -1087,7 +1088,38 @@ export default function ClientDashboard() {
               </div>
             </div>
             <div>
-              <Label className="text-sm font-medium text-gray-700">Competitors (comma-separated)</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium text-gray-700">Competitors (comma-separated)</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    setIsAutoFinding(true);
+                    try {
+                      const results = await fetchCompetitors(newClientForm.brand_name, newClientForm.industry, newClientForm.target_region);
+
+                      if (results && results.length > 0) {
+                        const current = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean);
+                        const combined = Array.from(new Set([...current, ...results]));
+                        setNewClientForm(prev => ({ ...prev, competitors: combined.join(", ") }));
+                      } else {
+                        alert("No competitors found.");
+                      }
+                    } catch (err) {
+                      console.error("Auto-find failed:", err);
+                    } finally {
+                      setIsAutoFinding(false);
+                    }
+                  }}
+                  disabled={isAutoFinding || !newClientForm.brand_name}
+                  className="h-6 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
+                >
+                  {isAutoFinding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                  {isAutoFinding ? "Finding..." : "Auto-Find"}
+                </Button>
+              </div>
               <Input
                 placeholder="e.g., Nike, Adidas, Puma"
                 value={newClientForm.competitors}
@@ -1188,7 +1220,38 @@ export default function ClientDashboard() {
               </div>
             </div>
             <div>
-              <Label className="text-sm font-medium text-gray-700">Competitors (comma-separated)</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium text-gray-700">Competitors (comma-separated)</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    setIsAutoFinding(true);
+                    try {
+                      const results = await fetchCompetitors(editClientForm.brand_name, editClientForm.industry, editClientForm.target_region);
+
+                      if (results && results.length > 0) {
+                        const current = editClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean);
+                        const combined = Array.from(new Set([...current, ...results]));
+                        setEditClientForm(prev => ({ ...prev, competitors: combined.join(", ") }));
+                      } else {
+                        alert("No competitors found. Please try manually.");
+                      }
+                    } catch (err) {
+                      console.error("Auto-find failed:", err);
+                    } finally {
+                      setIsAutoFinding(false);
+                    }
+                  }}
+                  disabled={isAutoFinding || !editClientForm.brand_name}
+                  className="h-6 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
+                >
+                  {isAutoFinding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                  {isAutoFinding ? "Finding..." : "Auto-Find"}
+                </Button>
+              </div>
               <Input
                 placeholder="e.g., Nike, Adidas, Puma"
                 value={editClientForm.competitors}
@@ -1352,11 +1415,33 @@ export default function ClientDashboard() {
   function PromptDetailDialog() {
     const result = filteredAuditResults.find(r => r.prompt_id === selectedPromptDetail);
     const prompt = prompts.find(p => p.id === selectedPromptDetail);
-    const [detailTab, setDetailTab] = useState<"models" | "citations" | "tavily">("models");
+    const [detailTab, setDetailTab] = useState<"models" | "citations" | "tavily" | "content">("models");
+    const [generatedVisibilityContent, setGeneratedVisibilityContent] = useState<string | null>(null);
+    const [generatingVisibilityContent, setGeneratingVisibilityContent] = useState(false);
     if (!result && !prompt) return null;
     const allPromptCitations = result?.model_results.flatMap(mr => mr.citations.map(c => ({ ...c, model: mr.model_name }))) || [];
     const uniqueCitations = Array.from(new Map(allPromptCitations.map(c => [c.url, c])).values());
     const tavilyData = selectedPromptDetail ? tavilyResults[selectedPromptDetail] as any : null;
+
+    const handleGenerateVisibilityContent = async () => {
+      if (!prompt && !result) return;
+      setGeneratingVisibilityContent(true);
+      setGeneratedVisibilityContent(null);
+      try {
+        const content = await generateVisibilityContent(
+          prompt?.prompt_text || result?.prompt_text || "",
+          result || null,
+          tavilyData
+        );
+        setGeneratedVisibilityContent(content);
+        if (content) setDetailTab("content");
+      } catch (err) {
+        console.error("Error generating content:", err);
+      } finally {
+        setGeneratingVisibilityContent(false);
+      }
+    };
+
     return (
       <Dialog open={!!selectedPromptDetail} onOpenChange={() => setSelectedPromptDetail(null)}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto bg-white">
@@ -1386,10 +1471,26 @@ export default function ClientDashboard() {
               </div>
 
               {/* Tabs */}
-              <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-                <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
-                <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>All Citations ({uniqueCitations.length})</button>
-                <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Sparkles className="h-3.5 w-3.5" />Tavily{tavilyData ? ` (${tavilyData.sources?.length || 0})` : ""}</button>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
+                  <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
+                  <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Citations ({uniqueCitations.length})</button>
+                  <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Sparkles className="h-3.5 w-3.5" />Tavily</button>
+                  {generatedVisibilityContent && (
+                    <button onClick={() => setDetailTab("content")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "content" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Wand2 className="h-3.5 w-3.5" />Generated</button>
+                  )}
+                </div>
+                <Button
+                  onClick={handleGenerateVisibilityContent}
+                  disabled={generatingVisibilityContent}
+                  className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white"
+                >
+                  {generatingVisibilityContent ? (
+                    <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating...</>
+                  ) : (
+                    <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>
+                  )}
+                </Button>
               </div>
 
               {/* Model Results Tab */}
@@ -1640,6 +1741,68 @@ export default function ClientDashboard() {
                       <Sparkles className="h-12 w-12 mx-auto mb-3 text-gray-300" />
                       <p className="text-gray-600 font-medium mb-2">No Tavily data available</p>
                       <p className="text-sm text-gray-500 mb-4">Enable "Tavily On" and re-run this prompt to see AI source analysis.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Generated Content Tab */}
+              {detailTab === "content" && (
+                <div className="space-y-4">
+                  {generatedVisibilityContent ? (
+                    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-indigo-50 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Wand2 className="h-5 w-5 text-purple-600" />
+                          <span className="font-semibold text-gray-900">AI-Generated Content for Visibility</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">{generatedVisibilityContent.length} characters</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigator.clipboard.writeText(generatedVisibilityContent)}
+                            className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                          >
+                            <Copy className="h-3.5 w-3.5 mr-1" /> Copy
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="p-6 max-h-[60vh] overflow-y-auto">
+                        <div className="prose prose-sm max-w-none">
+                          <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
+                            {generatedVisibilityContent.split('\n').map((line, i) => {
+                              if (line.startsWith('# ')) return <h1 key={i} className="text-2xl font-bold text-gray-900 mt-4 mb-2">{line.replace('# ', '')}</h1>;
+                              if (line.startsWith('## ')) return <h2 key={i} className="text-xl font-semibold text-gray-800 mt-4 mb-2">{line.replace('## ', '')}</h2>;
+                              if (line.startsWith('### ')) return <h3 key={i} className="text-lg font-medium text-gray-800 mt-3 mb-1">{line.replace('### ', '')}</h3>;
+                              if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-gray-700">{line.replace(/^[-*] /, '')}</li>;
+                              if (line.startsWith('**') && line.endsWith('**')) return <strong key={i} className="font-semibold text-gray-900">{line.replace(/\*\*/g, '')}</strong>;
+                              if (line.trim() === '') return <br key={i} />;
+                              return <p key={i} className="mb-2">{line}</p>;
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="p-4 border-t border-gray-100 bg-gray-50">
+                        <div className="flex items-start gap-3">
+                          <div className="p-1.5 bg-blue-100 rounded-lg flex-shrink-0">
+                            <Sparkles className="h-4 w-4 text-blue-600" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">How to use this content</p>
+                            <p className="text-xs text-gray-500 mt-1">Publish on your blog, include in PR materials, or use as a basis for social content. The more authoritative sources link to content like this, the more likely AI models will cite your brand.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 bg-gray-50 rounded-xl border border-gray-200">
+                      <Wand2 className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                      <p className="text-gray-600 font-medium mb-2">No content generated yet</p>
+                      <p className="text-sm text-gray-500 mb-4">Click "Generate Content" to create AI-optimized content based on your audit results and Tavily analysis.</p>
+                      <Button onClick={handleGenerateVisibilityContent} disabled={generatingVisibilityContent} className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
+                        {generatingVisibilityContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating...</> : <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>}
+                      </Button>
                     </div>
                   )}
                 </div>

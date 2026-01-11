@@ -1227,6 +1227,161 @@ export function useClientDashboard() {
     return null;
   }, [selectedClient]);
 
+  /**
+   * Generate humanized content based on audit results and Tavily analysis
+   * Uses Groq API to create SEO-optimized content that improves AI visibility
+   */
+  const generateVisibilityContent = useCallback(async (
+    promptText: string,
+    auditResult: AuditResult | null,
+    tavilyData: any
+  ): Promise<string | null> => {
+    if (!selectedClient) return null;
+
+    // Build comprehensive context from audit results
+    const modelSummary = auditResult?.model_results
+      .map(mr => `${mr.model_name}: ${mr.brand_mentioned ? 'Mentioned' : 'Not mentioned'}, Rank: ${mr.brand_rank || 'N/A'}, Citations: ${mr.citations.length}`)
+      .join('\n') || 'No audit data available';
+
+    const topCitations = auditResult?.model_results
+      .flatMap(mr => mr.citations)
+      .slice(0, 10)
+      .map(c => `- ${c.domain}: ${c.title || c.url}`)
+      .join('\n') || 'No citations';
+
+    const competitorContext = auditResult?.model_results
+      .flatMap(mr => {
+        const response = mr.raw_response?.toLowerCase() || '';
+        return selectedClient.competitors.filter(c => response.includes(c.toLowerCase()));
+      })
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .join(', ') || 'None mentioned';
+
+    // Build Tavily context
+    const tavilyContext = tavilyData ? `
+TAVILY AI SOURCE ANALYSIS:
+- Brand Found: ${tavilyData.analysis?.brand_mentioned ? 'Yes' : 'No'} (${tavilyData.analysis?.brand_mention_count || 0} mentions)
+- Competitor Mentions: ${JSON.stringify(tavilyData.analysis?.competitor_mentions || {})}
+- Top Domains: ${(tavilyData.analysis?.top_domains || []).slice(0, 5).map((d: any) => d.domain).join(', ')}
+- Source Types: ${JSON.stringify(tavilyData.analysis?.source_types || {})}
+- AI Insights: ${(tavilyData.analysis?.insights || []).join('; ')}
+- Tavily Answer: ${tavilyData.answer?.substring(0, 500) || 'N/A'}
+` : 'No Tavily data available';
+
+    const systemPrompt = `You are an expert content strategist and writer specializing in AI visibility optimization.
+
+Your task is to create content that will help a brand become more visible in AI-generated responses like ChatGPT, Perplexity, Claude, and Google AI Overviews.
+
+CRITICAL RULES FOR HUMANIZED CONTENT:
+1. Write in a natural, conversational tone - not robotic or overly formal
+2. Include personal anecdotes, real-world examples, and relatable scenarios
+3. Vary sentence length and structure for natural rhythm
+4. Use contractions, idioms, and occasional informal expressions
+5. Add genuine opinions and nuanced perspectives
+6. Include practical tips that show real expertise
+7. Avoid keyword stuffing - integrate naturally
+8. Write as if explaining to a smart friend, not an algorithm
+9. Include specific data points, statistics, and verifiable facts
+10. Add emotional elements and storytelling where appropriate
+
+OUTPUT FORMAT:
+- Generate a complete, publish-ready article in Markdown
+- Include a compelling headline, introduction, body sections, and conclusion
+- Add practical takeaways and actionable advice
+- Length: 1200-1800 words
+- Natural keyword integration for the brand`;
+
+    const userPrompt = `Create content to improve AI visibility for this query:
+
+QUERY: "${promptText}"
+
+BRAND INFORMATION:
+- Brand Name: ${selectedClient.brand_name}
+- Industry: ${selectedClient.industry}
+- Region: ${selectedClient.target_region}
+- Competitors: ${selectedClient.competitors.join(', ')}
+- Brand Tags: ${selectedClient.brand_tags?.join(', ') || 'None'}
+
+CURRENT AUDIT RESULTS:
+${modelSummary}
+
+CURRENT VISIBILITY: ${auditResult?.summary?.share_of_voice || 0}%
+CURRENT RANK: ${auditResult?.summary?.average_rank || 'Not ranked'}
+
+TOP SOURCES CITING COMPETITORS:
+${topCitations}
+
+COMPETITORS MENTIONED IN RESPONSES: ${competitorContext}
+
+${tavilyContext}
+
+CONTENT STRATEGY GOALS:
+1. Position ${selectedClient.brand_name} as a thought leader for this query
+2. Address gaps where competitors are mentioned but the brand is not
+3. Create content that authoritative sources would want to link to
+4. Include natural mentions of the brand in the context of solving real problems
+5. Incorporate insights from top-ranking sources WITHOUT copying them
+
+Generate the complete article now:`;
+
+    // Try Groq API directly for best quality
+    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
+    if (!groqApiKey) {
+      console.error('[Groq] No API key configured');
+      return null;
+    }
+
+    try {
+      console.log('[Groq] Generating visibility content for:', promptText.substring(0, 50));
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${groqApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",  // Use larger model for better quality
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
+          temperature: 0.8,  // Higher temperature for more creative/human writing
+          max_tokens: 8192,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+        console.log('[Groq] Generated content:', content?.length || 0, 'characters');
+        return content || null;
+      } else {
+        const errorText = await response.text();
+        console.error('[Groq] API error:', response.status, errorText);
+      }
+    } catch (err) {
+      console.error('[Groq] Exception:', err);
+    }
+
+    // Fallback to edge function
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-content", {
+        body: {
+          prompt: userPrompt,
+          type: "visibility-content",
+          brand_name: selectedClient.brand_name,
+          competitors: selectedClient.competitors,
+          system_prompt: systemPrompt
+        },
+      });
+      if (!error && data?.response) return data.response;
+    } catch (err) {
+      console.log("Generate content edge function error:", err);
+    }
+
+    return null;
+  }, [selectedClient]);
+
   const getAllCitations = useCallback(() => {
     const citationMap = new Map<string, { url: string; title: string; domain: string; count: number; prompts: string[] }>();
     for (const result of auditResults) {
@@ -1308,6 +1463,61 @@ export function useClientDashboard() {
     }
   }, [selectedClient, updateSummary]);
 
+  /**
+   * Auto-discover competitors using Groq API
+   */
+  const fetchCompetitors = useCallback(async (
+    brandName: string,
+    industry: string,
+    region: string
+  ): Promise<string[]> => {
+    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
+    if (!groqApiKey || !brandName) return [];
+
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${groqApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            {
+              role: "system",
+              content: "You are a market research expert. user will provide a brand, industry, and region. You must return a JSON array of top 5 direct competitor names. OUTPUT ONLY JSON. No text."
+            },
+            {
+              role: "user",
+              content: `Identify top 5 direct competitors for "${brandName}" in the "${industry}" industry in "${region}". Return JSON array only.`
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 500,
+          response_format: { type: "json_object" }
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+        try {
+          const parsed = JSON.parse(content);
+          // Handle various possible JSON structures the LLM might return
+          const list = Array.isArray(parsed) ? parsed : (parsed.competitors || parsed.companies || Object.values(parsed)[0]);
+          return Array.isArray(list) ? list.map(String).slice(0, 7) : [];
+        } catch (e) {
+          console.error("Failed to parse competitor JSON", e);
+          return [];
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching competitors:", err);
+    }
+    return [];
+  }, []);
+
   // ============================================
   // RETURN
   // ============================================
@@ -1319,7 +1529,7 @@ export function useClientDashboard() {
 
     // Client management
     addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily,
-    updateBrandTags, updateCompetitors,
+    updateBrandTags, updateCompetitors, fetchCompetitors,
 
     // Audit
     runFullAudit, runSinglePrompt, runCampaign, clearResults,
@@ -1331,7 +1541,7 @@ export function useClientDashboard() {
     exportToCSV, exportPrompts, exportFullReport, importData,
 
     // AI features
-    generatePromptsFromKeywords, generateContent,
+    generatePromptsFromKeywords, generateContent, generateVisibilityContent,
 
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,
