@@ -3,7 +3,7 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -84,7 +84,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns" | "insights">("overview");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
@@ -123,6 +123,8 @@ export default function ClientDashboard() {
   const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" });
   const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", primary_color: "#3b82f6", logo_url: "", competitors: "", website: "" });
   const [isAutoFinding, setIsAutoFinding] = useState(false);
+  const [aiInsights, setAiInsights] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string; keyActions: string[] } | null>(null);
+  const [generatingAiInsights, setGeneratingAiInsights] = useState(false);
 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
@@ -1537,6 +1539,33 @@ export default function ClientDashboard() {
       aggregatedRecommendations.push(`${highPriorityPrompts.length} prompt${highPriorityPrompts.length > 1 ? 's' : ''} with critical visibility gaps require immediate content creation attention.`);
     }
 
+    // Handler to generate AI-powered pinpoint recommendations
+    const handleGenerateAiInsights = async () => {
+      setGeneratingAiInsights(true);
+      try {
+        const topComps = Object.entries(allCompetitorMentions)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([name, count]) => ({ name, count }));
+
+        const result = await generateOverallRecommendations({
+          overallSov,
+          totalPrompts: filteredAuditResults.length,
+          highPriorityCount: highPriorityPrompts.length,
+          mediumPriorityCount: mediumPriorityPrompts.length,
+          lowPriorityCount: lowPriorityPrompts.length,
+          topCompetitors: topComps,
+          topDomains,
+          tavilyInsights
+        });
+        if (result) setAiInsights(result);
+      } catch (err) {
+        console.error("Error generating AI insights:", err);
+      } finally {
+        setGeneratingAiInsights(false);
+      }
+    };
+
     return (
       <div className="space-y-6 animate-in fade-in">
         {/* Overall Status Header */}
@@ -1584,6 +1613,80 @@ export default function ClientDashboard() {
               <div className="text-3xl font-bold text-green-700">{lowPriorityPrompts.length}</div>
               <div className="text-sm font-medium text-green-600 mt-1">Good</div>
             </div>
+          </div>
+        </div>
+
+        {/* AI-Powered Pinpoint Recommendations */}
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-purple-600" />
+                  AI-Powered Pinpoint Insights
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">Strategic recommendations using Groq AI + aggregated data</p>
+              </div>
+              <Button
+                onClick={handleGenerateAiInsights}
+                disabled={generatingAiInsights || filteredAuditResults.length === 0}
+                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md"
+              >
+                {generatingAiInsights ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                {generatingAiInsights ? "Generating..." : aiInsights ? "Refresh" : "Generate AI Insights"}
+              </Button>
+            </div>
+          </div>
+          <div className="p-5">
+            {aiInsights ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border border-purple-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-gray-900">Executive Summary</span>
+                    <span className={cn(
+                      "px-2 py-1 rounded text-xs font-semibold",
+                      aiInsights?.priority === 'high' ? "bg-red-100 text-red-700" :
+                        aiInsights?.priority === 'medium' ? "bg-amber-100 text-amber-700" :
+                          "bg-green-100 text-green-700"
+                    )}>{aiInsights?.priority?.toUpperCase() || 'N/A'}</span>
+                  </div>
+                  <p className="text-sm text-gray-700">{aiInsights?.summary || 'No summary available'}</p>
+                </div>
+
+                <div className="space-y-3">
+                  <h4 className="font-semibold text-gray-900 flex items-center gap-2"><Lightbulb className="h-4 w-4 text-purple-600" /> Strategic Recommendations</h4>
+                  {(aiInsights?.recommendations || []).map((rec, idx) => (
+                    <div key={idx} className="flex items-start gap-3 p-3 bg-gradient-to-r from-gray-50 to-white rounded-lg border border-gray-100 hover:border-purple-200 transition-colors">
+                      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                        {idx + 1}
+                      </div>
+                      <p className="text-sm text-gray-700">{rec}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {aiInsights?.keyActions && aiInsights.keyActions.length > 0 && (
+                  <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
+                    <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2"><Target className="h-4 w-4 text-green-600" /> Key Actions</h4>
+                    {aiInsights.keyActions.map((action, idx) => (
+                      <p key={idx} className="text-sm text-gray-700 flex items-center gap-2 mb-1">
+                        <CheckCircle className="h-3.5 w-3.5 text-green-600" /> {action}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <div className="p-4 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+                  <Sparkles className="h-8 w-8 text-purple-600" />
+                </div>
+                <h4 className="font-semibold text-gray-900">Get AI-Powered Insights</h4>
+                <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">
+                  Click "Generate AI Insights" to get strategic, pinpoint recommendations combining your audit data with Groq AI analysis.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

@@ -1918,6 +1918,140 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
     };
   }, [selectedClient]);
 
+  /**
+   * Generate AI-powered overall recommendations for the dashboard
+   * Combines local aggregation data with Groq API for pinpoint insights
+   */
+  const generateOverallRecommendations = useCallback(async (
+    aggregatedData: {
+      overallSov: number;
+      totalPrompts: number;
+      highPriorityCount: number;
+      mediumPriorityCount: number;
+      lowPriorityCount: number;
+      topCompetitors: { name: string; count: number }[];
+      topDomains: string[];
+      tavilyInsights: string[];
+    }
+  ): Promise<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string; keyActions: string[] } | null> => {
+    if (!selectedClient) return null;
+
+    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
+    if (!groqApiKey) {
+      console.error('[Groq] No API key for overall recommendations');
+      return null;
+    }
+
+    const systemPrompt = `You are an AI Visibility Strategy Expert analyzing aggregated brand performance across multiple queries.
+Your task is to provide PRECISE, STRATEGIC recommendations based on the overall visibility patterns.
+
+Output EXACTLY this JSON format (no markdown, no extra text):
+{
+  "priority": "high|medium|low",
+  "summary": "One-sentence executive summary of overall AI visibility status",
+  "recommendations": [
+    "Strategic recommendation 1",
+    "Strategic recommendation 2",
+    "Strategic recommendation 3",
+    "Strategic recommendation 4",
+    "Strategic recommendation 5"
+  ],
+  "keyActions": [
+    "Immediate action 1 (this week)",
+    "Short-term action 2 (this month)",
+    "Long-term action 3 (this quarter)"
+  ]
+}`;
+
+    const userPrompt = `Analyze this brand's OVERALL AI visibility performance and provide strategic recommendations:
+
+BRAND: ${selectedClient.brand_name}
+INDUSTRY: ${selectedClient.industry}
+REGION: ${selectedClient.target_region}
+WEBSITE: ${selectedClient.brand_domain || 'Not specified'}
+COMPETITORS: ${selectedClient.competitors.join(', ')}
+
+AGGREGATED VISIBILITY METRICS:
+- Average Visibility (SOV): ${aggregatedData.overallSov}%
+- Total Prompts Analyzed: ${aggregatedData.totalPrompts}
+- Critical (<30% visibility): ${aggregatedData.highPriorityCount} prompts
+- Needs Work (30-60%): ${aggregatedData.mediumPriorityCount} prompts
+- Good (>60%): ${aggregatedData.lowPriorityCount} prompts
+
+TOP COMPETITORS IN AI RESPONSES:
+${aggregatedData.topCompetitors.map(c => `- ${c.name}: ${c.count} mentions`).join('\n') || 'No competitor data'}
+
+MOST CITED DOMAINS BY AI:
+${aggregatedData.topDomains.slice(0, 10).join(', ') || 'No citation data'}
+
+WEB SOURCE INSIGHTS (from Tavily):
+${aggregatedData.tavilyInsights.slice(0, 5).join('\n') || 'No Tavily data'}
+
+Provide strategic, pinpoint recommendations to improve overall AI visibility for ${selectedClient.brand_name}:`;
+
+    try {
+      console.log('[Groq] Generating overall recommendations');
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${groqApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "llama-3.1-8b-instant",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
+          temperature: 0.5,
+          max_tokens: 1200,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content || '';
+        console.log('[Groq] Overall recommendations response:', content.substring(0, 100));
+
+        try {
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return {
+              priority: parsed.priority || 'medium',
+              summary: parsed.summary || 'Analysis complete',
+              recommendations: parsed.recommendations || [],
+              keyActions: parsed.keyActions || []
+            };
+          }
+        } catch (parseErr) {
+          console.error('[Groq] Failed to parse overall recommendations JSON:', parseErr);
+        }
+      }
+    } catch (err) {
+      console.error('[Groq] Overall recommendations exception:', err);
+    }
+
+    // Return fallback based on aggregated data
+    const fallbackRecs = [];
+    if (aggregatedData.overallSov < 30) {
+      fallbackRecs.push(`Critical: Overall visibility is ${aggregatedData.overallSov}%. Prioritize content creation for high-impact queries.`);
+    }
+    if (aggregatedData.topCompetitors.length > 0) {
+      fallbackRecs.push(`Analyze ${aggregatedData.topCompetitors[0].name}'s content strategy - they appear ${aggregatedData.topCompetitors[0].count}x in AI responses.`);
+    }
+    if (aggregatedData.topDomains.length > 0) {
+      fallbackRecs.push(`Target high-authority sources: ${aggregatedData.topDomains.slice(0, 3).join(', ')}`);
+    }
+
+    return {
+      priority: aggregatedData.overallSov < 30 ? 'high' : aggregatedData.overallSov < 60 ? 'medium' : 'low',
+      summary: `Average visibility: ${aggregatedData.overallSov}% across ${aggregatedData.totalPrompts} prompts`,
+      recommendations: fallbackRecs.length > 0 ? fallbackRecs : ['Run more audits to generate insights'],
+      keyActions: ['Audit more prompts to gather comprehensive data']
+    };
+  }, [selectedClient]);
+
   // ============================================
   // RETURN
   // ============================================
@@ -1941,7 +2075,7 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
     exportToCSV, exportPrompts, exportFullReport, importData,
 
     // AI features
-    generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations,
+    generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations,
 
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,

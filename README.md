@@ -154,11 +154,17 @@ Groq's Llama 3.1 model powers intelligent content features:
 - ✅ **Enhanced Export Report** - Full report now includes Tavily analysis + AI Insights section
 - ✅ **Prompt-Level Recommendations** - Data-driven suggestions based on audit + Tavily data
 
-### v7.2 Features (Latest)
+### v7.2 Features
 - ✅ **Overall Insights Dashboard** - Aggregated visibility metrics and recommendations across all prompts
 - ✅ **Priority Breakdown** - View prompts by Critical, Needs Work, Good categories
 - ✅ **Top Recommendations** - Aggregated insights from competitors, domains, and Tavily
 - ✅ **Enhanced Export** - Full report includes overall visibility summary + per-prompt insights
+
+### v7.3 Features (Latest)
+- ✅ **AI-Powered Pinpoint Insights** - Groq API generates strategic recommendations combining local aggregation + AI analysis
+- ✅ **Executive Summary** - AI-generated one-sentence visibility status with priority badge
+- ✅ **Strategic Recommendations** - 5 targeted, actionable recommendations from Groq
+- ✅ **Key Actions** - Immediate, short-term, and long-term action items
 
 ### v6.1 Features (Consolidated & Polished)
 - ✅ **Premium UI Design** - Complete redesign with glassmorphism, refined typography (Inter), and "finished product" aesthetics.
