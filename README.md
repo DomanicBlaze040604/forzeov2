@@ -75,6 +75,35 @@ Each AI model is queried via its dedicated LIVE endpoint for real-time responses
 - **SERP**: Traditional organic search results
 - Cost: ~$0.002-0.003/query
 
+### Tavily AI (Web Source Analysis)
+Tavily provides real-time web search to analyze where your brand appears in editorial content:
+
+| Feature | Description |
+|---------|-------------|
+| **Search** | Advanced web search for brand/competitor mentions |
+| **Sources** | Returns URLs, titles, content, relevance scores |
+| **Answer** | AI-generated answer from search results |
+| **Analysis** | Brand mentions, competitor counts, top domains |
+
+**Use cases:**
+- Find editorial sources mentioning your brand
+- Discover competitor coverage patterns
+- Identify high-authority sources for outreach
+- Correlate web presence with AI visibility
+
+### Groq AI (Content Generation)
+Groq's Llama 3.1 model powers intelligent content features:
+
+| Feature | Description |
+|---------|-------------|
+| **Prompt Generation** | Generate search prompts from keywords |
+| **Content Generation** | Create SEO-optimized blog posts, articles |
+| **Visibility Content** | Generate content based on audit + Tavily data |
+| **AI Insights Panel** | Actionable recommendations based on audit + Tavily analysis |
+| **Auto-Find Competitors** | AI-powered competitor discovery |
+
+**Model:** `llama-3.1-8b-instant` (fast inference)
+
 ---
 
 ## Key Metrics
@@ -111,6 +140,19 @@ Each AI model is queried via its dedicated LIVE endpoint for real-time responses
 - ✅ **Historical Data Retention** - Audit results preserved even after prompt deletion
 - ✅ **Dark Theme UI** - Professional dashboard interface
 
+
+### v7.0 Features (Current)
+- ✅ **Website URL Field** - Add brand website to improve AI content generation
+- ✅ **Custom Industry Input** - Enter specific industry when "Custom" is selected
+- ✅ **Fixed Delete Buttons** - Schedule and brand deletion now working
+- ✅ **Groq AI Integration** - Prompt generation, content creation, competitor discovery
+- ✅ **Tavily Source Analysis** - Web source analysis and visibility correlation
+
+### v7.1 Features (Latest)
+- ✅ **AI Insights Panel** - Groq-powered actionable recommendations per prompt with priority levels
+- ✅ **Tavily Auto-Run** - Automatically runs Tavily analysis when toggle is ON during audits
+- ✅ **Enhanced Export Report** - Full report now includes Tavily analysis + AI Insights section
+- ✅ **Prompt-Level Recommendations** - Data-driven suggestions based on audit + Tavily data
 
 ### v6.1 Features (Consolidated & Polished)
 - ✅ **Premium UI Design** - Complete redesign with glassmorphism, refined typography (Inter), and "finished product" aesthetics.
@@ -196,7 +238,9 @@ npx supabase secrets set DATAFORSEO_PASSWORD=your-password --project-ref pqvyyzi
 | Frontend | React, TypeScript, Tailwind CSS, Radix UI |
 | Backend | Supabase Edge Functions (Deno) |
 | Database | Supabase PostgreSQL |
-| APIs | DataForSEO |
+| AI Content | Groq (Llama 3.1) |
+| Web Search | Tavily API |
+| LLM Queries | DataForSEO LIVE API |
 | Hosting | Netlify |
 
 ---

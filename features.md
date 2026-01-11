@@ -14,9 +14,11 @@ Forzeo is an **AI Visibility Analytics Platform** that tracks how your brand app
 Manage multiple brands/clients with their own prompts, competitors, and tracking settings.
 
 **How it works:**
-1. User creates a client with name, brand domain, and competitors
-2. Data stored in `clients` table
-3. Each client has isolated prompts and audit history
+1. User creates a client with name, brand domain, website URL, and competitors
+2. Custom industry can be entered when "Custom" is selected
+3. Data stored in `clients` table
+4. Website URL stored in `brand_domain` field for AI context
+5. Each client has isolated prompts and audit history
 
 **Database tables:** `clients`, `organizations`
 
@@ -131,6 +133,45 @@ Stored in tavily_results table
 **Database tables:** `tavily_results`
 
 **Edge function:** `supabase/functions/tavily-search/index.ts`
+
+---
+
+### 5b. Groq AI Content Generation
+
+**What it does:**  
+Provides intelligent AI-powered content generation and recommendations using Groq's fast Llama 3.1 model.
+
+**How it works:**
+
+```
+User triggers AI feature → Frontend calls Groq API
+         ↓
+┌─────────────────────────────────────────┐
+│  Groq Model: llama-3.1-8b-instant       │
+│  Fast inference, high quality output    │
+└───────────────┬─────────────────────────┘
+         ↓
+Features powered:
+  • Prompt Generation from keywords
+  • Content Generation (blog posts, articles)
+  • Visibility Content (based on audit + Tavily)
+  • AI Recommendations/Insights Panel
+  • Auto-Find Competitors
+```
+
+**Use cases:**
+- Generate search prompts from topics/keywords
+- Create SEO-optimized content for AI visibility
+- Auto-discover competitors for your brand
+- **AI Insights Panel**: Get actionable recommendations based on audit + Tavily data
+- Generate content recommendations from audit data
+
+**Frontend integration:** `src/hooks/useClientDashboard.ts`
+- `generatePromptsFromKeywords()` - AI prompt generation
+- `generateContent()` - Blog/article generation
+- `generateVisibilityContent()` - Audit-based content
+- `generateRecommendations()` - AI-powered actionable insights
+- `fetchCompetitors()` - AI competitor discovery
 
 ---
 
@@ -316,7 +357,8 @@ Visualize visibility trends over time.
 
 | API | Purpose | Required |
 |-----|---------|----------|
-| **DataForSEO** | LLM queries (ChatGPT, Gemini, etc.) | ✅ Yes |
+| **DataForSEO** | LLM queries (ChatGPT, Gemini, Claude, Perplexity) | ✅ Yes |
+| **Groq** | Content generation, prompt AI, competitor discovery | ✅ Recommended |
 | **Tavily** | Web search for sources | Optional |
 | **Serper** | Backup SERP data | Optional |
 | **OpenAI** | Direct ChatGPT queries | Optional |

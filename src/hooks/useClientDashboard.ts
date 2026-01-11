@@ -112,6 +112,7 @@ export interface Client {
   id: string;
   name: string;
   brand_name: string;
+  brand_domain?: string;
   brand_tags: string[];
   slug: string;
   target_region: string;
@@ -420,9 +421,9 @@ export function useClientDashboard() {
 
       if (!fetchError && data && data.length > 0) {
         const mappedClients: Client[] = data.map(c => ({
-          id: c.id, name: c.name, brand_name: c.brand_name, brand_tags: c.brand_tags || [],
-          slug: c.slug, target_region: c.target_region, location_code: c.location_code,
-          industry: c.industry, competitors: c.competitors || [],
+          id: c.id, name: c.name, brand_name: c.brand_name, brand_domain: c.brand_domain,
+          brand_tags: c.brand_tags || [], slug: c.slug, target_region: c.target_region,
+          location_code: c.location_code, industry: c.industry, competitors: c.competitors || [],
           primary_color: c.primary_color || generateColor(), created_at: c.created_at,
         }));
         setClients(mappedClients);
@@ -459,6 +460,7 @@ export function useClientDashboard() {
       id: crypto.randomUUID(),
       name: clientData.name || "New Client",
       brand_name: clientData.brand_name || clientData.name || "New Brand",
+      brand_domain: clientData.brand_domain || undefined,
       slug: generateSlug(clientData.name || "new-client"),
       target_region: clientData.target_region || "United States",
       location_code: clientData.location_code || 2840,
@@ -473,7 +475,8 @@ export function useClientDashboard() {
     try {
       const { error: insertError } = await supabase.from("clients").insert({
         id: newClient.id, name: newClient.name, brand_name: newClient.brand_name,
-        slug: newClient.slug, target_region: newClient.target_region, location_code: newClient.location_code,
+        brand_domain: newClient.brand_domain, slug: newClient.slug,
+        target_region: newClient.target_region, location_code: newClient.location_code,
         industry: newClient.industry, primary_color: newClient.primary_color,
         brand_tags: newClient.brand_tags, competitors: newClient.competitors,
       });
@@ -496,9 +499,10 @@ export function useClientDashboard() {
     try {
       const { error: updateError } = await supabase.from("clients").update({
         name: updatedClient.name, brand_name: updatedClient.brand_name,
-        target_region: updatedClient.target_region, location_code: updatedClient.location_code,
-        industry: updatedClient.industry, primary_color: updatedClient.primary_color,
-        brand_tags: updatedClient.brand_tags, competitors: updatedClient.competitors,
+        brand_domain: updatedClient.brand_domain, target_region: updatedClient.target_region,
+        location_code: updatedClient.location_code, industry: updatedClient.industry,
+        primary_color: updatedClient.primary_color, brand_tags: updatedClient.brand_tags,
+        competitors: updatedClient.competitors,
       }).eq("id", clientId);
       if (updateError) console.error("Supabase update error:", updateError);
     } catch (err) { console.log("Supabase update failed:", err); }
@@ -854,6 +858,35 @@ export function useClientDashboard() {
           storedResults[selectedClient.id] = results;
           saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
           updateSummary(results);
+
+          // Run Tavily search if enabled
+          if (includeTavily) {
+            try {
+              console.log("[Tavily] Running source analysis for prompt:", prompt.prompt_text.substring(0, 50));
+              const { data: tavilyData, error: tavilyError } = await supabase.functions.invoke("tavily-search", {
+                body: {
+                  client_id: selectedClient.id,
+                  prompt_id: prompt.id,
+                  prompt_text: prompt.prompt_text,
+                  brand_name: selectedClient.brand_name,
+                  competitors: selectedClient.competitors,
+                  search_depth: "advanced",
+                  max_results: 20,
+                  include_answer: true,
+                  save_to_db: true,
+                },
+              });
+
+              if (!tavilyError && tavilyData?.success) {
+                console.log("[Tavily] Got", tavilyData.sources?.length || 0, "sources");
+                setTavilyResults(prev => ({ ...prev, [prompt.id]: tavilyData }));
+              } else {
+                console.warn("[Tavily] Search failed:", tavilyError || tavilyData?.error);
+              }
+            } catch (tavilyErr) {
+              console.error("[Tavily] Exception:", tavilyErr);
+            }
+          }
         } else {
           setError(fnError?.message || data?.error || "Audit failed");
         }
@@ -865,7 +898,7 @@ export function useClientDashboard() {
     }
     setLoading(false);
     setLoadingPromptId(null);
-  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary]);
+  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
 
   const runSinglePrompt = useCallback(async (promptId: string) => {
     if (!selectedClient) return;
@@ -1080,6 +1113,7 @@ export function useClientDashboard() {
 
     let report = `FORZEO GEO VISIBILITY REPORT\n${"=".repeat(60)}\n\n`;
     report += `Client: ${selectedClient.name}\nBrand: ${selectedClient.brand_name}\n`;
+    report += `Website: ${selectedClient.brand_domain || 'Not specified'}\n`;
     report += `Industry: ${selectedClient.industry}\nRegion: ${selectedClient.target_region}\nDate: ${date}\n\n`;
     report += `SUMMARY\n${"-".repeat(40)}\nShare of Voice: ${summary?.overall_sov || 0}%\n`;
     report += `Average Rank: ${summary?.average_rank ? `#${summary.average_rank}` : 'N/A'}\n`;
@@ -1096,6 +1130,135 @@ export function useClientDashboard() {
     report += `\nTOP SOURCES\n${"-".repeat(40)}\n`;
     sources.forEach((s, idx) => { report += `${idx + 1}. ${s.domain.padEnd(40)} ${s.count}\n`; });
 
+    // Add Tavily Results section
+    const tavilyEntries = Object.entries(tavilyResults).filter(([_, data]) => data);
+    if (tavilyEntries.length > 0) {
+      report += `\n${"=".repeat(60)}\nTAVILY AI SOURCE ANALYSIS\n${"=".repeat(60)}\n\n`;
+
+      tavilyEntries.forEach(([promptText, data]: [string, any]) => {
+        report += `QUERY: "${promptText}"\n${"-".repeat(40)}\n`;
+
+        if (data.answer) {
+          report += `AI Answer:\n${data.answer.substring(0, 500)}${data.answer.length > 500 ? '...' : ''}\n\n`;
+        }
+
+        if (data.analysis) {
+          report += `Brand Mentioned: ${data.analysis.brand_mentioned ? 'Yes' : 'No'} (${data.analysis.brand_mention_count || 0} times)\n`;
+
+          const compMentions = Object.entries(data.analysis.competitor_mentions || {})
+            .filter(([_, count]) => (count as number) > 0)
+            .map(([name, count]) => `${name}: ${count}`)
+            .join(', ');
+          if (compMentions) {
+            report += `Competitor Mentions: ${compMentions}\n`;
+          }
+
+          if (data.analysis.top_domains?.length > 0) {
+            report += `Top Domains: ${data.analysis.top_domains.slice(0, 5).map((d: any) => d.domain).join(', ')}\n`;
+          }
+
+          if (data.analysis.source_types) {
+            const types = Object.entries(data.analysis.source_types)
+              .filter(([_, count]) => (count as number) > 0)
+              .map(([type, count]) => `${type}: ${count}`)
+              .join(', ');
+            report += `Source Types: ${types}\n`;
+          }
+
+          if (data.analysis.insights?.length > 0) {
+            report += `Insights:\n${data.analysis.insights.map((i: string) => `  • ${i}`).join('\n')}\n`;
+          }
+        }
+
+        if (data.sources?.length > 0) {
+          report += `\nTop Sources (${data.sources.length} total):\n`;
+          data.sources.slice(0, 5).forEach((src: any, idx: number) => {
+            report += `  ${idx + 1}. ${src.domain} - ${src.title?.substring(0, 50) || 'No title'}...\n`;
+          });
+        }
+
+        report += `\n`;
+      });
+    }
+
+    // Add AI Visibility Insights section
+    if (auditResults.length > 0) {
+      report += `\n${"=".repeat(60)}\nAI VISIBILITY INSIGHTS & RECOMMENDATIONS\n${"=".repeat(60)}\n\n`;
+
+      auditResults.forEach(result => {
+        const sov = result.summary?.share_of_voice || 0;
+        const rank = result.summary?.average_rank;
+        const citations = result.summary?.total_citations || 0;
+        const tavilyData = tavilyResults[result.prompt_id] as any;
+
+        // Determine priority
+        const priority = sov < 30 ? 'HIGH' : sov < 60 ? 'MEDIUM' : 'LOW';
+
+        report += `QUERY: "${result.prompt_text.substring(0, 80)}${result.prompt_text.length > 80 ? '...' : ''}"\n`;
+        report += `${"─".repeat(40)}\n`;
+        report += `Priority: ${priority} | Visibility: ${sov}% | Rank: ${rank ? `#${rank}` : 'N/A'} | Citations: ${citations}\n\n`;
+
+        // Generate inline recommendations based on data
+        const recommendations: string[] = [];
+
+        if (sov < 30) {
+          recommendations.push(`Critical: Brand visibility is very low (${sov}%). Focus on building authoritative content and getting cited by high-authority sources.`);
+        } else if (sov < 60) {
+          recommendations.push(`Moderate visibility (${sov}%). Target improvement by expanding content presence on cited domains.`);
+        }
+
+        // Check competitor mentions from audit
+        const competitorsFound: string[] = [];
+        result.model_results.forEach(mr => {
+          const response = mr.raw_response?.toLowerCase() || '';
+          selectedClient.competitors.forEach(comp => {
+            if (response.includes(comp.toLowerCase()) && !competitorsFound.includes(comp)) {
+              competitorsFound.push(comp);
+            }
+          });
+        });
+
+        if (competitorsFound.length > 0) {
+          recommendations.push(`Competitors appearing in responses: ${competitorsFound.slice(0, 3).join(', ')}. Analyze their content strategy and create differentiated content.`);
+        }
+
+        // Add Tavily-based recommendations
+        if (tavilyData?.analysis) {
+          if (!tavilyData.analysis.brand_mentioned && tavilyData.analysis.top_domains?.length > 0) {
+            const topDomains = tavilyData.analysis.top_domains.slice(0, 3).map((d: any) => d.domain).join(', ');
+            recommendations.push(`Target these influential domains for content placement: ${topDomains}`);
+          }
+          if (tavilyData.analysis.insights?.length > 0) {
+            recommendations.push(tavilyData.analysis.insights[0]);
+          }
+        }
+
+        // Add citation strategy
+        if (citations > 0) {
+          const topCitedDomains = result.model_results
+            .flatMap(mr => mr.citations)
+            .slice(0, 3)
+            .map(c => c.domain)
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .join(', ');
+          if (topCitedDomains) {
+            recommendations.push(`Build relationships with frequently cited sources: ${topCitedDomains}`);
+          }
+        }
+
+        // Fallback recommendation
+        if (recommendations.length === 0) {
+          recommendations.push('Run more audits to gather comprehensive data for actionable insights.');
+        }
+
+        report += `Recommendations:\n`;
+        recommendations.forEach((rec, idx) => {
+          report += `  ${idx + 1}. ${rec}\n`;
+        });
+        report += `\n`;
+      });
+    }
+
     const blob = new Blob([report], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1103,7 +1266,7 @@ export function useClientDashboard() {
     a.download = `${selectedClient.slug}-report-${new Date().toISOString().split("T")[0]}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [selectedClient, summary, getModelStats, getCompetitorGap, getTopSources, getInsights]);
+  }, [selectedClient, summary, auditResults, tavilyResults, getModelStats, getCompetitorGap, getTopSources, getInsights]);
 
   const importData = useCallback((data: string) => {
     try {
@@ -1268,28 +1431,37 @@ TAVILY AI SOURCE ANALYSIS:
 - Tavily Answer: ${tavilyData.answer?.substring(0, 500) || 'N/A'}
 ` : 'No Tavily data available';
 
-    const systemPrompt = `You are an expert content strategist and writer specializing in AI visibility optimization.
+    const systemPrompt = `You are an expert content strategist and writer specializing in AI visibility optimization (GEO - Generative Engine Optimization).
 
 Your task is to create content that will help a brand become more visible in AI-generated responses like ChatGPT, Perplexity, Claude, and Google AI Overviews.
 
-CRITICAL RULES FOR HUMANIZED CONTENT:
-1. Write in a natural, conversational tone - not robotic or overly formal
-2. Include personal anecdotes, real-world examples, and relatable scenarios
-3. Vary sentence length and structure for natural rhythm
-4. Use contractions, idioms, and occasional informal expressions
-5. Add genuine opinions and nuanced perspectives
-6. Include practical tips that show real expertise
-7. Avoid keyword stuffing - integrate naturally
-8. Write as if explaining to a smart friend, not an algorithm
-9. Include specific data points, statistics, and verifiable facts
-10. Add emotional elements and storytelling where appropriate
+CRITICAL RULES FOR HUMANIZED, AUTHENTIC CONTENT:
+1. Write in a natural, conversational tone with personality - avoid corporate jargon
+2. Include personal insights, real-world examples, and relatable scenarios that show genuine expertise
+3. Vary sentence length and structure for natural rhythm - mix short punchy sentences with longer explanatory ones
+4. Use contractions, occasional idioms, and natural expressions (but keep it professional)
+5. Add genuine opinions, nuanced perspectives, and thoughtful analysis
+6. Include practical, actionable tips that demonstrate real expertise
+7. Avoid keyword stuffing - integrate brand mentions naturally and sparingly
+8. Write as if explaining to a smart friend who values your expertise
+9. Include specific data points, statistics, and verifiable facts where relevant
+10. Add subtle emotional elements and micro-storytelling where appropriate
+
+E-E-A-T OPTIMIZATION (Experience, Expertise, Authoritativeness, Trustworthiness):
+- Demonstrate EXPERIENCE through specific examples and first-hand knowledge
+- Show EXPERTISE with detailed technical information and insider insights
+- Build AUTHORITATIVENESS by referencing credible sources and industry standards
+- Establish TRUSTWORTHINESS through balanced perspectives and honest assessments
 
 OUTPUT FORMAT:
 - Generate a complete, publish-ready article in Markdown
-- Include a compelling headline, introduction, body sections, and conclusion
-- Add practical takeaways and actionable advice
-- Length: 1200-1800 words
-- Natural keyword integration for the brand`;
+- Include a compelling headline that naturally incorporates the topic
+- Strong introduction that hooks the reader and establishes expertise
+- Well-structured body sections with clear subheadings
+- Practical takeaways and actionable advice throughout
+- Thoughtful conclusion with a forward-looking perspective
+- Length: 1500-2500 words for comprehensive coverage
+- Natural keyword and brand integration`;
 
     const userPrompt = `Create content to improve AI visibility for this query:
 
@@ -1297,32 +1469,37 @@ QUERY: "${promptText}"
 
 BRAND INFORMATION:
 - Brand Name: ${selectedClient.brand_name}
+- Website: ${selectedClient.brand_domain || 'Not specified'}
 - Industry: ${selectedClient.industry}
 - Region: ${selectedClient.target_region}
 - Competitors: ${selectedClient.competitors.join(', ')}
-- Brand Tags: ${selectedClient.brand_tags?.join(', ') || 'None'}
+- Brand Identity Tags: ${selectedClient.brand_tags?.join(', ') || 'None'}
 
-CURRENT AUDIT RESULTS:
+CURRENT AI VISIBILITY AUDIT RESULTS:
 ${modelSummary}
 
-CURRENT VISIBILITY: ${auditResult?.summary?.share_of_voice || 0}%
-CURRENT RANK: ${auditResult?.summary?.average_rank || 'Not ranked'}
+VISIBILITY METRICS:
+- Share of Voice: ${auditResult?.summary?.share_of_voice || 0}% (${auditResult?.summary?.share_of_voice || 0 >= 50 ? 'Good - appearing in most AI responses' : 'Improvement needed'})
+- Average Rank: ${auditResult?.summary?.average_rank || 'Not ranked in lists'}
+- Total Citations: ${auditResult?.summary?.total_citations || 0}
 
-TOP SOURCES CITING COMPETITORS:
+TOP SOURCES CITED BY AI MODELS:
 ${topCitations}
 
-COMPETITORS MENTIONED IN RESPONSES: ${competitorContext}
+COMPETITORS APPEARING IN AI RESPONSES: ${competitorContext}
 
 ${tavilyContext}
 
-CONTENT STRATEGY GOALS:
-1. Position ${selectedClient.brand_name} as a thought leader for this query
-2. Address gaps where competitors are mentioned but the brand is not
-3. Create content that authoritative sources would want to link to
-4. Include natural mentions of the brand in the context of solving real problems
-5. Incorporate insights from top-ranking sources WITHOUT copying them
+CONTENT STRATEGY BASED ON ANALYSIS:
+1. Current gap: ${auditResult?.summary?.share_of_voice || 0 < 50 ? `${selectedClient.brand_name} is underrepresented vs competitors` : `${selectedClient.brand_name} has good visibility but can improve ranking`}
+2. Target: Position ${selectedClient.brand_name} as a thought leader and trusted authority for "${promptText}"
+3. Approach: Address gaps where competitors are mentioned but the brand is not
+4. Citation strategy: Create content worthy of being cited by authoritative sources
+5. Brand integration: Natural mentions that solve real user problems
+6. Differentiation: Highlight unique value propositions not covered by competitors
 
-Generate the complete article now:`;
+Generate comprehensive, humanized content that will improve this brand's AI visibility:`;
+
 
     // Try Groq API directly for best quality
     const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
@@ -1518,6 +1695,163 @@ Generate the complete article now:`;
     return [];
   }, []);
 
+  /**
+   * Generate AI-powered recommendations for a specific prompt based on audit and Tavily data
+   * Uses Groq API to analyze visibility gaps and provide actionable insights
+   */
+  const generateRecommendations = useCallback(async (
+    promptText: string,
+    auditResult: AuditResult | null,
+    tavilyData: any
+  ): Promise<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string } | null> => {
+    if (!selectedClient) return null;
+
+    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
+    if (!groqApiKey) {
+      console.error('[Groq] No API key for recommendations');
+      return null;
+    }
+
+    // Build context from audit
+    const sov = auditResult?.summary?.share_of_voice || 0;
+    const rank = auditResult?.summary?.average_rank || 'Not ranked';
+    const modelSummary = auditResult?.model_results
+      .map(mr => `${mr.model_name}: ${mr.brand_mentioned ? 'Mentioned' : 'Not mentioned'}${mr.brand_rank ? `, Rank #${mr.brand_rank}` : ''}`)
+      .join('\n') || 'No model data';
+
+    const topCitations = auditResult?.model_results
+      .flatMap(mr => mr.citations)
+      .slice(0, 5)
+      .map(c => `${c.domain}`)
+      .join(', ') || 'None';
+
+    const competitorsInResponse = auditResult?.model_results
+      .flatMap(mr => {
+        const response = mr.raw_response?.toLowerCase() || '';
+        return selectedClient.competitors.filter(c => response.includes(c.toLowerCase()));
+      })
+      .filter((v, i, a) => a.indexOf(v) === i) || [];
+
+    // Build Tavily context
+    const tavilyContext = tavilyData ? `
+Tavily Web Analysis:
+- Brand Found in Web Sources: ${tavilyData.analysis?.brand_mentioned ? 'Yes' : 'No'} (${tavilyData.analysis?.brand_mention_count || 0} times)
+- Competitor Web Presence: ${JSON.stringify(tavilyData.analysis?.competitor_mentions || {})}
+- Top Authoritative Domains: ${(tavilyData.analysis?.top_domains || []).slice(0, 5).map((d: any) => d.domain).join(', ') || 'None'}
+- Dominant Source Types: ${JSON.stringify(tavilyData.analysis?.source_types || {})}
+- Tavily Insights: ${(tavilyData.analysis?.insights || []).join('; ') || 'None'}` : '';
+
+    const systemPrompt = `You are an AI Visibility Strategy Expert. Analyze the provided data and generate specific, actionable recommendations to improve brand visibility in AI-generated responses.
+
+Your recommendations must be:
+1. SPECIFIC - mention exact domains, content types, or actions
+2. ACTIONABLE - can be implemented within 2-4 weeks
+3. PRIORITIZED - based on impact potential
+4. DATA-DRIVEN - reference the actual audit and Tavily findings
+
+Output EXACTLY this JSON format (no markdown, no extra text):
+{
+  "priority": "high|medium|low",
+  "summary": "One sentence summary of the visibility status and main gap",
+  "recommendations": [
+    "Specific action 1 with details",
+    "Specific action 2 with details",
+    "Specific action 3 with details",
+    "Specific action 4 with details",
+    "Specific action 5 with details"
+  ]
+}`;
+
+    const userPrompt = `Analyze this brand's AI visibility and provide recommendations:
+
+QUERY: "${promptText}"
+
+BRAND: ${selectedClient.brand_name}
+INDUSTRY: ${selectedClient.industry}
+REGION: ${selectedClient.target_region}
+WEBSITE: ${selectedClient.brand_domain || 'Not specified'}
+COMPETITORS: ${selectedClient.competitors.join(', ')}
+
+CURRENT VISIBILITY STATUS:
+- Share of Voice: ${sov}%
+- Average Rank: ${rank}
+- Competitors appearing in AI responses: ${competitorsInResponse.join(', ') || 'None'}
+
+AI MODEL BREAKDOWN:
+${modelSummary}
+
+TOP CITED DOMAINS: ${topCitations}
+${tavilyContext}
+
+Generate 5 specific, actionable recommendations to improve this brand's visibility for this query:`;
+
+    try {
+      console.log('[Groq] Generating recommendations for:', promptText.substring(0, 40));
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${groqApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "llama-3.1-8b-instant",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
+          temperature: 0.5,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content || '';
+        console.log('[Groq] Recommendations response:', content.substring(0, 100));
+
+        try {
+          // Parse JSON response
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return {
+              priority: parsed.priority || 'medium',
+              summary: parsed.summary || 'Analysis complete',
+              recommendations: parsed.recommendations || []
+            };
+          }
+        } catch (parseErr) {
+          console.error('[Groq] Failed to parse recommendations JSON:', parseErr);
+          // Fallback: try to extract recommendations from text
+          const lines = content.split('\n').filter((l: string) => l.trim().startsWith('-') || l.trim().match(/^\d+\./));
+          if (lines.length > 0) {
+            return {
+              priority: sov < 30 ? 'high' : sov < 60 ? 'medium' : 'low',
+              summary: `Current visibility is ${sov}% - ${sov < 30 ? 'urgent improvement needed' : sov < 60 ? 'room for growth' : 'maintain and optimize'}`,
+              recommendations: lines.slice(0, 5).map((l: string) => l.replace(/^[-\d.]+\s*/, '').trim())
+            };
+          }
+        }
+      } else {
+        console.error('[Groq] Recommendations API error:', response.status);
+      }
+    } catch (err) {
+      console.error('[Groq] Recommendations exception:', err);
+    }
+
+    // Return fallback recommendations based on data
+    const fallbackRecs = [];
+    if (sov < 50) fallbackRecs.push(`Improve visibility - currently only appearing in ${sov}% of AI responses`);
+    if (competitorsInResponse.length > 0) fallbackRecs.push(`Target competitor gap: ${competitorsInResponse[0]} is appearing where you're not`);
+    if (topCitations) fallbackRecs.push(`Build relationships with cited sources: ${topCitations}`);
+
+    return {
+      priority: sov < 30 ? 'high' : sov < 60 ? 'medium' : 'low',
+      summary: `Share of Voice: ${sov}%`,
+      recommendations: fallbackRecs.length > 0 ? fallbackRecs : ['Run more audits to gather data for recommendations']
+    };
+  }, [selectedClient]);
+
   // ============================================
   // RETURN
   // ============================================
@@ -1541,7 +1875,7 @@ Generate the complete article now:`;
     exportToCSV, exportPrompts, exportFullReport, importData,
 
     // AI features
-    generatePromptsFromKeywords, generateContent, generateVisibilityContent,
+    generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations,
 
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,

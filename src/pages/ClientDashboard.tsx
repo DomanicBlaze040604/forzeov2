@@ -3,7 +3,7 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -84,7 +84,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns">("overview");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
@@ -120,8 +120,8 @@ export default function ClientDashboard() {
   const [modelFilter, setModelFilter] = useState<string[]>([]);
   const [promptsTabView, setPromptsTabView] = useState<"active" | "suggested" | "inactive">("active");
   const [sourcesGapView, setSourcesGapView] = useState<"all" | "gap">("all");
-  const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6", logo_url: "" });
-  const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", primary_color: "#3b82f6", logo_url: "", competitors: "" });
+  const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" });
+  const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", primary_color: "#3b82f6", logo_url: "", competitors: "", website: "" });
   const [isAutoFinding, setIsAutoFinding] = useState(false);
 
   const filteredAuditResults = useMemo(() => {
@@ -223,8 +223,8 @@ export default function ClientDashboard() {
   const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType); if (c) setGeneratedContent(c); } finally { setGeneratingContent(false); } };
   const handleImport = () => { if (importText.trim()) { importData(importText); setImportText(""); setImportDialogOpen(false); } };
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = (ev) => importData(ev.target?.result as string); r.readAsText(f); } };
-  const handleCreateClient = async () => { if (!newClientForm.name.trim()) return; const comps = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); await addClient({ name: newClientForm.name, brand_name: newClientForm.brand_name || newClientForm.name, target_region: newClientForm.target_region, location_code: locations[newClientForm.target_region] || 2840, industry: newClientForm.industry, competitors: comps.length > 0 ? comps : industries[newClientForm.industry]?.competitors || [], primary_color: newClientForm.primary_color }); setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", competitors: "", primary_color: "#3b82f6", logo_url: "" }); setAddClientOpen(false); };
-  const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; const comps = editClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: editClientForm.industry, primary_color: editClientForm.primary_color, competitors: comps }); setEditClientOpen(false); };
+  const handleCreateClient = async () => { if (!newClientForm.name.trim()) return; const comps = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); const finalIndustry = newClientForm.industry === "Custom" && newClientForm.customIndustry.trim() ? newClientForm.customIndustry.trim() : newClientForm.industry; await addClient({ name: newClientForm.name, brand_name: newClientForm.brand_name || newClientForm.name, brand_domain: newClientForm.website.trim() || undefined, target_region: newClientForm.target_region, location_code: locations[newClientForm.target_region] || 2840, industry: finalIndustry, competitors: comps.length > 0 ? comps : industries[newClientForm.industry]?.competitors || [], primary_color: newClientForm.primary_color }); setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" }); setAddClientOpen(false); };
+  const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; const comps = editClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); const finalIndustry = editClientForm.industry === "Custom" && editClientForm.customIndustry.trim() ? editClientForm.customIndustry.trim() : editClientForm.industry; await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, brand_domain: editClientForm.website.trim() || undefined, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: finalIndustry, primary_color: editClientForm.primary_color, competitors: comps }); setEditClientOpen(false); };
   const handleDeleteClient = async () => { if (!selectedClient || clients.length <= 1) return; if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
   const handleAddTag = () => { if (newTag.trim() && selectedClient) { updateBrandTags([...selectedClient.brand_tags, newTag.trim()]); setNewTag(""); } };
   const handleAddCompetitor = () => { if (newCompetitor.trim() && selectedClient) { updateCompetitors([...selectedClient.competitors, newCompetitor.trim()]); setNewCompetitor(""); } };
@@ -1062,7 +1062,7 @@ export default function ClientDashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium text-gray-700">Industry</Label>
-                <Select value={newClientForm.industry} onValueChange={(v) => setNewClientForm(prev => ({ ...prev, industry: v }))}>
+                <Select value={newClientForm.industry} onValueChange={(v) => setNewClientForm(prev => ({ ...prev, industry: v, customIndustry: v === "Custom" ? prev.customIndustry : "" }))}>
                   <SelectTrigger className="mt-1.5 bg-white border-gray-300 text-gray-900 focus:border-blue-500 focus:ring-blue-500">
                     <SelectValue placeholder="Select industry..." />
                   </SelectTrigger>
@@ -1086,6 +1086,28 @@ export default function ClientDashboard() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            {newClientForm.industry === "Custom" && (
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Custom Industry Name</Label>
+                <Input
+                  placeholder="e.g., AI Technology, Pet Services, FinTech..."
+                  value={newClientForm.customIndustry}
+                  onChange={(e) => setNewClientForm(prev => ({ ...prev, customIndustry: e.target.value }))}
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">Enter your specific industry for better content generation</p>
+              </div>
+            )}
+            <div>
+              <Label className="text-sm font-medium text-gray-700">Website URL (optional)</Label>
+              <Input
+                placeholder="https://www.example.com"
+                value={newClientForm.website}
+                onChange={(e) => setNewClientForm(prev => ({ ...prev, website: e.target.value }))}
+                className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
+              />
+              <p className="mt-1 text-xs text-gray-500">Helps AI generate better content with brand context</p>
             </div>
             <div>
               <div className="flex items-center justify-between">
@@ -1194,7 +1216,7 @@ export default function ClientDashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium text-gray-700">Industry</Label>
-                <Select value={editClientForm.industry} onValueChange={(v) => setEditClientForm(prev => ({ ...prev, industry: v }))}>
+                <Select value={editClientForm.industry} onValueChange={(v) => setEditClientForm(prev => ({ ...prev, industry: v, customIndustry: v === "Custom" ? prev.customIndustry : "" }))}>
                   <SelectTrigger className="mt-1.5 bg-white border-gray-300 text-gray-900">
                     <SelectValue />
                   </SelectTrigger>
@@ -1218,6 +1240,28 @@ export default function ClientDashboard() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            {editClientForm.industry === "Custom" && (
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Custom Industry Name</Label>
+                <Input
+                  placeholder="e.g., AI Technology, Pet Services, FinTech..."
+                  value={editClientForm.customIndustry}
+                  onChange={(e) => setEditClientForm(prev => ({ ...prev, customIndustry: e.target.value }))}
+                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
+                />
+                <p className="mt-1 text-xs text-gray-500">Enter your specific industry for better content generation</p>
+              </div>
+            )}
+            <div>
+              <Label className="text-sm font-medium text-gray-700">Website URL (optional)</Label>
+              <Input
+                placeholder="https://www.example.com"
+                value={editClientForm.website}
+                onChange={(e) => setEditClientForm(prev => ({ ...prev, website: e.target.value }))}
+                className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
+              />
+              <p className="mt-1 text-xs text-gray-500">Helps AI generate better content with brand context</p>
             </div>
             <div>
               <div className="flex items-center justify-between">
@@ -1322,7 +1366,7 @@ export default function ClientDashboard() {
                   <div className="flex items-center gap-2">
                     {client.id === selectedClient?.id && <Badge className="bg-blue-100 text-blue-700">Active</Badge>}
                     <Button variant="outline" size="sm" onClick={() => { switchClient(client); setManageBrandsOpen(false); }} className="text-gray-600"><Eye className="h-4 w-4 mr-1" /> View</Button>
-                    <Button variant="outline" size="sm" onClick={() => { setEditClientForm({ name: client.name, brand_name: client.brand_name, target_region: client.target_region, industry: client.industry, primary_color: client.primary_color, logo_url: "", competitors: client.competitors?.join(", ") || "" }); switchClient(client); setManageBrandsOpen(false); setEditClientOpen(true); }} className="text-gray-600"><Settings className="h-4 w-4 mr-1" /> Edit</Button>
+                    <Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(client.industry) ? client.industry : "Custom"; const customInd = Object.keys(industries).includes(client.industry) ? "" : client.industry; setEditClientForm({ name: client.name, brand_name: client.brand_name, target_region: client.target_region, industry: clientIndustry, customIndustry: customInd, primary_color: client.primary_color, logo_url: "", competitors: client.competitors?.join(", ") || "", website: client.brand_domain || "" }); switchClient(client); setManageBrandsOpen(false); setEditClientOpen(true); }} className="text-gray-600"><Settings className="h-4 w-4 mr-1" /> Edit</Button>
                     {clients.length > 1 && (<Button variant="outline" size="sm" onClick={() => { if (confirm("Delete " + client.name + "?")) deleteClient(client.id); }} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>)}
                   </div>
                 </div>
@@ -1415,9 +1459,11 @@ export default function ClientDashboard() {
   function PromptDetailDialog() {
     const result = filteredAuditResults.find(r => r.prompt_id === selectedPromptDetail);
     const prompt = prompts.find(p => p.id === selectedPromptDetail);
-    const [detailTab, setDetailTab] = useState<"models" | "citations" | "tavily" | "content">("models");
+    const [detailTab, setDetailTab] = useState<"models" | "citations" | "tavily" | "content" | "insights">("models");
     const [generatedVisibilityContent, setGeneratedVisibilityContent] = useState<string | null>(null);
     const [generatingVisibilityContent, setGeneratingVisibilityContent] = useState(false);
+    const [recommendations, setRecommendations] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string } | null>(null);
+    const [generatingRecommendations, setGeneratingRecommendations] = useState(false);
     if (!result && !prompt) return null;
     const allPromptCitations = result?.model_results.flatMap(mr => mr.citations.map(c => ({ ...c, model: mr.model_name }))) || [];
     const uniqueCitations = Array.from(new Map(allPromptCitations.map(c => [c.url, c])).values());
@@ -1439,6 +1485,25 @@ export default function ClientDashboard() {
         console.error("Error generating content:", err);
       } finally {
         setGeneratingVisibilityContent(false);
+      }
+    };
+
+    const handleGenerateRecommendations = async () => {
+      if (!prompt && !result) return;
+      setGeneratingRecommendations(true);
+      setRecommendations(null);
+      try {
+        const recs = await generateRecommendations(
+          prompt?.prompt_text || result?.prompt_text || "",
+          result || null,
+          tavilyData
+        );
+        setRecommendations(recs);
+        if (recs) setDetailTab("insights");
+      } catch (err) {
+        console.error("Error generating recommendations:", err);
+      } finally {
+        setGeneratingRecommendations(false);
       }
     };
 
@@ -1476,6 +1541,10 @@ export default function ClientDashboard() {
                   <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
                   <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Citations ({uniqueCitations.length})</button>
                   <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Sparkles className="h-3.5 w-3.5" />Tavily</button>
+                  <button onClick={() => { if (recommendations) setDetailTab("insights"); else handleGenerateRecommendations(); }} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "insights" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>
+                    {generatingRecommendations ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
+                    Insights
+                  </button>
                   {generatedVisibilityContent && (
                     <button onClick={() => setDetailTab("content")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "content" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Wand2 className="h-3.5 w-3.5" />Generated</button>
                   )}
@@ -1750,59 +1819,163 @@ export default function ClientDashboard() {
               {detailTab === "content" && (
                 <div className="space-y-4">
                   {generatedVisibilityContent ? (
-                    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                      <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-indigo-50 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Wand2 className="h-5 w-5 text-purple-600" />
-                          <span className="font-semibold text-gray-900">AI-Generated Content for Visibility</span>
+                    <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                      <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl shadow-lg shadow-purple-200">
+                            <Wand2 className="h-5 w-5 text-white" />
+                          </div>
+                          <div>
+                            <span className="font-semibold text-gray-900">AI-Generated Visibility Content</span>
+                            <p className="text-xs text-gray-500 mt-0.5">Optimized for AI search visibility</p>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">{generatedVisibilityContent.length} characters</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs px-2.5 py-1 bg-white/80 backdrop-blur rounded-full text-gray-600 font-medium shadow-sm">{generatedVisibilityContent.length.toLocaleString()} characters</span>
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => navigator.clipboard.writeText(generatedVisibilityContent)}
-                            className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                            className="text-purple-600 border-purple-200 hover:bg-purple-50 hover:border-purple-300 transition-all"
                           >
-                            <Copy className="h-3.5 w-3.5 mr-1" /> Copy
+                            <Copy className="h-3.5 w-3.5 mr-1.5" /> Copy
                           </Button>
                         </div>
                       </div>
-                      <div className="p-6 max-h-[60vh] overflow-y-auto">
-                        <div className="prose prose-sm max-w-none">
-                          <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
+                      <div className="p-6 max-h-[60vh] overflow-y-auto bg-gradient-to-b from-white to-gray-50/50">
+                        <article className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-p:text-gray-700 prose-li:text-gray-700">
+                          <div className="whitespace-pre-wrap leading-relaxed">
                             {generatedVisibilityContent.split('\n').map((line, i) => {
-                              if (line.startsWith('# ')) return <h1 key={i} className="text-2xl font-bold text-gray-900 mt-4 mb-2">{line.replace('# ', '')}</h1>;
-                              if (line.startsWith('## ')) return <h2 key={i} className="text-xl font-semibold text-gray-800 mt-4 mb-2">{line.replace('## ', '')}</h2>;
-                              if (line.startsWith('### ')) return <h3 key={i} className="text-lg font-medium text-gray-800 mt-3 mb-1">{line.replace('### ', '')}</h3>;
-                              if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-gray-700">{line.replace(/^[-*] /, '')}</li>;
-                              if (line.startsWith('**') && line.endsWith('**')) return <strong key={i} className="font-semibold text-gray-900">{line.replace(/\*\*/g, '')}</strong>;
-                              if (line.trim() === '') return <br key={i} />;
-                              return <p key={i} className="mb-2">{line}</p>;
+                              if (line.startsWith('# ')) return <h1 key={i} className="text-2xl font-bold text-gray-900 mt-6 mb-3 pb-2 border-b border-gray-100">{line.replace('# ', '')}</h1>;
+                              if (line.startsWith('## ')) return <h2 key={i} className="text-xl font-semibold text-gray-800 mt-6 mb-3">{line.replace('## ', '')}</h2>;
+                              if (line.startsWith('### ')) return <h3 key={i} className="text-lg font-medium text-gray-800 mt-5 mb-2">{line.replace('### ', '')}</h3>;
+                              if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-gray-700 my-1 pl-2">{line.replace(/^[-*] /, '')}</li>;
+                              if (line.startsWith('**') && line.endsWith('**')) return <strong key={i} className="font-semibold text-gray-900 block my-2">{line.replace(/\*\*/g, '')}</strong>;
+                              if (line.trim() === '') return <div key={i} className="h-3" />;
+                              return <p key={i} className="mb-3 text-gray-700 leading-relaxed">{line}</p>;
                             })}
                           </div>
-                        </div>
+                        </article>
                       </div>
-                      <div className="p-4 border-t border-gray-100 bg-gray-50">
+                      <div className="p-4 border-t border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
                         <div className="flex items-start gap-3">
-                          <div className="p-1.5 bg-blue-100 rounded-lg flex-shrink-0">
-                            <Sparkles className="h-4 w-4 text-blue-600" />
+                          <div className="p-2 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex-shrink-0 shadow-sm">
+                            <Sparkles className="h-4 w-4 text-white" />
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-gray-700">How to use this content</p>
-                            <p className="text-xs text-gray-500 mt-1">Publish on your blog, include in PR materials, or use as a basis for social content. The more authoritative sources link to content like this, the more likely AI models will cite your brand.</p>
+                            <p className="text-sm font-semibold text-gray-800">How to maximize AI visibility</p>
+                            <p className="text-xs text-gray-600 mt-1 leading-relaxed">Publish on your blog with proper schema markup. Share on social media and industry forums. Pitch to authoritative sites for backlinks. The more high-quality sources reference this content, the more likely AI models will cite your brand.</p>
                           </div>
                         </div>
                       </div>
                     </div>
                   ) : (
-                    <div className="text-center py-12 bg-gray-50 rounded-xl border border-gray-200">
-                      <Wand2 className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                      <p className="text-gray-600 font-medium mb-2">No content generated yet</p>
-                      <p className="text-sm text-gray-500 mb-4">Click "Generate Content" to create AI-optimized content based on your audit results and Tavily analysis.</p>
-                      <Button onClick={handleGenerateVisibilityContent} disabled={generatingVisibilityContent} className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
-                        {generatingVisibilityContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating...</> : <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>}
+                    <div className="text-center py-16 bg-gradient-to-br from-purple-50 via-white to-indigo-50 rounded-2xl border border-gray-200 shadow-sm">
+                      <div className="bg-gradient-to-br from-purple-100 to-indigo-100 h-20 w-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                        <Wand2 className="h-10 w-10 text-purple-500" />
+                      </div>
+                      <p className="text-gray-800 font-semibold text-lg mb-2">Generate AI-Optimized Content</p>
+                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Create humanized, E-E-A-T optimized content based on your audit results, Tavily source analysis, and competitor insights.</p>
+                      <Button onClick={handleGenerateVisibilityContent} disabled={generatingVisibilityContent} size="lg" className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-lg shadow-purple-200 transition-all">
+                        {generatingVisibilityContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating humanized content...</> : <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>}
                       </Button>
+                      <div className="flex items-center justify-center gap-4 mt-6 text-xs text-gray-400">
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Audit-based</span>
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Tavily insights</span>
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> E-E-A-T optimized</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AI Insights/Recommendations Tab */}
+              {detailTab === "insights" && (
+                <div className="space-y-4">
+                  {recommendations ? (
+                    <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                      <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-amber-50 via-yellow-50 to-orange-50 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "p-2 rounded-xl shadow-lg",
+                            recommendations.priority === 'high' ? "bg-gradient-to-br from-red-500 to-rose-600 shadow-red-200" :
+                              recommendations.priority === 'medium' ? "bg-gradient-to-br from-amber-500 to-orange-600 shadow-amber-200" :
+                                "bg-gradient-to-br from-green-500 to-emerald-600 shadow-green-200"
+                          )}>
+                            <Lightbulb className="h-5 w-5 text-white" />
+                          </div>
+                          <div>
+                            <span className="font-semibold text-gray-900">AI Visibility Insights</span>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Priority: <span className={cn(
+                                "font-medium",
+                                recommendations.priority === 'high' ? "text-red-600" :
+                                  recommendations.priority === 'medium' ? "text-amber-600" :
+                                    "text-green-600"
+                              )}>{recommendations.priority.toUpperCase()}</span>
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleGenerateRecommendations}
+                          disabled={generatingRecommendations}
+                          className="text-amber-600 border-amber-200 hover:bg-amber-50"
+                        >
+                          {generatingRecommendations ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                          Refresh
+                        </Button>
+                      </div>
+
+                      {/* Summary */}
+                      <div className="p-4 bg-gray-50 border-b border-gray-100">
+                        <p className="text-sm text-gray-700 leading-relaxed">{recommendations.summary}</p>
+                      </div>
+
+                      {/* Recommendations List */}
+                      <div className="p-5">
+                        <h4 className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-4">Actionable Recommendations</h4>
+                        <div className="space-y-3">
+                          {recommendations.recommendations.map((rec, idx) => (
+                            <div key={idx} className="flex items-start gap-3 p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-100 hover:border-amber-200 transition-colors">
+                              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-sm font-bold shadow-sm">
+                                {idx + 1}
+                              </div>
+                              <p className="text-sm text-gray-700 leading-relaxed">{rec}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="p-4 border-t border-gray-100 bg-gradient-to-r from-amber-50 to-orange-50">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex-shrink-0 shadow-sm">
+                            <Sparkles className="h-4 w-4 text-white" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-800">Powered by AI Analysis</p>
+                            <p className="text-xs text-gray-600 mt-1 leading-relaxed">These insights are generated based on your audit results, Tavily web analysis, and competitor data. Implement these recommendations to improve your brand's visibility in AI-generated responses.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-16 bg-gradient-to-br from-amber-50 via-white to-orange-50 rounded-2xl border border-gray-200 shadow-sm">
+                      <div className="bg-gradient-to-br from-amber-100 to-orange-100 h-20 w-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                        <Lightbulb className="h-10 w-10 text-amber-500" />
+                      </div>
+                      <p className="text-gray-800 font-semibold text-lg mb-2">Get AI-Powered Insights</p>
+                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Generate actionable recommendations based on your audit results, Tavily analysis, and competitor data to improve AI visibility.</p>
+                      <Button onClick={handleGenerateRecommendations} disabled={generatingRecommendations} size="lg" className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-lg shadow-amber-200 transition-all">
+                        {generatingRecommendations ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Analyzing...</> : <><Lightbulb className="h-4 w-4 mr-2" />Generate Insights</>}
+                      </Button>
+                      <div className="flex items-center justify-center gap-4 mt-6 text-xs text-gray-400">
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Audit-based</span>
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Tavily data</span>
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Competitor analysis</span>
+                      </div>
                     </div>
                   )}
                 </div>

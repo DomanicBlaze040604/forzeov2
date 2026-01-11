@@ -682,11 +682,12 @@ CREATE TABLE clients (
   id UUID PRIMARY KEY,
   name TEXT NOT NULL,                -- "Juleo Club"
   brand_name TEXT NOT NULL,          -- "Juleo"
+  brand_domain TEXT,                 -- "https://juleo.club" (website URL)
   brand_tags TEXT[],                 -- ["Juleo Club", "juleo.club"]
   slug TEXT,                         -- "juleo"
   target_region TEXT,                -- "India"
   location_code INTEGER,             -- 2356 (DataForSEO location code)
-  industry TEXT,                     -- "Dating/Matrimony"
+  industry TEXT,                     -- "Dating/Matrimony" or custom value
   competitors TEXT[],                -- ["Bumble", "Tinder"]
   primary_color TEXT,                -- "#ec4899"
   created_at TIMESTAMPTZ
@@ -778,6 +779,53 @@ Each AI model is queried via DataForSEO's provider-specific LIVE endpoints:
 | Google SERP | DataForSEO | serp/google/organic/live | N/A | ~$0.002 |
 
 **All LLM models use LIVE provider-specific APIs for real-time responses.**
+
+### Groq AI Integration
+
+Groq provides fast AI content generation using Llama 3.1 model.
+
+**API Endpoint:** `https://api.groq.com/openai/v1/chat/completions`
+
+**Model:** `llama-3.1-8b-instant` (fast inference)
+
+**Use cases:**
+1. **Prompt Generation** - Generate search prompts from keywords
+2. **Content Generation** - Create SEO-optimized blog posts
+3. **Visibility Content** - Content based on audit + Tavily data
+4. **Competitor Discovery** - AI-powered auto-discovery
+
+**Frontend integration:** `src/hooks/useClientDashboard.ts`
+- `generatePromptsFromKeywords()` - AI prompt generation
+- `generateContent()` - Blog/article generation
+- `generateVisibilityContent()` - Audit-based content
+- `fetchCompetitors()` - AI competitor discovery
+
+---
+
+### Tavily AI Integration
+
+Tavily provides real-time web search for source analysis.
+
+**Edge Function:** `supabase/functions/tavily-search/index.ts`
+
+**API Endpoints:**
+- `POST https://api.tavily.com/search` - Web search with AI answer
+- `POST https://api.tavily.com/extract` - Deep content extraction
+
+**Response includes:**
+- `answer` - AI-generated answer from sources
+- `sources` - Array of web sources with scores
+- `analysis.brand_mentioned` - Brand in sources?
+- `analysis.competitor_mentions` - Counts per competitor
+- `analysis.top_domains` - Most cited domains
+- `analysis.insights` - Actionable recommendations
+
+**Use cases:**
+- Find editorial sources mentioning your brand
+- Discover competitor coverage patterns
+- Correlate web presence with AI visibility
+
+---
 
 ### DataForSEO - Google SERP
 

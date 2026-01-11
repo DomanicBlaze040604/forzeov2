@@ -209,6 +209,7 @@ export function ScheduleManager({ clientId, prompts, selectedModels }: ScheduleM
 
     // Delete schedule
     const handleDelete = async (scheduleId: string) => {
+        console.log("[ScheduleManager] handleDelete called with:", scheduleId);
         if (!confirm("Delete this schedule? Run history will be preserved.")) return;
 
         try {
@@ -364,6 +365,7 @@ export function ScheduleManager({ clientId, prompts, selectedModels }: ScheduleM
                                                     <Edit2 className="h-4 w-4" />
                                                 </Button>
                                                 <Button
+                                                    type="button"
                                                     variant="ghost"
                                                     size="sm"
                                                     onClick={() => handleDelete(schedule.id)}
