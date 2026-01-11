@@ -179,6 +179,7 @@ serve(async (req: Request) => {
         // Get request body for specific feed polling, or poll all due feeds
         const body = await req.json().catch(() => ({}));
         const specificFeedId = body.feed_id;
+        const clientId = body.client_id;
 
         // Fetch due feeds
         let feedsQuery = supabase
@@ -188,8 +189,15 @@ serve(async (req: Request) => {
 
         if (specificFeedId) {
             feedsQuery = feedsQuery.eq("id", specificFeedId);
+        } else if (clientId) {
+            // Filter by client and get feeds that are due for polling
+            feedsQuery = feedsQuery
+                .eq("client_id", clientId)
+                .or(
+                    `last_polled_at.is.null,last_polled_at.lt.${new Date(Date.now() - 60 * 60 * 1000).toISOString()}`
+                );
         } else {
-            // Get feeds that are due for polling
+            // Get all feeds that are due for polling
             feedsQuery = feedsQuery.or(
                 `last_polled_at.is.null,last_polled_at.lt.${new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()}`
             );

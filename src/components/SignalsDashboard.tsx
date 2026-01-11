@@ -195,9 +195,14 @@ export function SignalsDashboard({ clientId }: SignalsDashboardProps) {
     const handlePollNow = async () => {
         setProcessing(true);
         try {
-            await supabase.functions.invoke("rss-ingestor", {});
-            // Also run scorer
-            await supabase.functions.invoke("signal-scorer", {});
+            // Poll RSS feeds for this client
+            await supabase.functions.invoke("rss-ingestor", {
+                body: { client_id: clientId }
+            });
+            // Score signals and run Tavily correlation
+            await supabase.functions.invoke("signal-scorer", {
+                body: { client_id: clientId }
+            });
             fetchData();
         } catch (err) {
             console.error("[SignalsDashboard] Poll error:", err);

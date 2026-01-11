@@ -403,12 +403,12 @@ export function ScheduleManager({ clientId, prompts, selectedModels }: ScheduleM
                         {/* Prompt */}
                         <div>
                             <Label htmlFor="prompt">Prompt (Optional)</Label>
-                            <Select value={formPromptId} onValueChange={setFormPromptId}>
+                            <Select value={formPromptId || "__none__"} onValueChange={(v) => setFormPromptId(v === "__none__" ? "" : v)}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Select a prompt or use schedule name as query" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="">Use schedule name as query</SelectItem>
+                                    <SelectItem value="__none__">Use schedule name as query</SelectItem>
                                     {prompts.filter(p => p.is_active).map((p) => (
                                         <SelectItem key={p.id} value={p.id}>
                                             {p.prompt_text.substring(0, 50)}...
@@ -417,6 +417,7 @@ export function ScheduleManager({ clientId, prompts, selectedModels }: ScheduleM
                                 </SelectContent>
                             </Select>
                         </div>
+
 
                         {/* Interval */}
                         <div className="grid grid-cols-2 gap-4">
