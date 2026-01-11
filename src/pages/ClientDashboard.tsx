@@ -1352,10 +1352,11 @@ export default function ClientDashboard() {
   function PromptDetailDialog() {
     const result = filteredAuditResults.find(r => r.prompt_id === selectedPromptDetail);
     const prompt = prompts.find(p => p.id === selectedPromptDetail);
-    const [detailTab, setDetailTab] = useState<"models" | "citations">("models");
+    const [detailTab, setDetailTab] = useState<"models" | "citations" | "tavily">("models");
     if (!result && !prompt) return null;
     const allPromptCitations = result?.model_results.flatMap(mr => mr.citations.map(c => ({ ...c, model: mr.model_name }))) || [];
     const uniqueCitations = Array.from(new Map(allPromptCitations.map(c => [c.url, c])).values());
+    const tavilyData = selectedPromptDetail ? tavilyResults[selectedPromptDetail] as any : null;
     return (
       <Dialog open={!!selectedPromptDetail} onOpenChange={() => setSelectedPromptDetail(null)}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto bg-white">
@@ -1388,6 +1389,7 @@ export default function ClientDashboard() {
               <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit">
                 <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
                 <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>All Citations ({uniqueCitations.length})</button>
+                <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Sparkles className="h-3.5 w-3.5" />Tavily{tavilyData ? ` (${tavilyData.sources?.length || 0})` : ""}</button>
               </div>
 
               {/* Model Results Tab */}
@@ -1513,6 +1515,132 @@ export default function ClientDashboard() {
                         </div>
                       );
                     })
+                  )}
+                </div>
+              )}
+
+              {/* Tavily Tab */}
+              {detailTab === "tavily" && (
+                <div className="space-y-4">
+                  {tavilyData ? (
+                    <>
+                      {/* Tavily Answer */}
+                      {tavilyData.answer && (
+                        <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-4">
+                          <div className="text-xs font-semibold text-purple-600 uppercase tracking-wide mb-2 flex items-center gap-2">
+                            <Sparkles className="h-3.5 w-3.5" />AI-Generated Answer
+                          </div>
+                          <p className="text-gray-800 leading-relaxed">{tavilyData.answer}</p>
+                        </div>
+                      )}
+
+                      {/* Analysis Cards */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-white border border-gray-200 rounded-xl p-4">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Brand Visibility</div>
+                          <div className="flex items-center gap-3">
+                            {tavilyData.analysis?.brand_mentioned ? (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-100 text-green-700 rounded-full text-sm font-semibold">
+                                <CheckCircle className="h-4 w-4" /> Mentioned {tavilyData.analysis.brand_mention_count || 0}x
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-100 text-red-700 rounded-full text-sm font-semibold">
+                                <X className="h-4 w-4" /> Not Found
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="bg-white border border-gray-200 rounded-xl p-4">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Competitor Mentions</div>
+                          <div className="flex flex-wrap gap-2">
+                            {Object.entries(tavilyData.analysis?.competitor_mentions || {}).filter(([_, v]) => (v as number) > 0).map(([name, count]) => (
+                              <Badge key={name} variant="outline" className="text-orange-600 bg-orange-50 border-orange-200">
+                                {name}: {count as number}x
+                              </Badge>
+                            ))}
+                            {Object.values(tavilyData.analysis?.competitor_mentions || {}).every((v) => (v as number) === 0) && (
+                              <span className="text-sm text-gray-400">No competitors found</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Top Domains */}
+                      {tavilyData.analysis?.top_domains?.length > 0 && (
+                        <div className="bg-white border border-gray-200 rounded-xl p-4">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Top Domains (Influence Sources)</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {tavilyData.analysis.top_domains.slice(0, 10).map((d: any, i: number) => (
+                              <div key={i} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                                <img src={`https://www.google.com/s2/favicons?domain=${d.domain}&sz=16`} alt="" className="h-4 w-4 rounded" />
+                                <span className="text-sm text-gray-700 flex-1 truncate">{d.domain}</span>
+                                <span className="text-xs text-gray-500 font-medium">{d.count}x</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Source Types */}
+                      {tavilyData.analysis?.source_types && (
+                        <div className="bg-white border border-gray-200 rounded-xl p-4">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Source Types</div>
+                          <div className="flex flex-wrap gap-2">
+                            {Object.entries(tavilyData.analysis.source_types).filter(([_, v]) => (v as number) > 0).map(([type, count]) => (
+                              <Badge key={type} variant="secondary" className="capitalize">
+                                {type}: {count as number}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Insights */}
+                      {tavilyData.analysis?.insights?.length > 0 && (
+                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4">
+                          <div className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-3">AI Insights</div>
+                          <ul className="space-y-2">
+                            {tavilyData.analysis.insights.map((insight: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                                <ChevronRight className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                                {insight}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* All Sources */}
+                      {tavilyData.sources?.length > 0 && (
+                        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                          <div className="p-4 border-b border-gray-100">
+                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Web Sources ({tavilyData.sources.length})</div>
+                          </div>
+                          <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
+                            {tavilyData.sources.map((source: any, i: number) => (
+                              <a key={i} href={source.url} target="_blank" rel="noopener noreferrer" className="flex items-start gap-3 p-4 hover:bg-gray-50 transition-colors">
+                                <img src={`https://www.google.com/s2/favicons?domain=${source.domain}&sz=24`} alt="" className="h-6 w-6 rounded mt-0.5" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-gray-900 line-clamp-1">{source.title}</div>
+                                  <p className="text-sm text-gray-500 line-clamp-2 mt-1">{source.content?.substring(0, 150)}...</p>
+                                  <div className="flex items-center gap-2 mt-2 text-xs text-gray-400">
+                                    <span>{source.domain}</span>
+                                    {source.score && <span className="px-1.5 py-0.5 bg-gray-100 rounded">Score: {(source.score * 100).toFixed(0)}%</span>}
+                                  </div>
+                                </div>
+                                <ExternalLink className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center py-12 bg-gray-50 rounded-xl border border-gray-200">
+                      <Sparkles className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                      <p className="text-gray-600 font-medium mb-2">No Tavily data available</p>
+                      <p className="text-sm text-gray-500 mb-4">Enable "Tavily On" and re-run this prompt to see AI source analysis.</p>
+                    </div>
                   )}
                 </div>
               )}

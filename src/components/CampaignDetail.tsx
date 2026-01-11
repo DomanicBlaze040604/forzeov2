@@ -41,17 +41,37 @@ export function CampaignDetail({ campaignId, onBack }: CampaignDetailProps) {
             if (campError) throw campError;
             setCampaign(campaignData);
 
-            // Get Associated Runs (from schedule_runs or audit_results - simplifying to fetch from view or union if needed, 
-            // but for now let's assume we link to schedule_runs as per plan)
-            // Ideally we'd have a unified view, but for v1 checking schedule_runs
-            const { data: runsData, error: runsError } = await supabase
-                .from("schedule_runs")
-                .select("*")
+            // Get Associated Audit Results from audit_results table
+            // Campaign prompts are saved directly to audit_results with campaign_id
+            const { data: resultsData, error: resultsError } = await supabase
+                .from("audit_results")
+                .select("id, prompt_id, prompts(prompt_text), share_of_voice, average_rank, total_citations, created_at")
                 .eq("campaign_id", campaignId)
                 .order("created_at", { ascending: true });
 
-            if (runsError) console.log("Error fetching runs:", runsError);
-            setRuns(runsData || []);
+            if (resultsError) {
+                console.log("Error fetching audit results:", resultsError);
+                // Try alternative: fetch from schedule_runs if audit_results fails
+                const { data: runsData, error: runsError } = await supabase
+                    .from("schedule_runs")
+                    .select("*")
+                    .eq("campaign_id", campaignId)
+                    .order("created_at", { ascending: true });
+
+                if (runsError) console.log("Error fetching runs:", runsError);
+                setRuns(runsData || []);
+            } else {
+                // Map audit_results to Run interface
+                const mappedRuns: Run[] = (resultsData || []).map(r => ({
+                    id: r.id,
+                    prompt_text: (r.prompts as any)?.prompt_text || "Unknown prompt",
+                    sov_score: r.share_of_voice || 0,
+                    rank_list: [],
+                    citations_count: r.total_citations || 0,
+                    created_at: r.created_at,
+                }));
+                setRuns(mappedRuns);
+            }
 
         } catch (err) {
             console.error("Error fetching campaign details:", err);
