@@ -2,7 +2,23 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Calendar, ChevronRight, BarChart3 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Loader2, Calendar, ChevronRight, BarChart3, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 interface Campaign {
@@ -25,6 +41,10 @@ interface CampaignsListProps {
 export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps) {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [loading, setLoading] = useState(true);
+    const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
+    const [deletingCampaign, setDeletingCampaign] = useState<Campaign | null>(null);
+    const [newName, setNewName] = useState("");
+    const [isUpdating, setIsUpdating] = useState(false);
 
     useEffect(() => {
         fetchCampaigns();
@@ -45,6 +65,72 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
             console.error("Error fetching campaigns:", err);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleEdit = (campaign: Campaign, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditingCampaign(campaign);
+        setNewName(campaign.name);
+    };
+
+    const handleDelete = (campaign: Campaign, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setDeletingCampaign(campaign);
+    };
+
+    const confirmEdit = async () => {
+        if (!editingCampaign || !newName.trim()) return;
+        setIsUpdating(true);
+
+        try {
+            const { error } = await supabase
+                .from("campaigns")
+                .update({ name: newName.trim() })
+                .eq("id", editingCampaign.id);
+
+            if (error) throw error;
+
+            setCampaigns(prev =>
+                prev.map(c => c.id === editingCampaign.id ? { ...c, name: newName.trim() } : c)
+            );
+            console.log(`Campaign renamed to "${newName.trim()}"`);
+            setEditingCampaign(null);
+        } catch (err) {
+            console.error("Error updating campaign:", err);
+            alert("Failed to rename campaign");
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const confirmDelete = async () => {
+        if (!deletingCampaign) return;
+        setIsUpdating(true);
+
+        try {
+            // Delete associated audit results first
+            await supabase
+                .from("audit_results")
+                .delete()
+                .eq("campaign_id", deletingCampaign.id);
+
+            // Then delete the campaign
+            const { error } = await supabase
+                .from("campaigns")
+                .delete()
+                .eq("id", deletingCampaign.id);
+
+            if (error) throw error;
+
+            setCampaigns(prev => prev.filter(c => c.id !== deletingCampaign.id));
+            console.log(`Campaign "${deletingCampaign.name}" deleted`);
+            setDeletingCampaign(null);
+        } catch (err) {
+            console.error("Error deleting campaign:", err);
+            alert("Failed to delete campaign");
+        } finally {
+            setIsUpdating(false);
         }
     };
 
@@ -72,10 +158,6 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
                     <h2 className="text-xl font-semibold text-gray-900">Campaign Runs</h2>
                     <p className="text-sm text-gray-500">Track batched audits and historical performance.</p>
                 </div>
-                {/* <Button onClick={() => {}}>
-                    <PlayCircle className="h-4 w-4 mr-2" />
-                    New Campaign
-                </Button> */}
             </div>
 
             {campaigns.length === 0 ? (
@@ -115,7 +197,7 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center gap-8">
+                                    <div className="flex items-center gap-6">
                                         <div className="text-right">
                                             <p className="text-xs text-gray-500 uppercase font-medium">Avg SOV</p>
                                             <p className={`text-xl font-bold ${(campaign.avg_sov || 0) > 50 ? 'text-green-600' :
@@ -136,6 +218,29 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
                                                 {campaign.total_citations || 0}
                                             </p>
                                         </div>
+
+                                        {/* Actions Menu */}
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                    <MoreVertical className="h-4 w-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem onClick={(e) => handleEdit(campaign, e as unknown as React.MouseEvent)}>
+                                                    <Pencil className="h-4 w-4 mr-2" />
+                                                    Rename
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    onClick={(e) => handleDelete(campaign, e as unknown as React.MouseEvent)}
+                                                    className="text-red-600 focus:text-red-600"
+                                                >
+                                                    <Trash2 className="h-4 w-4 mr-2" />
+                                                    Delete
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+
                                         <ChevronRight className="h-5 w-5 text-gray-300" />
                                     </div>
                                 </div>
@@ -154,6 +259,48 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
                     ))}
                 </div>
             )}
+
+            {/* Edit Dialog */}
+            <Dialog open={!!editingCampaign} onOpenChange={() => setEditingCampaign(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Rename Campaign</DialogTitle>
+                        <DialogDescription>Enter a new name for this campaign.</DialogDescription>
+                    </DialogHeader>
+                    <Input
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        placeholder="Campaign name"
+                        onKeyDown={(e) => e.key === "Enter" && confirmEdit()}
+                    />
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditingCampaign(null)}>Cancel</Button>
+                        <Button onClick={confirmEdit} disabled={isUpdating || !newName.trim()}>
+                            {isUpdating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Save
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Confirmation Dialog */}
+            <Dialog open={!!deletingCampaign} onOpenChange={() => setDeletingCampaign(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Delete Campaign</DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to delete "{deletingCampaign?.name}"? This will also delete all associated audit results. This action cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setDeletingCampaign(null)}>Cancel</Button>
+                        <Button variant="destructive" onClick={confirmDelete} disabled={isUpdating}>
+                            {isUpdating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Delete
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
