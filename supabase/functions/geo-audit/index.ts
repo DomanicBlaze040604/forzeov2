@@ -107,6 +107,10 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
+// Tavily API (for real-time web search when header x-include-tavily is set)
+const TAVILY_API_KEY = Deno.env.get("TAVILY_API_KEY") || "";
+const TAVILY_API_URL = "https://api.tavily.com";
+
 // ============================================
 // MODEL CONFIGURATIONS
 // ============================================
@@ -131,6 +135,8 @@ const AI_MODELS: Record<string, {
   // Traditional SERP models
   google_ai_overview: { name: "Google AI Overview", color: "#ea4335", provider: "DataForSEO", weight: 0.85, costPerQuery: 0.003, isLLM: false },
   google_serp: { name: "Google SERP", color: "#34a853", provider: "DataForSEO", weight: 0.7, costPerQuery: 0.002, isLLM: false },
+  // Real-time web search
+  tavily: { name: "Tavily Search", color: "#7c3aed", provider: "Tavily", weight: 0.8, costPerQuery: 0, isLLM: false },
 };
 
 // LLM model IDs for the LLM Mentions API
@@ -525,6 +531,75 @@ function findWinnerBrand(response: string, brandName: string, competitors: strin
   }
 
   return winner;
+}
+
+// ============================================
+// TAVILY SEARCH API
+// ============================================
+
+/**
+ * Query Tavily Search API for real-time web search results
+ * Used when x-include-tavily header is set to "true"
+ */
+async function tavilySearch(query: string): Promise<{
+  success: boolean;
+  answer?: string;
+  sources: Array<{ url: string; title: string; content: string; domain: string }>;
+  error?: string;
+  response_time_ms?: number;
+}> {
+  if (!TAVILY_API_KEY) {
+    console.log("[Tavily] API key not configured, skipping");
+    return { success: false, sources: [], error: "Tavily API key not configured" };
+  }
+
+  console.log(`[Tavily] Searching: "${query.substring(0, 50)}..."`);
+  const startTime = Date.now();
+
+  try {
+    const response = await fetch(`${TAVILY_API_URL}/search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${TAVILY_API_KEY}`,
+      },
+      body: JSON.stringify({
+        query,
+        search_depth: "advanced",
+        include_answer: true,
+        include_raw_content: false,
+        max_results: 20,
+      }),
+    });
+
+    const responseTime = Date.now() - startTime;
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Tavily] HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+      return { success: false, sources: [], error: `HTTP ${response.status}`, response_time_ms: responseTime };
+    }
+
+    const data = await response.json();
+    const sources = (data.results || []).map((r: { url: string; title: string; content: string }) => ({
+      url: r.url,
+      title: r.title,
+      content: r.content,
+      domain: extractDomain(r.url),
+    }));
+
+    console.log(`[Tavily] Got answer (${(data.answer || "").length} chars) and ${sources.length} sources in ${responseTime}ms`);
+
+    return {
+      success: true,
+      answer: data.answer,
+      sources,
+      response_time_ms: responseTime,
+    };
+  } catch (err) {
+    console.error(`[Tavily] Exception: ${err}`);
+    return { success: false, sources: [], error: String(err), response_time_ms: Date.now() - startTime };
+  }
 }
 
 // ============================================
@@ -1828,6 +1903,12 @@ serve(async (req: Request) => {
     console.log(`[GEO Audit] "${prompt_text.substring(0, 50)}..." | Brand: ${brand_name} | Category: ${prompt_category}`);
     console.log(`[GEO Audit] Models: ${models.join(", ")} | Location: ${location_code}`);
 
+    // Check for Tavily header
+    const includeTavily = req.headers.get("x-include-tavily") === "true";
+    if (includeTavily) {
+      console.log(`[GEO Audit] Tavily search enabled via header`);
+    }
+
     const results: ModelResult[] = [];
     let totalCost = 0;
     const promises: Promise<void>[] = [];
@@ -1982,6 +2063,59 @@ serve(async (req: Request) => {
             response_time_ms: serpResult.response_time_ms,
           }
         ));
+      })());
+    }
+
+    // Query Tavily if header is set
+    let tavilyResults: { answer?: string; sources: Array<{ url: string; title: string; content: string; domain: string }> } | null = null;
+    if (includeTavily) {
+      promises.push((async () => {
+        const tavilyResult = await tavilySearch(prompt_text);
+
+        if (tavilyResult.success) {
+          tavilyResults = {
+            answer: tavilyResult.answer,
+            sources: tavilyResult.sources,
+          };
+
+          // Convert Tavily sources to citations format for model result
+          const tavCitations: Citation[] = tavilyResult.sources.map((s, idx) => ({
+            url: s.url,
+            title: s.title,
+            domain: s.domain,
+            position: idx + 1,
+            snippet: s.content?.substring(0, 200) || "",
+          }));
+
+          // Check if brand is mentioned in Tavily answer
+          const brandData = parseBrandData(tavilyResult.answer || "", brand_name, sanitizedBrandTags);
+          const isCited = tavCitations.some(c =>
+            [brand_name, targetDomain, ...sanitizedBrandTags].some(term =>
+              term && (c.domain.toLowerCase().includes(term.toLowerCase()) ||
+                c.url.toLowerCase().includes(term.toLowerCase()))
+            )
+          );
+
+          // Add Tavily as a model result for unified tracking
+          results.push(createModelResult(
+            "tavily",
+            true,
+            tavilyResult.answer || "Tavily search completed successfully.",
+            tavCitations,
+            0, // Tavily is billed separately, not tracked here
+            brand_name,
+            sanitizedBrandTags,
+            targetDomain,
+            sanitizedCompetitors,
+            undefined,
+            {
+              brand_mentioned: brandData.mentioned,
+              brand_mention_count: brandData.count,
+              is_cited: isCited,
+              response_time_ms: tavilyResult.response_time_ms,
+            }
+          ));
+        }
       })());
     }
 
@@ -2171,6 +2305,7 @@ serve(async (req: Request) => {
         model_results: results,
         top_sources: topSources,
         top_competitors: topCompetitors,
+        tavily_results: tavilyResults, // Included when x-include-tavily header is set
         available_models: Object.entries(AI_MODELS).map(([id, m]) => ({ id, ...m })),
         timestamp: new Date().toISOString(),
       },
