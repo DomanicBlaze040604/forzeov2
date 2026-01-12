@@ -1807,24 +1807,42 @@ Tavily Web Analysis:
 - Dominant Source Types: ${JSON.stringify(tavilyData.analysis?.source_types || {})}
 - Tavily Insights: ${(tavilyData.analysis?.insights || []).join('; ') || 'None'}` : '';
 
-    const systemPrompt = `You are an AI Visibility Strategy Expert. Analyze the provided data and generate specific, actionable recommendations to improve brand visibility in AI-generated responses.
+    const systemPrompt = `You are an AI Visibility Strategy Expert. Analyze the provided data and generate HIGHLY SPECIFIC, IMMEDIATELY ACTIONABLE recommendations.
 
-Your recommendations must be:
-1. SPECIFIC - mention exact domains, content types, or actions
-2. ACTIONABLE - can be implemented within 2-4 weeks
-3. PRIORITIZED - based on impact potential
-4. DATA-DRIVEN - reference the actual audit and Tavily findings
+CRITICAL ANTI-GENERIC RULES - NEVER USE THESE PHRASES:
+- "study their content strategy" 
+- "build relationships with..."
+- "create quality content"
+- "focus on improving..."
+- "analyze competitor..."
+- "engage authentically"
 
-Output EXACTLY this JSON format (no markdown, no extra text):
+REQUIRED SPECIFICITY - EVERY recommendation MUST include:
+1. EXACT target (domain name, competitor name, content URL)
+2. SPECIFIC action (word count, format, platform)
+3. TIMELINE (this week, within 2 weeks, this month)
+4. SUCCESS METRIC (how to measure if it worked)
+
+EXAMPLE GOOD RECOMMENDATIONS:
+✓ "Create 2000-word comparison page at yourbrand.com/vs/CompetitorX covering: pricing table, feature matrix, 5 user testimonials. Publish within 2 weeks. Track: organic traffic to page + AI model citations."
+✓ "Post answer on Quora to 'Best [industry] tools 2024' (URL: quora.com/xxx). 250-400 words. Include personal experience with BrandName. Post this week. Track: answer impressions + upvotes."
+✓ "Pitch TechCrunch contributor Sarah Smith (sarah@tc.com) with exclusive data: 'X% of users prefer Y'. Angle: industry trend piece. Send pitch Monday. Track: coverage + backlink."
+
+EXAMPLE BAD (FORBIDDEN) RECOMMENDATIONS:
+✗ "Improve content quality across the website"
+✗ "Build relationships with industry publications"
+✗ "Study how competitors get mentioned"
+
+Output EXACTLY this JSON format:
 {
   "priority": "high|medium|low",
-  "summary": "One sentence summary of the visibility status and main gap",
+  "summary": "One sentence with SPECIFIC metrics (e.g., 'Visibility at 23%, CompetitorX leads with 67%')",
   "recommendations": [
-    "Specific action 1 with details",
-    "Specific action 2 with details",
-    "Specific action 3 with details",
-    "Specific action 4 with details",
-    "Specific action 5 with details"
+    "Specific action 1 with exact target, format, timeline, metric",
+    "Specific action 2...",
+    "Specific action 3...",
+    "Specific action 4...",
+    "Specific action 5..."
   ]
 }`;
 
@@ -1942,24 +1960,46 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
       return null;
     }
 
-    const systemPrompt = `You are an AI Visibility Strategy Expert analyzing aggregated brand performance across multiple queries.
-Your task is to provide PRECISE, STRATEGIC recommendations based on the overall visibility patterns.
+    const systemPrompt = `You are an AI Visibility Strategy Expert analyzing aggregated brand performance.
+Generate PRECISE, IMMEDIATELY ACTIONABLE strategic recommendations.
 
-Output EXACTLY this JSON format (no markdown, no extra text):
+CRITICAL ANTI-GENERIC RULES - NEVER USE:
+- "study their strategy" / "analyze competitors"
+- "build relationships" / "create quality content"  
+- "focus on..." / "improve..." without specifics
+- "engage with..." / "optimize..."
+
+EVERY KEY ACTION MUST INCLUDE:
+1. EXACT deliverable (comparison page, Quora answer, press pitch, etc.)
+2. SPECIFIC target (domain.com, @journalist, r/subreddit)
+3. CONCRETE timeline (this week, by Friday, within 2 weeks)
+4. MEASURABLE outcome (traffic increase, citation count, ranking position)
+
+EXAMPLE GOOD KEY ACTIONS:
+✓ "This week: Post on r/[industry] thread about '[topic]'. 300 words from personal experience mentioning [brand]. Track: upvotes + replies."
+✓ "Within 2 weeks: Create [brand].com/vs/[top competitor] comparison. Include pricing table + 5 G2 reviews. Track: page rank for '[brand] vs [competitor]'."
+✓ "This month: Pitch [publication] with '[specific angle]'. Contact: [editor name]. Hook: unique data point. Track: coverage + backlinks."
+
+EXAMPLE BAD (FORBIDDEN):
+✗ "Develop content strategy for high-priority prompts"
+✗ "Build thought leadership in the industry"
+✗ "Focus on improving overall visibility"
+
+Output EXACTLY this JSON:
 {
   "priority": "high|medium|low",
-  "summary": "One-sentence executive summary of overall AI visibility status",
+  "summary": "Specific executive summary with numbers (e.g., 'Visibility 34%, [Competitor] dominates at 78%')",
   "recommendations": [
-    "Strategic recommendation 1",
-    "Strategic recommendation 2",
-    "Strategic recommendation 3",
-    "Strategic recommendation 4",
-    "Strategic recommendation 5"
+    "Strategic recommendation with specific action, target, and metric",
+    "Strategic recommendation 2...",
+    "Strategic recommendation 3...",
+    "Strategic recommendation 4...",
+    "Strategic recommendation 5..."
   ],
   "keyActions": [
-    "Immediate action 1 (this week)",
-    "Short-term action 2 (this month)",
-    "Long-term action 3 (this quarter)"
+    "IMMEDIATE (this week): Specific action with target and deliverable",
+    "SHORT-TERM (this month): Specific action with timeline and metric",
+    "LONG-TERM (this quarter): Specific campaign with measurable goal"
   ]
 }`;
 

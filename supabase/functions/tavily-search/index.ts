@@ -77,16 +77,33 @@ interface TavilySearchRequest {
 // AI VISIBILITY ANALYST PROMPT
 // ============================================
 
-const VISIBILITY_ANALYST_PROMPT = `You are an AI visibility analyst.
+const VISIBILITY_ANALYST_PROMPT = `You are an AI Visibility Analyst specializing in GEO (Generative Engine Optimization).
 
-Given the extracted sources below, identify:
-1. Why certain brands appear in AI answers for this query
-2. What content patterns and source types dominate
-3. What a missing brand should do to influence future AI answers
+Analyze the extracted web sources and provide SPECIFIC, ACTIONABLE insights.
 
-Base all recommendations strictly on the provided sources.
-Do not speculate.
-Cite patterns, not opinions.`;
+FOR EACH INSIGHT YOU MUST:
+1. Name EXACT domains/sources with high authority
+2. Identify SPECIFIC content patterns (format, length, structure)
+3. Provide CONCRETE recommendations with timelines
+4. Reference actual data from the sources
+
+FORBIDDEN GENERIC PHRASES:
+- "study their content strategy"
+- "build relationships with..."
+- "create quality content"
+- "focus on improving..."
+
+GOOD INSIGHT EXAMPLES:
+✓ "Forbes.com appears 3x for this query. Their articles are 2000+ words with expert quotes. Create similar depth content."
+✓ "Reddit r/technology thread ranks #1. Post helpful answer there within 48h. Personal experience format works best."
+✓ "Competitor X mentioned in 4/5 sources. They're cited for 'pricing transparency'. Counter with comparison page."
+
+BAD INSIGHT EXAMPLES (FORBIDDEN):
+✗ "Build thought leadership in the industry"
+✗ "Improve overall content quality"
+✗ "Study competitor positioning"
+
+Base all recommendations strictly on the provided sources. Be specific about domains, formats, and tactics.`;
 
 // ============================================
 // HELPER FUNCTIONS
@@ -305,18 +322,40 @@ function analyzeSources(
     }
   }
 
-  // Generate insights
+  // Generate SPECIFIC, ACTIONABLE insights
   const insights: string[] = [];
   const topSourceType = Object.entries(sourceTypes).sort((a, b) => b[1] - a[1])[0];
-  if (topSourceType && topSourceType[1] > 0) {
-    insights.push(`${topSourceType[0].charAt(0).toUpperCase() + topSourceType[0].slice(1)} sources dominate (${topSourceType[1]}/${sources.length})`);
+
+  // Top domains for targeting
+  const sortedDomains = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]);
+  if (sortedDomains.length > 0) {
+    const topDomain = sortedDomains[0];
+    const domainType = topDomain[0].includes('reddit') ? 'Reddit thread' :
+      topDomain[0].includes('quora') ? 'Quora answer' :
+        topDomain[0].includes('forbes') || topDomain[0].includes('techcrunch') ? 'editorial article' : 'page';
+    insights.push(`${topDomain[0]} appears ${topDomain[1]}x. Target: Create ${domainType === 'Reddit thread' ? 'helpful comment on this subreddit' : domainType === 'Quora answer' ? 'detailed answer on similar questions' : 'guest content or get cited by this domain'}.`);
   }
 
+  // Source type strategy
+  if (topSourceType && topSourceType[1] > 0) {
+    const typeStrategies: Record<string, string> = {
+      editorial: `Editorial dominates (${topSourceType[1]}/${sources.length}). Pitch: ${sortedDomains.find(d => d[0].includes('forbes') || d[0].includes('wired'))?.[0] || 'top publications'}. Prepare data-driven angle.`,
+      ugc: `UGC dominates (${topSourceType[1]}/${sources.length}). Action: Post on ${sortedDomains.find(d => d[0].includes('reddit') || d[0].includes('quora'))?.[0] || 'Reddit/Quora'} within 48h. Use personal experience format.`,
+      reference: `Reference sites dominate (${topSourceType[1]}/${sources.length}). Strategy: Build Wikipedia notability through major press coverage first.`,
+      corporate: `Corporate sites dominate (${topSourceType[1]}/${sources.length}). Strategy: Create comparison content targeting these brands.`,
+      other: `Mixed source types (${topSourceType[1]}/${sources.length}). Diversify: Target top 3 domains with tailored content.`
+    };
+    insights.push(typeStrategies[topSourceType[0]] || `${topSourceType[0]} sources dominate.`);
+  }
+
+  // Competitor-specific insight
   if (brandMentionCount === 0 && competitors.length > 0) {
     const topComp = Object.entries(competitorMentions).sort((a, b) => b[1] - a[1])[0];
     if (topComp && topComp[1] > 0) {
-      insights.push(`${topComp[0]} appears ${topComp[1]} times - study their content strategy`);
+      insights.push(`${topComp[0]} mentioned ${topComp[1]}x, you're at 0. Counter: Create ${brandName.toLowerCase()}.com/vs/${topComp[0].toLowerCase().replace(/\s+/g, '-')} comparison page with pricing + feature table.`);
     }
+  } else if (brandMentionCount > 0) {
+    insights.push(`Brand appears ${brandMentionCount}x - good baseline. Amplify: Get quoted in top sources like ${sortedDomains[0]?.[0] || 'industry publications'}.`);
   }
 
   // Top domains

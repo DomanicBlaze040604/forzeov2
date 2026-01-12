@@ -22,6 +22,7 @@ import { UniversalImport } from "@/components/UniversalImport";
 import { CampaignsList } from "@/components/CampaignsList";
 import { CampaignDetail } from "@/components/CampaignDetail";
 import { SignalsDashboard } from "@/components/SignalsDashboard";
+import CitationIntelligence from "@/components/CitationIntelligence";
 
 const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; dot: string }> = {
   ugc: { label: "UGC", color: "text-cyan-700", bg: "bg-cyan-100", dot: "#06b6d4" },
@@ -86,7 +87,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 export default function ClientDashboard() {
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns" | "insights">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns" | "insights" | "intelligence">("overview");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [newPrompt, setNewPrompt] = useState("");
@@ -236,28 +237,120 @@ export default function ClientDashboard() {
   const handleExportFullAudit = () => {
     if (!selectedClient) return;
     const overallVisibility = Math.round(auditResults.reduce((sum, r) => sum + r.summary.share_of_voice, 0) / (auditResults.length || 1));
-    let txt = "FORZEO GEO AUDIT REPORT\n" + "=".repeat(60) + "\n\n";
-    txt += "Export Date: " + new Date().toLocaleString() + "\n\n";
-    txt += "CLIENT INFORMATION\n" + "-".repeat(40) + "\n";
-    txt += "Name: " + selectedClient.name + "\nBrand: " + selectedClient.brand_name + "\nIndustry: " + (selectedClient.industry || "N/A") + "\nRegion: " + (selectedClient.target_region || "N/A") + "\n";
-    txt += "Brand Tags: " + (selectedClient.brand_tags?.join(", ") || "None") + "\nCompetitors: " + (selectedClient.competitors?.join(", ") || "None") + "\n\n";
-    txt += "SUMMARY\n" + "-".repeat(40) + "\n";
-    txt += "Total Prompts: " + prompts.length + "\nTotal Audits: " + auditResults.length + "\nOverall Visibility: " + overallVisibility + "%\nTotal Citations: " + allCitations.length + "\nTotal Cost: $" + totalCost.toFixed(4) + "\n\n";
-    txt += "MODEL PERFORMANCE\n" + "-".repeat(40) + "\n";
+    const priority = overallVisibility < 30 ? 'HIGH' : overallVisibility < 60 ? 'MEDIUM' : 'LOW';
+
+    // Calculate priority counts
+    const highCount = auditResults.filter(r => (r.summary?.share_of_voice || 0) < 30).length;
+    const medCount = auditResults.filter(r => { const s = r.summary?.share_of_voice || 0; return s >= 30 && s < 60; }).length;
+    const lowCount = auditResults.filter(r => (r.summary?.share_of_voice || 0) >= 60).length;
+
+    // Gather Tavily insights
+    const tavilyInsights: string[] = [];
+    const tavilySrcs: { prompt: string; urls: string[] }[] = [];
+    Object.entries(tavilyResults).forEach(([pid, data]: [string, any]) => {
+      if (data?.analysis?.insights) data.analysis.insights.forEach((i: string) => { if (!tavilyInsights.includes(i)) tavilyInsights.push(i); });
+      if (data?.sources?.length) {
+        const p = prompts.find(x => x.id === pid);
+        tavilySrcs.push({ prompt: p?.prompt_text || pid, urls: data.sources.slice(0, 3).map((s: any) => s.url) });
+      }
+    });
+
+    let txt = "=".repeat(64) + "\n";
+    txt += "           FORZEO GEO AUDIT REPORT - FULL ANALYSIS\n";
+    txt += "=".repeat(64) + "\n\n";
+    txt += "Export Date: " + new Date().toLocaleString() + "\n";
+    txt += "Priority Level: " + priority + "\n\n";
+
+    txt += "-".repeat(40) + "\n EXECUTIVE SUMMARY\n" + "-".repeat(40) + "\n\n";
+    txt += "Brand: " + selectedClient.brand_name + "\n";
+    txt += "Overall Visibility: " + overallVisibility + "%\n\n";
+    txt += "Quick Stats:\n";
+    txt += "  * Total Prompts: " + prompts.length + "\n";
+    txt += "  * Completed Audits: " + auditResults.length + "\n";
+    txt += "  * Citations Found: " + allCitations.length + "\n";
+    txt += "  * Unique Sources: " + domainStats.length + "\n";
+    txt += "  * Total API Cost: $" + totalCost.toFixed(4) + "\n\n";
+    txt += "Priority Breakdown:\n";
+    txt += "  [CRITICAL] <30%: " + highCount + " prompts\n";
+    txt += "  [MODERATE] 30-60%: " + medCount + " prompts\n";
+    txt += "  [GOOD] >60%: " + lowCount + " prompts\n\n";
+
+    txt += "-".repeat(40) + "\n CLIENT INFORMATION\n" + "-".repeat(40) + "\n\n";
+    txt += "Name: " + selectedClient.name + "\n";
+    txt += "Brand: " + selectedClient.brand_name + "\n";
+    txt += "Industry: " + (selectedClient.industry || "N/A") + "\n";
+    txt += "Region: " + (selectedClient.target_region || "N/A") + "\n";
+    txt += "Brand Tags: " + (selectedClient.brand_tags?.join(", ") || "None") + "\n";
+    txt += "Competitors: " + (selectedClient.competitors?.join(", ") || "None") + "\n\n";
+
+    txt += "-".repeat(40) + "\n AI-POWERED RECOMMENDATIONS\n" + "-".repeat(40) + "\n\n";
+    if (aiInsights) {
+      txt += "Summary: " + (aiInsights.summary || 'N/A') + "\n";
+      txt += "Priority: " + (aiInsights.priority?.toUpperCase() || 'N/A') + "\n\n";
+      if (aiInsights.recommendations?.length) {
+        txt += "Strategic Recommendations:\n";
+        aiInsights.recommendations.forEach((r, i) => { txt += "  " + (i + 1) + ". " + r + "\n"; });
+        txt += "\n";
+      }
+      if (aiInsights.keyActions?.length) {
+        txt += "Key Actions:\n";
+        aiInsights.keyActions.forEach(a => { txt += "  * " + a + "\n"; });
+        txt += "\n";
+      }
+    } else {
+      txt += "No AI recommendations generated yet.\n";
+      txt += "Visit the Insights tab and click 'Generate AI Insights' to get recommendations.\n\n";
+    }
+
+    txt += "-".repeat(40) + "\n TAVILY WEB ANALYSIS\n" + "-".repeat(40) + "\n\n";
+    if (tavilyInsights.length > 0 || tavilySrcs.length > 0) {
+      if (tavilyInsights.length) {
+        txt += "Web Insights:\n";
+        tavilyInsights.slice(0, 5).forEach((ins, i) => { txt += "  " + (i + 1) + ". " + ins + "\n"; });
+        txt += "\n";
+      }
+      if (tavilySrcs.length) {
+        txt += "Discovered Sources:\n";
+        tavilySrcs.slice(0, 5).forEach((item, i) => {
+          txt += "\n  [" + (i + 1) + "] " + item.prompt.substring(0, 50) + (item.prompt.length > 50 ? "..." : "") + "\n";
+          item.urls.forEach(u => { txt += "      - " + u + "\n"; });
+        });
+        txt += "\n";
+      }
+    } else {
+      txt += "No Tavily data available. Enable Tavily toggle and run audits.\n\n";
+    }
+
+    txt += "-".repeat(40) + "\n MODEL PERFORMANCE\n" + "-".repeat(40) + "\n\n";
     AI_MODELS.forEach(m => { const s = modelStats[m.id]; const pct = s?.total ? Math.round((s.visible / s.total) * 100) : 0; txt += m.name + " (" + m.provider + "): " + (s?.visible || 0) + "/" + (s?.total || 0) + " visible (" + pct + "%) - $" + (s?.cost || 0).toFixed(4) + "\n"; });
-    txt += "\nCOMPETITOR ANALYSIS\n" + "-".repeat(40) + "\n";
-    competitorGap.forEach((c, i) => { txt += (i + 1) + ". " + c.name + ": " + c.mentions + " mentions (" + c.percentage + "%)\n"; });
-    txt += "\nPROMPTS (" + prompts.length + ")\n" + "-".repeat(40) + "\n";
-    prompts.forEach((p, i) => { txt += (i + 1) + ". [" + (p.is_active ? "Active" : "Inactive") + "] " + p.prompt_text + "\n   Category: " + (p.category || "custom") + " | Niche: " + (p.niche_level || "N/A") + "\n"; });
-    txt += "\nAUDIT RESULTS (" + auditResults.length + ")\n" + "=".repeat(60) + "\n";
+
+    txt += "\n" + "-".repeat(40) + "\n COMPETITOR ANALYSIS\n" + "-".repeat(40) + "\n\n";
+    competitorGap.forEach((c, i) => { const isBrand = c.name === selectedClient?.brand_name; txt += (isBrand ? ">> " : "   ") + (i + 1) + ". " + c.name + ": " + c.mentions + " mentions (" + c.percentage + "%)\n"; });
+
+    txt += "\n" + "-".repeat(40) + "\n PROMPTS (" + prompts.length + ")\n" + "-".repeat(40) + "\n\n";
+    prompts.forEach((p, i) => { const r = auditResults.find(x => x.prompt_id === p.id); const sov = r?.summary?.share_of_voice || 0; const pri = sov < 30 ? "[!]" : sov < 60 ? "[~]" : "[+]"; txt += (i + 1) + ". " + pri + " [" + (p.is_active ? "Active" : "Inactive") + "] " + p.prompt_text + "\n   Category: " + (p.category || "custom") + " | Niche: " + (p.niche_level || "N/A") + (r ? " | Visibility: " + sov + "%" : "") + "\n"; });
+
+    txt += "\n" + "=".repeat(40) + "\n AUDIT RESULTS (" + auditResults.length + ")\n" + "=".repeat(40) + "\n";
     auditResults.forEach((r, i) => { txt += "\n[" + (i + 1) + "] " + r.prompt_text + "\n" + "-".repeat(50) + "\nDate: " + new Date(r.created_at).toLocaleString() + "\nSOV: " + r.summary.share_of_voice + "% | Rank: " + (r.summary.average_rank || "N/A") + " | Citations: " + r.summary.total_citations + "\n\nModel Results:\n"; r.model_results.forEach(mr => { txt += "  - " + mr.model_name + ": " + (mr.brand_mentioned ? "Mentioned" : "Not mentioned") + (mr.brand_rank ? " (Rank #" + mr.brand_rank + ")" : "") + " - " + mr.brand_mention_count + " mentions, " + (mr.citations?.length || 0) + " citations\n"; }); txt += "\n"; });
-    txt += "\nTOP CITATIONS (" + Math.min(allCitations.length, 50) + ")\n" + "-".repeat(40) + "\n";
+
+    txt += "\n" + "-".repeat(40) + "\n TOP CITATIONS (" + Math.min(allCitations.length, 50) + ")\n" + "-".repeat(40) + "\n\n";
     allCitations.slice(0, 50).forEach((c, i) => { txt += (i + 1) + ". " + c.domain + " (" + c.count + "x)\n   " + c.url + "\n"; });
-    txt += "\nTOP SOURCES (" + Math.min(domainStats.length, 30) + ")\n" + "-".repeat(40) + "\n";
+
+    txt += "\n" + "-".repeat(40) + "\n TOP SOURCES (" + Math.min(domainStats.length, 30) + ")\n" + "-".repeat(40) + "\n\n";
     domainStats.slice(0, 30).forEach((s, i) => { txt += (i + 1) + ". " + s.domain + ": " + s.count + " citations across " + s.promptCount + " prompts\n"; });
-    txt += "\n" + "=".repeat(60) + "\nGenerated by Forzeo GEO Dashboard\nhttps://wondrous-queijadas-f95c7e.netlify.app\n";
+
+    txt += "\n" + "=".repeat(64) + "\n";
+    txt += "Generated by Forzeo GEO Dashboard\n";
+    txt += "https://wondrous-queijadas-f95c7e.netlify.app\n";
+    txt += "=".repeat(64) + "\n";
+
     const blob = new Blob([txt], { type: "text/plain" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = (selectedClient.slug || selectedClient.name.toLowerCase().replace(/\s+/g, "-")) + "-full-audit-" + new Date().toISOString().split("T")[0] + ".txt"; a.click(); URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (selectedClient.slug || selectedClient.name.toLowerCase().replace(/\s+/g, "-")) + "-full-audit-" + new Date().toISOString().split("T")[0] + ".txt";
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const dateRangeLabel = dateRangeFilter === "7d" ? "Last 7 days" : dateRangeFilter === "30d" ? "Last 30 days" : dateRangeFilter === "90d" ? "Last 90 days" : "All Time";
@@ -315,7 +408,7 @@ export default function ClientDashboard() {
         </div>
         <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">General</div>
-          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "insights", label: "Insights", icon: Lightbulb }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Sparkles }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Wand2 }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
+          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "insights", label: "Insights", icon: Lightbulb }, { id: "intelligence", label: "Intelligence", icon: Target }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Sparkles }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Wand2 }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
@@ -383,6 +476,13 @@ export default function ClientDashboard() {
           {activeTab === "sources" && SourcesTab()}
           {activeTab === "content" && ContentTab()}
           {activeTab === "insights" && InsightsTab()}
+          {activeTab === "intelligence" && selectedClient && (
+            <CitationIntelligence
+              clientId={selectedClient.id}
+              brandName={selectedClient.brand_name}
+              competitors={selectedClient.competitors}
+            />
+          )}
         </div>
       </main>
       {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{ImportDialog()}{RunCampaignDialog()}
