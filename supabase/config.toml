@@ -1,0 +1,18 @@
+# Supabase Functions Configuration
+# This file configures Edge Function settings
+
+[functions.geo-audit]
+# Allow unauthenticated access (using anon key is still recommended)
+verify_jwt = false
+
+[functions.tavily-search]
+verify_jwt = false
+
+[functions.scheduler]
+verify_jwt = false
+
+[functions.signal-scorer]
+verify_jwt = false
+
+[functions.rss-ingestor]
+verify_jwt = false
