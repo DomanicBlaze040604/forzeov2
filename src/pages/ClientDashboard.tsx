@@ -302,7 +302,7 @@ export default function ClientDashboard() {
       txt += "Visit the Insights tab and click 'Generate AI Insights' to get recommendations.\n\n";
     }
 
-    txt += "-".repeat(40) + "\n TAVILY WEB ANALYSIS\n" + "-".repeat(40) + "\n\n";
+    txt += "-".repeat(40) + "\n FORZEO DISCOVERY ENGINE ANALYSIS\n" + "-".repeat(40) + "\n\n";
     if (tavilyInsights.length > 0 || tavilySrcs.length > 0) {
       if (tavilyInsights.length) {
         txt += "Web Insights:\n";
@@ -318,7 +318,7 @@ export default function ClientDashboard() {
         txt += "\n";
       }
     } else {
-      txt += "No Tavily data available. Enable Tavily toggle and run audits.\n\n";
+      txt += "No Discovery Engine data available. Enable Discovery toggle and run audits.\n\n";
     }
 
     txt += "-".repeat(40) + "\n MODEL PERFORMANCE\n" + "-".repeat(40) + "\n\n";
@@ -445,7 +445,7 @@ export default function ClientDashboard() {
               </div>
               {activeTab === "prompts" && <Button onClick={() => setBulkPromptsOpen(true)} variant="outline" size="sm"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>}
               <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
-              <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-purple-50 border-purple-200 text-purple-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Tavily AI Source Analysis"><Sparkles className="h-3.5 w-3.5" />{includeTavily ? "Tavily On" : "Tavily Off"}</button>
+              <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-purple-50 border-purple-200 text-purple-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Forzeo Discovery Engine"><Sparkles className="h-3.5 w-3.5" />{includeTavily ? "Discovery On" : "Discovery Off"}</button>
               <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>
             </div>
           </div>
@@ -1631,7 +1631,7 @@ export default function ClientDashboard() {
       }
     });
     if (tavilyInsights.length > 0) {
-      aggregatedRecommendations.push(`Web analysis insight: ${tavilyInsights[0]}`);
+      aggregatedRecommendations.push(`Discovery Engine insight: ${tavilyInsights[0]}`);
     }
 
     // High-priority prompts need attention
@@ -1924,7 +1924,7 @@ export default function ClientDashboard() {
                 <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
                   <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
                   <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Citations ({uniqueCitations.length})</button>
-                  <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Sparkles className="h-3.5 w-3.5" />Tavily</button>
+                  <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Sparkles className="h-3.5 w-3.5" />Discovery Engine</button>
                   <button onClick={() => { if (recommendations) setDetailTab("insights"); else handleGenerateRecommendations(); }} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "insights" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>
                     {generatingRecommendations ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
                     Insights
@@ -2192,8 +2192,8 @@ export default function ClientDashboard() {
                   ) : (
                     <div className="text-center py-12 bg-gray-50 rounded-xl border border-gray-200">
                       <Sparkles className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                      <p className="text-gray-600 font-medium mb-2">No Tavily data available</p>
-                      <p className="text-sm text-gray-500 mb-4">Enable "Tavily On" and re-run this prompt to see AI source analysis.</p>
+                      <p className="text-gray-600 font-medium mb-2">No Discovery Engine data available</p>
+                      <p className="text-sm text-gray-500 mb-4">Enable "Discovery On" and re-run this prompt to see AI source analysis.</p>
                     </div>
                   )}
                 </div>
@@ -2259,7 +2259,7 @@ export default function ClientDashboard() {
                         <Wand2 className="h-10 w-10 text-purple-500" />
                       </div>
                       <p className="text-gray-800 font-semibold text-lg mb-2">Generate AI-Optimized Content</p>
-                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Create humanized, E-E-A-T optimized content based on your audit results, Tavily source analysis, and competitor insights.</p>
+                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Create humanized, E-E-A-T optimized content based on your audit results, Discovery Engine source analysis, and competitor insights.</p>
                       <Button onClick={handleGenerateVisibilityContent} disabled={generatingVisibilityContent} size="lg" className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-lg shadow-purple-200 transition-all">
                         {generatingVisibilityContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating humanized content...</> : <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>}
                       </Button>

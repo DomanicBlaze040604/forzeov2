@@ -1045,6 +1045,35 @@ export function useClientDashboard() {
           newResults.push(result);
           // Update local state incremental
           setAuditResults([...newResults]);
+
+          // Run Tavily search if enabled
+          if (includeTavily) {
+            try {
+              console.log("[Tavily] Running source analysis for campaign prompt:", prompt.prompt_text.substring(0, 50));
+              const { data: tavilyData, error: tavilyError } = await supabase.functions.invoke("tavily-search", {
+                body: {
+                  client_id: selectedClient.id,
+                  prompt_id: prompt.id,
+                  prompt_text: prompt.prompt_text,
+                  brand_name: selectedClient.brand_name,
+                  competitors: selectedClient.competitors,
+                  search_depth: "advanced",
+                  max_results: 20,
+                  include_answer: true,
+                  save_to_db: true,
+                },
+              });
+
+              if (!tavilyError && tavilyData?.success) {
+                console.log("[Tavily] Got", tavilyData.sources?.length || 0, "sources");
+                setTavilyResults(prev => ({ ...prev, [prompt.id]: tavilyData }));
+              } else {
+                console.warn("[Tavily] Search failed:", tavilyError || tavilyData?.error);
+              }
+            } catch (tavilyErr) {
+              console.error("[Tavily] Exception:", tavilyErr);
+            }
+          }
         } else {
           console.error("Campaign prompt failed:", fnError || data?.error);
         }

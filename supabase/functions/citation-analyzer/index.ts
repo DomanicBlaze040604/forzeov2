@@ -34,37 +34,14 @@ const corsHeaders = {
 // ============================================
 
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") || "";
+const TAVILY_API_KEY = Deno.env.get("TAVILY_API_KEY") || "";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "llama-3.1-8b-instant";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-// ============================================
-// DOMAIN CLASSIFICATION PATTERNS
-// ============================================
-
-const UGC_DOMAINS = [
-    'reddit.com', 'quora.com', 'x.com', 'twitter.com',
-    'facebook.com', 'linkedin.com', 'medium.com',
-    'disqus.com', 'discord.com', 'stackoverflow.com',
-    'producthunt.com', 'ycombinator.com', 'news.ycombinator.com',
-    'trustpilot.com', 'g2.com', 'capterra.com'
-];
-
-const PRESS_DOMAINS = [
-    'forbes.com', 'techcrunch.com', 'wired.com', 'theverge.com',
-    'businessinsider.com', 'cnbc.com', 'reuters.com', 'bbc.com',
-    'nytimes.com', 'wsj.com', 'bloomberg.com', 'ft.com',
-    'mashable.com', 'venturebeat.com', 'cnet.com', 'zdnet.com',
-    'engadget.com', 'gizmodo.com', 'arstechnica.com',
-    'inc.com', 'entrepreneur.com', 'fastcompany.com'
-];
-
-const APP_STORE_PATTERNS = [
-    'play.google.com', 'apps.apple.com', 'appstore.com',
-    'microsoft.com/store', 'amazon.com/app'
-];
+// ... patterns ...
 
 // ============================================
 // TYPE DEFINITIONS
@@ -77,6 +54,7 @@ interface Citation {
     title?: string;
     model?: string;
     audit_result_id?: string;
+    created_at?: string;
 }
 
 interface AnalysisRequest {
@@ -84,9 +62,10 @@ interface AnalysisRequest {
     audit_result_id?: string;
     citations?: Citation[];
     brand_name: string;
-    brand_domain?: string;
     competitors?: string[];
     analyze_all?: boolean;
+    scope?: 'latest' | '24h' | '7d' | 'all';
+    use_tavily?: boolean;
 }
 
 interface CitationIntelligence {
@@ -246,11 +225,47 @@ Analysis Requirements:
 
 Never give vague advice like "engage authentically" - instead provide specific tactics like "respond within 24 hours addressing the specific pain point of [X] mentioned in the thread"`;
 
+async function extractContentWithTavily(url: string): Promise<string | null> {
+    if (!TAVILY_API_KEY) return null;
+    try {
+        console.log(`[Tavily] Extracting content for: ${url}`);
+        const response = await fetch("https://api.tavily.com/search", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                api_key: TAVILY_API_KEY,
+                query: url,
+                search_depth: "basic",
+                include_raw_content: true,
+                max_results: 1
+            })
+        });
+
+        if (!response.ok) {
+            console.error(`[Tavily] Error: ${response.status}`);
+            return null;
+        }
+
+        const data = await response.json();
+        if (data.results && data.results.length > 0) {
+            // Prefer raw content, fallback to snippets
+            return data.results[0].raw_content || data.results[0].content || null;
+        }
+        return null;
+    } catch (error) {
+        console.error(`[Tavily] Extraction error: ${error}`);
+        return null;
+    }
+}
+
 async function analyzeWithGroq(
     citation: Citation,
     category: string,
     brandName: string,
-    competitors: string[]
+    competitors: string[],
+    extractedContent: string | null = null
 ): Promise<{ analysis: object; recommendation: Recommendation | null }> {
     if (!GROQ_API_KEY) {
         console.log("[Groq] API key not configured");
@@ -265,6 +280,10 @@ DOMAIN: ${citation.domain}
 TITLE: ${citation.title || 'Unknown'}
 CATEGORY: ${category}
 COMPETITORS: ${competitors.join(', ') || 'Not specified'}
+
+${extractedContent ? `EXTRACTED PAGE CONTENT (Use this for specific context):
+${extractedContent.substring(0, 3000)}
+` : ''}
 
 Provide SPECIFIC, ACTIONABLE analysis. No generic advice.
 
@@ -738,14 +757,19 @@ serve(async (req: Request) => {
         });
     }
 
+    console.log("[Citation Analyzer] Request received, method:", req.method);
+
     try {
         const body = await req.json();
+        console.log("[Citation Analyzer] Body parsed successfully, action:", body.action);
         const action = body.action || 'analyze';
 
-        console.log(`[Citation Analyzer] Action: ${action}`);
+        console.log(`[Citation Analyzer] Action: ${action}, client_id: ${body.client_id}`);
 
         // Initialize Supabase client
+        console.log("[Citation Analyzer] Initializing Supabase client...");
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+        console.log("[Citation Analyzer] Supabase client created");
 
         // Handle different actions
         switch (action) {
@@ -761,15 +785,64 @@ serve(async (req: Request) => {
 
                 let citations: Citation[] = request.citations || [];
 
-                // If analyze_all, fetch citations from database
-                if (request.analyze_all && request.audit_result_id) {
-                    const { data: dbCitations } = await supabase
-                        .from('citations')
-                        .select('id, url, domain, title, model, audit_result_id')
-                        .eq('audit_result_id', request.audit_result_id);
+                // Determine citations to analyze
+                if (request.analyze_all) {
+                    console.log(`[Citation Analyzer] Fetching citations with scope: ${request.scope || 'latest'}`);
 
-                    if (dbCitations) {
+                    let query = supabase.from('citations').select('*');
+
+                    if (request.scope === '24h') {
+                        const date = new Date();
+                        date.setHours(date.getHours() - 24);
+                        query = query.gte('created_at', date.toISOString());
+                    } else if (request.scope === '7d') {
+                        const date = new Date();
+                        date.setDate(date.getDate() - 7);
+                        query = query.gte('created_at', date.toISOString());
+                    } else if (request.scope === 'all') {
+                        // Fetch all, no filter (limit to 1000 to prevent timeouts/OOM)
+                        query = query.limit(1000);
+                    } else {
+                        // Default: Latest audit only
+                        if (request.audit_result_id) {
+                            query = query.eq('audit_result_id', request.audit_result_id);
+                        } else {
+                            // If no audit_id provided but scope is latest, try to find latest for client
+                            const { data: latestAudit } = await supabase
+                                .from('audit_results')
+                                .select('id')
+                                .eq('client_id', request.client_id)
+                                .order('created_at', { ascending: false })
+                                .limit(1)
+                                .single();
+
+                            if (latestAudit) {
+                                query = query.eq('audit_result_id', latestAudit.id);
+                            }
+                        }
+                    }
+
+                    const { data: dbCitations, error: fetchError } = await query;
+
+                    if (fetchError) {
+                        console.error(`[Citation Analyzer] Fetch error: ${fetchError.message}`);
+                        return new Response(JSON.stringify({ error: `Failed to fetch citations: ${fetchError.message}` }), {
+                            status: 500,
+                            headers: { ...corsHeaders, "Content-Type": "application/json" },
+                        });
+                    }
+
+                    if (dbCitations && dbCitations.length > 0) {
                         citations = dbCitations;
+                        console.log(`[Citation Analyzer] Found ${citations.length} citations`);
+                    } else {
+                        return new Response(JSON.stringify({
+                            success: true,
+                            message: 'No citations found matching this scope.',
+                            summary: { total_analyzed: 0, hallucinated: 0, verified: 0 },
+                            results: [],
+                            recommendations: []
+                        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
                     }
                 }
 
@@ -798,6 +871,13 @@ serve(async (req: Request) => {
                         (verification.error === 'AbortError' ? 'unreachable' :
                             verification.status === 404 ? 'fake_domain' : 'unreachable') : null;
 
+                    // Deep Analysis with Tavily
+                    let extractedContent: string | null = null;
+                    if (request.use_tavily && !isHallucinated && TAVILY_API_KEY) {
+                        extractedContent = await extractContentWithTavily(citation.url);
+                        await sleep(500); // Additional rate limiting for Tavily
+                    }
+
                     // AI analysis with Groq
                     let aiAnalysis = {};
                     let recommendation: Recommendation | null = null;
@@ -807,7 +887,8 @@ serve(async (req: Request) => {
                             citation,
                             classification.category,
                             request.brand_name,
-                            request.competitors || []
+                            request.competitors || [],
+                            extractedContent
                         );
                         aiAnalysis = groqResult.analysis;
                         recommendation = groqResult.recommendation;
@@ -832,35 +913,75 @@ serve(async (req: Request) => {
 
                     results.push(intelligence);
 
-                    // Save to database
-                    const { data: savedIntelligence, error: saveError } = await supabase
-                        .from('citation_intelligence')
-                        .insert({
-                            citation_id: citation.id || null,
-                            audit_result_id: citation.audit_result_id || request.audit_result_id,
-                            client_id: request.client_id,
-                            url: intelligence.url,
-                            domain: intelligence.domain,
-                            title: citation.title,
-                            model: citation.model,
-                            is_reachable: intelligence.is_reachable,
-                            http_status: intelligence.http_status,
-                            last_verified_at: new Date().toISOString(),
-                            is_hallucinated: intelligence.is_hallucinated,
-                            hallucination_type: intelligence.hallucination_type,
-                            hallucination_reason: intelligence.hallucination_reason,
-                            citation_category: intelligence.citation_category,
-                            subcategory: intelligence.subcategory,
-                            opportunity_level: intelligence.opportunity_level,
-                            ai_analysis: intelligence.ai_analysis,
-                            analysis_status: 'completed',
-                            processed_at: new Date().toISOString()
-                        })
-                        .select()
-                        .single();
+                    // Prepare data object
+                    const intelligenceData = {
+                        citation_id: citation.id || null,
+                        audit_result_id: citation.audit_result_id || request.audit_result_id,
+                        client_id: request.client_id,
+                        url: intelligence.url,
+                        domain: intelligence.domain,
+                        title: citation.title,
+                        model: citation.model,
+                        is_reachable: intelligence.is_reachable,
+                        http_status: intelligence.http_status,
+                        last_verified_at: new Date().toISOString(),
+                        is_hallucinated: intelligence.is_hallucinated,
+                        hallucination_type: intelligence.hallucination_type,
+                        hallucination_reason: intelligence.hallucination_reason,
+                        citation_category: intelligence.citation_category,
+                        subcategory: intelligence.subcategory,
+                        opportunity_level: intelligence.opportunity_level,
+                        ai_analysis: intelligence.ai_analysis,
+                        analysis_status: 'completed',
+                        processed_at: new Date().toISOString()
+                    };
 
-                    if (saveError) {
-                        console.error(`[Citation Analyzer] Save error: ${saveError.message}`);
+                    // Check for existing record to Upsert
+                    // We match on audit_result_id AND url (or citation_id if available)
+                    let query = supabase.from('citation_intelligence')
+                        .select('id')
+                        .eq('audit_result_id', intelligenceData.audit_result_id)
+                        .eq('url', intelligence.url);
+
+                    if (intelligenceData.citation_id) {
+                        query = supabase.from('citation_intelligence')
+                            .select('id')
+                            .eq('citation_id', intelligenceData.citation_id);
+                    }
+
+                    const { data: existingRecord } = await query.maybeSingle();
+
+                    let savedIntelligence;
+
+                    if (existingRecord) {
+                        // Update existing
+                        console.log(`[Citation Analyzer] Updating existing record: ${existingRecord.id}`);
+                        const { data, error } = await supabase
+                            .from('citation_intelligence')
+                            .update(intelligenceData)
+                            .eq('id', existingRecord.id)
+                            .select()
+                            .single();
+
+                        if (error) console.error(`[Citation Analyzer] Update error: ${error.message}`);
+                        savedIntelligence = data;
+
+                        // Clear old recommendations for this record to avoid duplicates
+                        if (savedIntelligence) {
+                            await supabase.from('citation_recommendations')
+                                .delete()
+                                .eq('citation_intelligence_id', savedIntelligence.id);
+                        }
+                    } else {
+                        // Insert new
+                        const { data, error } = await supabase
+                            .from('citation_intelligence')
+                            .insert(intelligenceData)
+                            .select()
+                            .single();
+
+                        if (error) console.error(`[Citation Analyzer] Insert error: ${error.message}`);
+                        savedIntelligence = data;
                     }
 
                     // Save recommendation if generated

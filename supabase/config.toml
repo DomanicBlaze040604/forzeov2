@@ -16,3 +16,6 @@ verify_jwt = false
 
 [functions.rss-ingestor]
 verify_jwt = false
+
+[functions.citation-analyzer]
+verify_jwt = false

@@ -131,7 +131,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 // TABS COMPONENT (Custom implementation)
 // ============================================
 
-type TabId = "overview" | "ugc" | "competitor" | "press" | "recommendations";
+type TabId = "overview" | "ugc" | "competitor" | "press" | "recommendations" | "all";
 
 const TabButton = ({
     label,
@@ -179,7 +179,12 @@ export default function CitationIntelligence({
     const [intelligence, setIntelligence] = useState<CitationIntelligenceData[]>([]);
     const [recommendations, setRecommendations] = useState<CitationRecommendation[]>([]);
     const [selectedTab, setSelectedTab] = useState<TabId>("overview");
+    const [opportunityFilter, setOpportunityFilter] = useState<string | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+    // New Configuration State
+    const [analysisScope, setAnalysisScope] = useState<'latest' | '24h' | '7d' | 'all'>('latest');
+    const [useDeepAnalysis, setUseDeepAnalysis] = useState(false);
 
     // Content generation state
     const [generatingContent, setGeneratingContent] = useState<string | null>(null);
@@ -203,11 +208,14 @@ export default function CitationIntelligence({
         setLoading(true);
         try {
             // Fetch intelligence data
+            console.log("Fetching intelligence for client:", clientId);
             const { data: intelligenceData, error: intError } = await supabase
                 .from('citation_intelligence')
                 .select('*')
                 .eq('client_id', clientId)
                 .order('created_at', { ascending: false });
+
+            console.log("Fetched intelligence data:", intelligenceData?.length, "records", intError);
 
             if (intError) throw intError;
             setIntelligence(intelligenceData || []);
@@ -299,7 +307,9 @@ export default function CitationIntelligence({
                 body: {
                     action: 'analyze',
                     client_id: clientId,
-                    audit_result_id: auditResultId,
+                    audit_result_id: analysisScope === 'latest' ? auditResultId : undefined,
+                    scope: analysisScope, // Pass the selected scope
+                    use_tavily: useDeepAnalysis, // Pass the deep analysis flag
                     brand_name: brandName,
                     competitors: competitors,
                     analyze_all: true
@@ -398,96 +408,123 @@ export default function CitationIntelligence({
     // ============================================
 
     const renderCitationsTable = (category?: string) => {
-        const filtered = category
-            ? intelligence.filter(i => i.citation_category === category)
-            : intelligence;
+        let filtered = intelligence;
+
+        if (category && category !== 'all') {
+            filtered = filtered.filter(i => i.citation_category === category);
+        }
+
+        if (opportunityFilter) {
+            filtered = filtered.filter(i => i.opportunity_level === opportunityFilter);
+        }
 
         if (filtered.length === 0) {
             return (
                 <div className="text-center py-12 text-gray-500">
                     <Brain className="w-12 h-12 mx-auto mb-4 opacity-30" />
-                    <p>No citations in this category</p>
-                    <p className="text-sm">Analyze citations to populate this view</p>
+                    <p>No citations found matching the criteria</p>
+                    {opportunityFilter && (
+                        <Button variant="link" onClick={() => setOpportunityFilter(null)} className="mt-2 text-blue-600">
+                            Clear active filters
+                        </Button>
+                    )}
                 </div>
             );
         }
 
         return (
-            <div className="overflow-x-auto">
-                <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">URL</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Category</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Model</th>
-                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Opportunity</th>
-                            <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                        {filtered.map(item => (
-                            <tr key={item.id} className="hover:bg-gray-50">
-                                <td className="px-4 py-3">
-                                    {item.is_hallucinated ? (
-                                        <div className="flex items-center gap-1">
-                                            <XCircle className="w-4 h-4 text-red-500" />
-                                            <span className="text-xs text-red-600">Hallucinated</span>
-                                        </div>
-                                    ) : item.is_reachable ? (
-                                        <div className="flex items-center gap-1">
-                                            <CheckCircle className="w-4 h-4 text-green-500" />
-                                            <span className="text-xs text-green-600">Verified</span>
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center gap-1">
-                                            <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                                            <span className="text-xs text-yellow-600">Unknown</span>
-                                        </div>
-                                    )}
-                                </td>
-                                <td className="px-4 py-3 max-w-xs">
-                                    <a
-                                        href={item.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-                                    >
-                                        {item.domain}
-                                        <ExternalLink className="w-3 h-3" />
-                                    </a>
-                                    {item.title && (
-                                        <p className="text-xs text-gray-500 truncate">{item.title}</p>
-                                    )}
-                                </td>
-                                <td className="px-4 py-3">
-                                    <span className={cn("text-sm", CATEGORY_CONFIG[item.citation_category]?.color)}>
-                                        {CATEGORY_CONFIG[item.citation_category]?.label || item.citation_category}
-                                    </span>
-                                </td>
-                                <td className="px-4 py-3">
-                                    <Badge variant="outline" className="text-xs">{item.model || "Unknown"}</Badge>
-                                </td>
-                                <td className="px-4 py-3">
-                                    <span className={cn(
-                                        "px-2 py-1 text-xs rounded-full",
-                                        item.opportunity_level === 'easy' ? 'bg-green-100 text-green-700' :
-                                            item.opportunity_level === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                                                'bg-red-100 text-red-700'
-                                    )}>
-                                        {item.opportunity_level === 'easy' ? 'Easy Win' :
-                                            item.opportunity_level === 'medium' ? 'Medium' : 'Difficult'}
-                                    </span>
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                    <Button size="sm" variant="ghost" onClick={() => window.open(item.url, '_blank')}>
-                                        <ExternalLink className="w-4 h-4" />
-                                    </Button>
-                                </td>
+            <div className="space-y-4">
+                {opportunityFilter && (
+                    <div className="bg-blue-50 border border-blue-100 px-4 py-2 rounded-lg flex items-center justify-between">
+                        <span className="text-sm text-blue-800 font-medium">
+                            Filtering by: <span className="capitalize">{opportunityFilter.replace('_', ' ')} Effort</span>
+                        </span>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setOpportunityFilter(null)}
+                            className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-100"
+                        >
+                            Clear Filter
+                        </Button>
+                    </div>
+                )}
+                <div className="overflow-x-auto">
+                    <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">URL</th>
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Category</th>
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Model</th>
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Opportunity</th>
+                                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {filtered.map(item => (
+                                <tr key={item.id} className="hover:bg-gray-50">
+                                    <td className="px-4 py-3">
+                                        {item.is_hallucinated ? (
+                                            <div className="flex items-center gap-1">
+                                                <XCircle className="w-4 h-4 text-red-500" />
+                                                <span className="text-xs text-red-600">Hallucinated</span>
+                                            </div>
+                                        ) : item.is_reachable ? (
+                                            <div className="flex items-center gap-1">
+                                                <CheckCircle className="w-4 h-4 text-green-500" />
+                                                <span className="text-xs text-green-600">Verified</span>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-1">
+                                                <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                                                <span className="text-xs text-yellow-600">Unknown</span>
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3 max-w-xs">
+                                        <a
+                                            href={item.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                                        >
+                                            {item.domain}
+                                            <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                        {item.title && (
+                                            <p className="text-xs text-gray-500 truncate">{item.title}</p>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <span className={cn("text-sm", CATEGORY_CONFIG[item.citation_category]?.color)}>
+                                            {CATEGORY_CONFIG[item.citation_category]?.label || item.citation_category}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <Badge variant="outline" className="text-xs">{item.model || "Unknown"}</Badge>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <span className={cn(
+                                            "px-2 py-1 text-xs rounded-full",
+                                            item.opportunity_level === 'easy' ? 'bg-green-100 text-green-700' :
+                                                item.opportunity_level === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                                    'bg-red-100 text-red-700'
+                                        )}>
+                                            {item.opportunity_level === 'easy' ? 'Easy Win' :
+                                                item.opportunity_level === 'medium' ? 'Medium' : 'Difficult'}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-right">
+                                        <Button size="sm" variant="ghost" onClick={() => window.open(item.url, '_blank')}>
+                                            <ExternalLink className="w-4 h-4" />
+                                        </Button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         );
     };
@@ -518,16 +555,57 @@ export default function CitationIntelligence({
                     </h2>
                     <p className="text-gray-500">AI-powered analysis of citation sources with actionable recommendations</p>
                 </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={fetchData} disabled={loading}>
-                        <RefreshCw className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
+                <div className="flex items-center gap-4">
+                    {/* Analysis Controls */}
+                    <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-gray-100 shadow-sm mr-2">
+                        <select
+                            value={analysisScope}
+                            onChange={(e) => setAnalysisScope(e.target.value as any)}
+                            className="bg-transparent text-sm font-medium text-gray-600 border-none outline-none cursor-pointer hover:text-gray-900"
+                        >
+                            <option value="latest">Latest Run Only</option>
+                            <option value="24h">Last 24 Hours</option>
+                            <option value="7d">Last 7 Days</option>
+                            <option value="all">All Time (Slow)</option>
+                        </select>
+                        <div className="h-4 w-px bg-gray-200" />
+                        <button
+                            onClick={() => setUseDeepAnalysis(!useDeepAnalysis)}
+                            className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors",
+                                useDeepAnalysis ? "bg-purple-100 text-purple-700" : "text-gray-500 hover:bg-gray-50"
+                            )}
+                            title="Uses 1 Discovery credit per citation for deep content analysis"
+                        >
+                            <span className={cn("w-2 h-2 rounded-full", useDeepAnalysis ? "bg-purple-500" : "bg-gray-300")} />
+                            Deep Analysis
+                        </button>
+                    </div>
+
+                    <Button
+                        onClick={() => fetchData()}
+                        variant="outline"
+                        className="bg-white"
+                        disabled={loading}
+                    >
+                        <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
                         Refresh
                     </Button>
-                    <Button onClick={analyzeAllCitations} disabled={analyzing}>
+                    <Button
+                        onClick={analyzeAllCitations}
+                        disabled={analyzing}
+                        className={cn("text-white shadow-lg shadow-blue-500/20", analyzing ? "bg-gray-700" : "bg-blue-600 hover:bg-blue-700")}
+                    >
                         {analyzing ? (
-                            <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Analyzing...</>
+                            <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                {useDeepAnalysis ? "Deep Analyzing..." : "Analyzing..."}
+                            </>
                         ) : (
-                            <><Brain className="w-4 h-4 mr-2" />Analyze Citations</>
+                            <>
+                                <Sparkles className="h-4 w-4 mr-2" />
+                                {useDeepAnalysis ? "Run Deep Analysis" : "Analyze Citations"}
+                            </>
                         )}
                     </Button>
                 </div>
@@ -598,6 +676,7 @@ export default function CitationIntelligence({
             {/* Tabs */}
             <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-lg w-fit">
                 <TabButton label="Overview" active={selectedTab === "overview"} onClick={() => setSelectedTab("overview")} />
+                <TabButton label="All Sources" active={selectedTab === "all"} onClick={() => setSelectedTab("all")} />
                 <TabButton label={`UGC (${summary?.categories.ugc || 0})`} active={selectedTab === "ugc"} onClick={() => setSelectedTab("ugc")} />
                 <TabButton label={`Competitor (${summary?.categories.competitor_blog || 0})`} active={selectedTab === "competitor"} onClick={() => setSelectedTab("competitor")} />
                 <TabButton label={`Press (${summary?.categories.press_media || 0})`} active={selectedTab === "press"} onClick={() => setSelectedTab("press")} />
@@ -642,25 +721,34 @@ export default function CitationIntelligence({
                         </CardHeader>
                         <CardContent>
                             <div className="grid grid-cols-3 gap-4">
-                                <div className="p-4 rounded-lg border bg-green-50 border-green-200">
+                                <div
+                                    onClick={() => { setSelectedTab('all'); setOpportunityFilter('easy'); }}
+                                    className="p-4 rounded-lg border bg-green-50 border-green-200 cursor-pointer hover:bg-green-100 transition-colors group"
+                                >
                                     <div className="flex items-center gap-2 mb-2">
-                                        <CheckCircle className="w-5 h-5 text-green-600" />
+                                        <CheckCircle className="w-5 h-5 text-green-600 group-hover:scale-110 transition-transform" />
                                         <p className="font-semibold text-green-700">Easy Wins</p>
                                     </div>
                                     <p className="text-3xl font-bold text-green-600">{summary?.opportunities.easy || 0}</p>
                                     <p className="text-xs text-green-600 mt-1">UGC, Forums, Competitor blogs</p>
                                 </div>
-                                <div className="p-4 rounded-lg border bg-yellow-50 border-yellow-200">
+                                <div
+                                    onClick={() => { setSelectedTab('all'); setOpportunityFilter('medium'); }}
+                                    className="p-4 rounded-lg border bg-yellow-50 border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors group"
+                                >
                                     <div className="flex items-center gap-2 mb-2">
-                                        <AlertTriangle className="w-5 h-5 text-yellow-600" />
+                                        <AlertTriangle className="w-5 h-5 text-yellow-600 group-hover:scale-110 transition-transform" />
                                         <p className="font-semibold text-yellow-700">Medium Effort</p>
                                     </div>
                                     <p className="text-3xl font-bold text-yellow-600">{summary?.opportunities.medium || 0}</p>
                                     <p className="text-xs text-yellow-600 mt-1">Press, App stores</p>
                                 </div>
-                                <div className="p-4 rounded-lg border bg-red-50 border-red-200">
+                                <div
+                                    onClick={() => { setSelectedTab('all'); setOpportunityFilter('difficult'); }}
+                                    className="p-4 rounded-lg border bg-red-50 border-red-200 cursor-pointer hover:bg-red-100 transition-colors group"
+                                >
                                     <div className="flex items-center gap-2 mb-2">
-                                        <XCircle className="w-5 h-5 text-red-600" />
+                                        <XCircle className="w-5 h-5 text-red-600 group-hover:scale-110 transition-transform" />
                                         <p className="font-semibold text-red-700">Difficult</p>
                                     </div>
                                     <p className="text-3xl font-bold text-red-600">{summary?.opportunities.difficult || 0}</p>
@@ -710,6 +798,19 @@ export default function CitationIntelligence({
                         </CardContent>
                     </Card>
                 </div>
+            )}
+
+            {selectedTab === "all" && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Brain className="w-5 h-5 text-gray-600" />
+                            All Citations
+                        </CardTitle>
+                        <CardDescription>Comprehensive list of all analyzed sources</CardDescription>
+                    </CardHeader>
+                    <CardContent>{renderCitationsTable('all')}</CardContent>
+                </Card>
             )}
 
             {selectedTab === "ugc" && (

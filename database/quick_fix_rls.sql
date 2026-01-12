@@ -1,0 +1,2 @@
+ALTER TABLE citation_intelligence DISABLE ROW LEVEL SECURITY;
+ALTER TABLE citation_recommendations DISABLE ROW LEVEL SECURITY;

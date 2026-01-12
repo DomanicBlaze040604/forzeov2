@@ -75,21 +75,22 @@ Each AI model is queried via its dedicated LIVE endpoint for real-time responses
 - **SERP**: Traditional organic search results
 - Cost: ~$0.002-0.003/query
 
-### Tavily AI (Web Source Analysis)
-Tavily provides real-time web search to analyze where your brand appears in editorial content:
+### Forzeo Discovery Engine (Web Source Analysis)
+Formerly known as the Tavily integration, this deep analysis engine provides real-time web search to analyze where your brand appears in editorial content:
 
 | Feature | Description |
 |---------|-------------|
-| **Search** | Advanced web search for brand/competitor mentions |
-| **Sources** | Returns URLs, titles, content, relevance scores |
-| **Answer** | AI-generated answer from search results |
-| **Analysis** | Brand mentions, competitor counts, top domains |
+| **Deep Search** | Advanced web search for brand/competitor mentions |
+| **Content Extraction** | Extracts full raw page content for AI analysis |
+| **Opportunity Logic** | Auto-classifies sources as Easy/Medium/Difficult for outreach |
+| **Analysis** | Correlates web presence with AI visibility |
 
 **Use cases:**
 - Find editorial sources mentioning your brand
 - Discover competitor coverage patterns
 - Identify high-authority sources for outreach
-- Correlate web presence with AI visibility
+
+📘 **[Read the Full Feature Architecture Guide](./FEATURE_GUIDE.md)** for detailed logic explanations.
 
 ### Groq AI (Content Generation)
 Groq's Llama 3.1 model powers intelligent content features:
