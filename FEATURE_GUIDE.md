@@ -79,7 +79,97 @@ Campaigns allow users to batch process hundreds of prompts to get an aggregate v
 
 ---
 
-## 4. Signal Detection (Fresh Web Influence)
+## 4. Citation Intelligence - Advanced UI/UX Features
+
+The Citation Intelligence dashboard offers a comprehensive suite of personalization and data management tools.
+
+### A. Delete Functionality
+**Individual Delete:**
+- Red trash icon on each table row
+- Confirmation dialog prevents accidental deletions
+- Real-time UI updates after deletion
+
+**Bulk Delete:**
+- Multi-select via checkboxes on each row
+- "Select All" checkbox in table header
+- Bulk action bar displays selected count
+- One-click "Delete Selected" button
+
+### B. Advanced Filtering System
+**Four-Tier Filtering:**
+1. **Category Filter**: UGC, Competitor, Press, App Stores, Wikipedia, Brand Owned, Other
+2. **Status Filter**: Verified, Hallucinated, Unknown
+3. **Model Filter**: Dynamic list based on available models (ChatGPT, Gemini, Claude, Perplexity)
+4. **Search Filter**: Live search across URL, domain, and title fields
+
+**Features:**
+- Filters apply cumulatively for precise data narrowing
+- "Clear All" button for instant reset
+- Visual indicators for active filters
+- Integrates with opportunity level filtering from overview cards
+
+### C. Sortable Columns
+**Click-to-Sort Headers:**
+- All columns support ascending/descending sort
+- Visual indicators: `↕` (unsorted), `⌃` (asc), `⌄` (desc)
+- Hover effects for discoverability
+- Auto-resets pagination to page 1 on sort
+
+**Sortable Fields:**
+- Status, URL/Domain, Category, Model, Opportunity Level
+
+### D. Pagination Controls
+**Smart Pagination:**
+- Page number buttons with intelligent truncation (shows 5 pages max)
+- Previous/Next navigation with disabled states
+- Result counter: "Showing X to Y of Z results"
+
+**Items Per Page Selector:**
+- Options: 10, 25, 50, 100 items per page
+- Default: 25 items
+- Auto-resets to page 1 on change
+
+### E. Column Visibility Toggles
+**Customizable Table View:**
+- "Columns" button in toolbar opens settings dropdown
+- Checkbox list for each column (Status, URL, Category, Model, Opportunity)
+- Hide/show columns dynamically
+- Headers and cells both respect visibility settings
+
+### F. Saved Filter Presets
+**Save Current State:**
+- "Save Preset" button appears when filters are active
+- User-defined preset names for easy identification
+- Stores complete filter configuration
+
+**Load Presets:**
+- "Load Preset..." dropdown in toolbar
+- One-click restoration of saved filter combinations
+- Success notifications on load
+
+### G. Export Functionality
+**Comprehensive TXT Reports:**
+- "Export Report" button in header (next to "Analyze Citations")
+- Respects current active filters
+- Auto-generates filename: `citation-intelligence-{clientId}-{date}.txt`
+
+**Report Contents:**
+- Summary statistics (verified/hallucinated breakdown with percentages)
+- Category distribution with citation counts
+- Opportunity level analysis (Easy/Medium/Difficult breakdown)
+- Top 10 recommendations with priority levels
+- Detailed citation list with full metadata
+
+### H. Discovery Toggle Redesign
+**Visual Update:**
+- Changed from purple/star icon to amber/yellow with dot indicator
+- Active state: Amber background, amber border, amber dot
+- Inactive state: White background, gray border, gray dot
+- More professional and visually consistent
+
+---
+
+## 5. Signal Detection (Fresh Web Influence)
 
 *   **Purpose**: Identify *new* content on the web that hasn't yet been indexed by AI but likely will be.
 *   **Mechanism**: Periodically scans high-authority domains and industry-specific feeds.

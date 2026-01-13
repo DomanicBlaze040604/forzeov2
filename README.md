@@ -90,6 +90,32 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 - Discover competitor coverage patterns
 - Identify high-authority sources for outreach
 
+---
+
+## ✨ Recent Updates (January 2026)
+
+### Citation Intelligence - Major UI/UX Overhaul
+The Citation Intelligence dashboard now includes comprehensive personalization and data management features:
+
+**New Features:**
+- ✅ **Delete Functionality**: Individual and bulk delete with confirmation dialogs
+- ✅ **Advanced Filtering**: 4-tier filtering (Category, Status, Model, Search) with cumulative logic
+- ✅ **Sortable Columns**: Click any header to sort ascending/descending
+- ✅ **Pagination**: Smart page controls with customizable items-per-page (10/25/50/100)
+- ✅ **Column Toggles**: Show/hide columns dynamically via settings dropdown
+- ✅ **Saved Filter Presets**: Save and load favorite filter combinations
+- ✅ **Export Reports**: Generate comprehensive TXT reports with all intelligence data
+- ✅ **Discovery Toggle Redesign**: Professional amber/yellow color scheme with dot indicator
+
+**Benefits:**
+- Faster data navigation with pagination and sorting  
+- Personalized views with column visibility controls
+- Efficient bulk operations for data cleanup
+- Exportable reports for external analysis
+- Professional, modern UI throughout
+
+---
+
 📘 **[Read the Full Feature Architecture Guide](./FEATURE_GUIDE.md)** for detailed logic explanations.
 
 ### Groq AI (Content Generation)

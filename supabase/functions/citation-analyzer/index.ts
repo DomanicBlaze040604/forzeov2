@@ -41,7 +41,30 @@ const GROQ_MODEL = "llama-3.1-8b-instant";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-// ... patterns ...
+
+// Pattern matching for citation classification
+const APP_STORE_PATTERNS = [
+    'play.google.com',
+    'apps.apple.com',
+    'itunes.apple.com',
+    'app.aptoide.com',
+    'www.amazon.com/gp/product'
+];
+
+const PRESS_DOMAINS = [
+    'techcrunch.com', 'forbes.com', 'businessinsider.com', 'theverge.com',
+    'wired.com', 'cnet.com', 'engadget.com', 'mashable.com', 'venturebeat.com',
+    'reuters.com', 'bloomberg.com', 'wsj.com', 'nytimes.com', 'theguardian.com',
+    'bbc.com', 'cnn.com', 'time.com', 'ft.com', 'axios.com', 'theinformation.com'
+];
+
+const UGC_DOMAINS = [
+    'reddit.com', 'quora.com', 'twitter.com', 'x.com', 'linkedin.com',
+    'stackoverflow.com', 'stackexchange.com', 'medium.com', 'dev.to',
+    'facebook.com', 'instagram.com', 'youtube.com', 'producthunt.com',
+    'hackernews.com', 'news.ycombinator.com'
+];
+
 
 // ============================================
 // TYPE DEFINITIONS
@@ -787,9 +810,40 @@ serve(async (req: Request) => {
 
                 // Determine citations to analyze
                 if (request.analyze_all) {
-                    console.log(`[Citation Analyzer] Fetching citations with scope: ${request.scope || 'latest'}`);
+                    console.log(`[Citation Analyzer] Fetching citations with scope: ${request.scope || 'latest'} for client: ${request.client_id}`);
 
-                    let query = supabase.from('citations').select('*');
+                    // Two-step approach: First get all audit IDs for this client, then query citations
+                    // This avoids dependency on Supabase relationship detection
+                    const { data: clientAudits, error: auditError } = await supabase
+                        .from('audit_results')
+                        .select('id')
+                        .eq('client_id', request.client_id);
+
+                    if (auditError) {
+                        console.error(`[Citation Analyzer] Error fetching audits: ${auditError.message}`);
+                        return new Response(JSON.stringify({ error: `Failed to fetch audits: ${auditError.message}` }), {
+                            status: 500,
+                            headers: { ...corsHeaders, "Content-Type": "application/json" },
+                        });
+                    }
+
+                    const auditIds = clientAudits?.map(a => a.id) || [];
+                    console.log(`[Citation Analyzer] Found ${auditIds.length} audits for client ${request.client_id}`);
+
+                    if (auditIds.length === 0) {
+                        return new Response(JSON.stringify({
+                            success: true,
+                            message: 'No audits found for this client.',
+                            summary: { total_analyzed: 0, hallucinated: 0, verified: 0 },
+                            results: [],
+                            recommendations: []
+                        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+                    }
+
+                    // Now query citations for these audits
+                    let query = supabase.from('citations')
+                        .select('*')
+                        .in('audit_result_id', auditIds);
 
                     if (request.scope === '24h') {
                         const date = new Date();
@@ -800,8 +854,9 @@ serve(async (req: Request) => {
                         date.setDate(date.getDate() - 7);
                         query = query.gte('created_at', date.toISOString());
                     } else if (request.scope === 'all') {
-                        // Fetch all, no filter (limit to 1000 to prevent timeouts/OOM)
-                        query = query.limit(1000);
+                        // Fetch all for this client, limit to avoid timeout (Edge Functions have 60s limit)
+                        // Processing 50 citations with verification + AI takes ~40-50 seconds
+                        query = query.limit(50);
                     } else {
                         // Default: Latest audit only
                         if (request.audit_result_id) {
@@ -892,7 +947,7 @@ serve(async (req: Request) => {
                         );
                         aiAnalysis = groqResult.analysis;
                         recommendation = groqResult.recommendation;
-                        await sleep(200); // Rate limiting for Groq
+                        await sleep(2000); // Rate limiting for Groq (30 req/min = 2s per request)
                     }
 
                     const intelligence: CitationIntelligence = {

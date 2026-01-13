@@ -31,7 +31,16 @@ import {
     Sparkles,
     TrendingUp,
     Target,
-    Zap
+    Zap,
+    Trash2,
+    Download,
+    ChevronUp,
+    ChevronDown,
+    Settings,
+    Save,
+    Grid,
+    List,
+    ArrowUpDown
 } from "lucide-react";
 
 // ============================================
@@ -185,6 +194,33 @@ export default function CitationIntelligence({
     // New Configuration State
     const [analysisScope, setAnalysisScope] = useState<'latest' | '24h' | '7d' | 'all'>('latest');
     const [useDeepAnalysis, setUseDeepAnalysis] = useState(false);
+
+    // Delete functionality state
+    const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+    const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; ids: string[] }>({ open: false, ids: [] });
+    const [deleting, setDeleting] = useState(false);
+
+    // Advanced filtering state
+    const [filters, setFilters] = useState({
+        category: 'all' as string,
+        status: 'all' as 'all' | 'verified' | 'hallucinated' | 'unknown',
+        model: 'all' as string,
+        search: ''
+    });
+
+    // Personalization state
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+    const [itemsPerPage, setItemsPerPage] = useState(25);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [visibleColumns, setVisibleColumns] = useState({
+        status: true,
+        url: true,
+        category: true,
+        model: true,
+        opportunity: true
+    });
+    const [savedPresets, setSavedPresets] = useState<Array<{ id: string; name: string; filters: typeof filters }>>([]);
+    const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
 
     // Content generation state
     const [generatingContent, setGeneratingContent] = useState<string | null>(null);
@@ -404,40 +440,492 @@ export default function CitationIntelligence({
     };
 
     // ============================================
+    // DELETE HANDLERS
+    // ============================================
+
+    const handleDeleteSelected = () => {
+        const ids = Array.from(selectedRows);
+        if (ids.length === 0) {
+            showMessage('error', 'No items selected');
+            return;
+        }
+        setDeleteDialog({ open: true, ids });
+    };
+
+    const handleDeleteSingle = (id: string) => {
+        setDeleteDialog({ open: true, ids: [id] });
+    };
+
+    const confirmDelete = async () => {
+        setDeleting(true);
+        try {
+            const { error } = await supabase
+                .from('citation_intelligence')
+                .delete()
+                .in('id', deleteDialog.ids);
+
+            if (error) throw error;
+
+            // Update local state
+            setIntelligence(prev => prev.filter(i => !deleteDialog.ids.includes(i.id)));
+            setSelectedRows(new Set());
+            setDeleteDialog({ open: false, ids: [] });
+            showMessage('success', `Deleted ${deleteDialog.ids.length} record(s)`);
+
+            // Refresh data
+            fetchData();
+        } catch (error) {
+            console.error("Delete error:", error);
+            showMessage('error', 'Failed to delete records');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const toggleRowSelection = (id: string) => {
+        const newSet = new Set(selectedRows);
+        if (newSet.has(id)) {
+            newSet.delete(id);
+        } else {
+            newSet.add(id);
+        }
+        setSelectedRows(newSet);
+    };
+
+    const toggleSelectAll = (filtered: CitationIntelligenceData[]) => {
+        if (selectedRows.size === filtered.length) {
+            setSelectedRows(new Set());
+        } else {
+            setSelectedRows(new Set(filtered.map(i => i.id)));
+        }
+    };
+
+    // ============================================
+    // FILTER HELPERS
+    // ============================================
+
+    const applyFilters = (data: CitationIntelligenceData[]) => {
+        let result = data;
+
+        // Category filter
+        if (filters.category !== 'all') {
+            result = result.filter(i => i.citation_category === filters.category);
+        }
+
+        // Status filter
+        if (filters.status !== 'all') {
+            if (filters.status === 'verified') {
+                result = result.filter(i => i.is_reachable);
+            } else if (filters.status === 'hallucinated') {
+                result = result.filter(i => i.is_hallucinated);
+            } else if (filters.status === 'unknown') {
+                result = result.filter(i => !i.is_reachable && !i.is_hallucinated);
+            }
+        }
+
+        // Model filter
+        if (filters.model !== 'all') {
+            result = result.filter(i => i.model === filters.model);
+        }
+
+        // Search filter
+        if (filters.search.trim()) {
+            const search = filters.search.toLowerCase();
+            result = result.filter(i =>
+                i.url.toLowerCase().includes(search) ||
+                i.domain.toLowerCase().includes(search) ||
+                (i.title && i.title.toLowerCase().includes(search))
+            );
+        }
+
+        return result;
+    };
+
+    const clearFilters = () => {
+        setFilters({
+            category: 'all',
+            status: 'all',
+            model: 'all',
+            search: ''
+        });
+        setOpportunityFilter(null);
+    };
+
+    // ============================================
+    // PERSONALIZATION HELPERS
+    // ============================================
+
+    const handleSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+        setCurrentPage(1); // Reset to first page on sort
+    };
+
+    const applySorting = (data: CitationIntelligenceData[]) => {
+        if (!sortConfig) return data;
+
+        return [...data].sort((a, b) => {
+            let aValue: any = a[sortConfig.key as keyof CitationIntelligenceData];
+            let bValue: any = b[sortConfig.key as keyof CitationIntelligenceData];
+
+            // Handle null/undefined
+            if (aValue === null || aValue === undefined) return 1;
+            if (bValue === null || bValue === undefined) return -1;
+
+            // String comparison
+            if (typeof aValue === 'string') {
+                aValue = aValue.toLowerCase();
+                bValue = (bValue as string).toLowerCase();
+            }
+
+            if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+    };
+
+    const applyPagination = (data: CitationIntelligenceData[]) => {
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        return data.slice(startIndex, endIndex);
+    };
+
+    const totalPages = (dataLength: number) => Math.ceil(dataLength / itemsPerPage);
+
+    const saveFilterPreset = () => {
+        const name = prompt('Enter a name for this filter preset:');
+        if (!name) return;
+
+        const newPreset = {
+            id: Date.now().toString(),
+            name,
+            filters: { ...filters }
+        };
+
+        setSavedPresets(prev => [...prev, newPreset]);
+        showMessage('success', `Preset "${name}" saved`);
+    };
+
+    const loadFilterPreset = (presetId: string) => {
+        const preset = savedPresets.find(p => p.id === presetId);
+        if (preset) {
+            setFilters(preset.filters);
+            showMessage('success', `Loaded preset "${preset.name}"`);
+        }
+    };
+
+    const deleteFilterPreset = (presetId: string) => {
+        setSavedPresets(prev => prev.filter(p => p.id !== presetId));
+        showMessage('success', 'Preset deleted');
+    };
+
+    const toggleColumn = (column: keyof typeof visibleColumns) => {
+        setVisibleColumns(prev => ({ ...prev, [column]: !prev[column] }));
+    };
+
+    // ============================================
+    // EXPORT FUNCTION
+    // ============================================
+
+    const exportReport = () => {
+        const timestamp = new Date().toLocaleString();
+        const filtered = applyFilters(intelligence);
+
+        const content = `
+=====================================================
+FORZEO CITATION INTELLIGENCE REPORT
+=====================================================
+Generated: ${timestamp}
+Client ID: ${clientId}
+Total Citations Analyzed: ${intelligence.length}
+Filtered Results: ${filtered.length}
+
+=====================================================
+SUMMARY STATISTICS  
+=====================================================
+
+Verification Status:
+  - Verified Sources: ${intelligence.filter(i => i.is_reachable).length} (${((intelligence.filter(i => i.is_reachable).length / intelligence.length) * 100).toFixed(1)}%)
+  - Hallucinated URLs: ${intelligence.filter(i => i.is_hallucinated).length} (${((intelligence.filter(i => i.is_hallucinated).length / intelligence.length) * 100).toFixed(1)}%)
+  - Unknown Status: ${intelligence.filter(i => !i.is_reachable && !i.is_hallucinated).length}
+
+=====================================================
+CITATION CATEGORIES
+=====================================================
+
+${Object.entries(CATEGORY_CONFIG).map(([key, config]) => {
+            const count = intelligence.filter(i => i.citation_category === key).length;
+            if (count === 0) return '';
+            return `  - ${config.label}: ${count} citations`;
+        }).filter(Boolean).join('\n')}
+
+=====================================================
+OPPORTUNITY LEVELS
+=====================================================
+
+  - Easy Wins: ${intelligence.filter(i => i.opportunity_level === 'easy').length} citations
+    (UGC forums, Competitor blogs - Direct response opportunities)
+    
+  - Medium Effort: ${intelligence.filter(i => i.opportunity_level === 'medium').length} citations
+    (Press, App stores - Requires outreach/coordination)
+    
+  - Difficult: ${intelligence.filter(i => i.opportunity_level === 'difficult').length} citations
+    (Wikipedia - High barriers to entry)
+
+=====================================================
+TOP RECOMMENDATIONS (${recommendations.length > 0 ? 'First 10' : 'None'})
+=====================================================
+
+${recommendations.slice(0, 10).map((rec, idx) => `
+${idx + 1}. [${rec.priority.toUpperCase()}] ${rec.title}
+   Type: ${rec.recommendation_type.replace(/_/g, ' ')}
+   Effort: ${rec.estimated_effort}
+   ${(rec.description || '').substring(0, 200)}${rec.description && rec.description.length > 200 ? '...' : ''}
+`).join('\n')}
+
+=====================================================
+DETAILED CITATION LIST
+=====================================================
+
+${filtered.map((item, idx) => `
+${idx + 1}. ${item.domain}
+   URL: ${item.url}
+   Status: ${item.is_hallucinated ? '❌ Hallucinated' : item.is_reachable ? '✅ Verified' : '⚠️ Unknown'}
+   Category: ${CATEGORY_CONFIG[item.citation_category]?.label || item.citation_category}
+   Model: ${item.model || 'Unknown'}
+   Opportunity: ${item.opportunity_level === 'easy' ? 'Easy Win' : item.opportunity_level === 'medium' ? 'Medium' : 'Difficult'}
+   ${item.title ? `Title: ${item.title}` : ''}
+`).join('\n')}
+
+=====================================================
+END OF REPORT
+=====================================================
+`;
+
+        // Create download
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `citation-intelligence-${clientId}-${new Date().toISOString().split('T')[0]}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showMessage('success', 'Report exported successfully');
+    };
+
+    // ============================================
     // RENDER HELPERS
     // ============================================
 
     const renderCitationsTable = (category?: string) => {
         let filtered = intelligence;
 
+        // Apply category from tab
         if (category && category !== 'all') {
             filtered = filtered.filter(i => i.citation_category === category);
         }
 
+        // Apply opportunity filter (from cards)
         if (opportunityFilter) {
             filtered = filtered.filter(i => i.opportunity_level === opportunityFilter);
         }
+
+        // Apply advanced filters
+        filtered = applyFilters(filtered);
+
+        //Apply sorting
+        filtered = applySorting(filtered);
+
+        const hasActiveFilters = opportunityFilter || filters.category !== 'all' || filters.status !== 'all' ||
+            filters.model !== 'all' || filters.search.trim() !== '';
+
+        // Calculate pagination
+        const totalPagesCount = totalPages(filtered.length);
+        const paginatedData = applyPagination(filtered);
 
         if (filtered.length === 0) {
             return (
                 <div className="text-center py-12 text-gray-500">
                     <Brain className="w-12 h-12 mx-auto mb-4 opacity-30" />
                     <p>No citations found matching the criteria</p>
-                    {opportunityFilter && (
-                        <Button variant="link" onClick={() => setOpportunityFilter(null)} className="mt-2 text-blue-600">
-                            Clear active filters
+                    {hasActiveFilters && (
+                        <Button variant="link" onClick={clearFilters} className="mt-2 text-blue-600">
+                            Clear all filters
                         </Button>
                     )}
                 </div>
             );
         }
 
+        // Get unique models for filter dropdown
+        const uniqueModels = Array.from(new Set(intelligence.map(i => i.model).filter(Boolean)));
+
+        // Helper for sort icons
+        const SortIcon = ({ column }: { column: string }) => {
+            if (!sortConfig || sortConfig.key !== column) {
+                return <ArrowUpDown className="w-3 h-3 opacity-30" />;
+            }
+            return sortConfig.direction === 'asc' ?
+                <ChevronUp className="w-3 h-3" /> :
+                <ChevronDown className="w-3 h-3" />;
+        };
+
         return (
             <div className="space-y-4">
+                {/* Toolbar with Settings */}
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-600 font-medium">
+                            {filtered.length} citations
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {/* Saved Presets Dropdown */}
+                        {savedPresets.length > 0 && (
+                            <select
+                                value=""
+                                onChange={(e) => e.target.value && loadFilterPreset(e.target.value)}
+                                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="">Load Preset...</option>
+                                {savedPresets.map(preset => (
+                                    <option key={preset.id} value={preset.id}>{preset.name}</option>
+                                ))}
+                            </select>
+                        )}
+                        {hasActiveFilters && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={saveFilterPreset}
+                                className="flex items-center gap-1"
+                            >
+                                <Save className="w-3 h-3" />
+                                Save Preset
+                            </Button>
+                        )}
+                        {/* Column Toggle Dropdown */}
+                        <div className="relative">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    const btn = document.getElementById('column-toggle-menu');
+                                    btn?.classList.toggle('hidden');
+                                }}
+                                className="flex items-center gap-1"
+                            >
+                                <Settings className="w-3 h-3" />
+                                Columns
+                            </Button>
+                            <div
+                                id="column-toggle-menu"
+                                className="hidden absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10 p-2"
+                            >
+                                {Object.entries(visibleColumns).map(([col, visible]) => (
+                                    <label
+                                        key={col}
+                                        className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={visible}
+                                            onChange={() => toggleColumn(col as keyof typeof visibleColumns)}
+                                            className="w-4 h-4 text-blue-600 rounded"
+                                        />
+                                        <span className="text-sm capitalize">{col}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Filter Bar */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
+                        {hasActiveFilters && (
+                            <Button variant="ghost" size="sm" onClick={clearFilters} className="text-xs">
+                                Clear All
+                            </Button>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        {/* Category Filter */}
+                        <div>
+                            <label className="text-xs font-medium text-gray-600 mb-1 block">Category</label>
+                            <select
+                                value={filters.category}
+                                onChange={(e) => setFilters(prev => ({ ...prev, category: e.target.value }))}
+                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="all">All Categories</option>
+                                <option value="ugc">UGC / Social</option>
+                                <option value="competitor_blog">Competitor</option>
+                                <option value="press_media">Press & Media</option>
+                                <option value="app_store">App Stores</option>
+                                <option value="wikipedia">Wikipedia</option>
+                                <option value="brand_owned">Brand Owned</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+
+                        {/* Status Filter */}
+                        <div>
+                            <label className="text-xs font-medium text-gray-600 mb-1 block">Status</label>
+                            <select
+                                value={filters.status}
+                                onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value as any }))}
+                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="all">All Status</option>
+                                <option value="verified">Verified Only</option>
+                                <option value="hallucinated">Hallucinated Only</option>
+                                <option value="unknown">Unknown Status</option>
+                            </select>
+                        </div>
+
+                        {/* Model Filter */}
+                        <div>
+                            <label className="text-xs font-medium text-gray-600 mb-1 block">Model</label>
+                            <select
+                                value={filters.model}
+                                onChange={(e) => setFilters(prev => ({ ...prev, model: e.target.value }))}
+                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="all">All Models</option>
+                                {uniqueModels.map(model => (
+                                    <option key={model!} value={model!}>{model}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Search */}
+                        <div>
+                            <label className="text-xs font-medium text-gray-600 mb-1 block">Search</label>
+                            <input
+                                type="text"
+                                placeholder="Search URL, domain..."
+                                value={filters.search}
+                                onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Active Filter Badge */}
                 {opportunityFilter && (
                     <div className="bg-blue-50 border border-blue-100 px-4 py-2 rounded-lg flex items-center justify-between">
                         <span className="text-sm text-blue-800 font-medium">
-                            Filtering by: <span className="capitalize">{opportunityFilter.replace('_', ' ')} Effort</span>
+                            Opportunity: <span className="capitalize">{opportunityFilter.replace('_', ' ')} Effort</span>
                         </span>
                         <Button
                             variant="ghost"
@@ -445,86 +933,270 @@ export default function CitationIntelligence({
                             onClick={() => setOpportunityFilter(null)}
                             className="h-8 text-blue-600 hover:text-blue-800 hover:bg-blue-100"
                         >
-                            Clear Filter
+                            Clear
                         </Button>
                     </div>
                 )}
-                <div className="overflow-x-auto">
+
+                {/* Bulk Actions Bar */}
+                {selectedRows.size > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 px-4 py-3 rounded-lg flex items-center justify-between">
+                        <span className="text-sm font-medium text-blue-900">
+                            {selectedRows.size} item(s) selected
+                        </span>
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={handleDeleteSelected}
+                            className="flex items-center gap-2"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Delete Selected
+                        </Button>
+                    </div>
+                )}
+
+                <div className="overflow-x-auto border border-gray-200 rounded-lg">
                     <table className="w-full">
-                        <thead className="bg-gray-50 border-b border-gray-200">
+                        <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                             <tr>
-                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">URL</th>
-                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Category</th>
-                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Model</th>
-                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Opportunity</th>
+                                <th className="text-left px-4 py-3 w-12">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedRows.size === paginatedData.length && paginatedData.length > 0}
+                                        onChange={() => toggleSelectAll(paginatedData)}
+                                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </th>
+                                {visibleColumns.status && (
+                                    <th
+                                        className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:bg-gray-100 transition-colors"
+                                        onClick={() => handleSort('is_reachable')}
+                                    >
+                                        <div className="flex items-center gap-1">
+                                            Status
+                                            <SortIcon column="is_reachable" />
+                                        </div>
+                                    </th>
+                                )}
+                                {visibleColumns.url && (
+                                    <th
+                                        className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:bg-gray-100 transition-colors"
+                                        onClick={() => handleSort('domain')}
+                                    >
+                                        <div className="flex items-center gap-1">
+                                            URL
+                                            <SortIcon column="domain" />
+                                        </div>
+                                    </th>
+                                )}
+                                {visibleColumns.category && (
+                                    <th
+                                        className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:bg-gray-100 transition-colors"
+                                        onClick={() => handleSort('citation_category')}
+                                    >
+                                        <div className="flex items-center gap-1">
+                                            Category
+                                            <SortIcon column="citation_category" />
+                                        </div>
+                                    </th>
+                                )}
+                                {visibleColumns.model && (
+                                    <th
+                                        className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:bg-gray-100 transition-colors"
+                                        onClick={() => handleSort('model')}
+                                    >
+                                        <div className="flex items-center gap-1">
+                                            Model
+                                            <SortIcon column="model" />
+                                        </div>
+                                    </th>
+                                )}
+                                {visibleColumns.opportunity && (
+                                    <th
+                                        className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:bg-gray-100 transition-colors"
+                                        onClick={() => handleSort('opportunity_level')}
+                                    >
+                                        <div className="flex items-center gap-1">
+                                            Opportunity
+                                            <SortIcon column="opportunity_level" />
+                                        </div>
+                                    </th>
+                                )}
                                 <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {filtered.map(item => (
-                                <tr key={item.id} className="hover:bg-gray-50">
+                        <tbody className="divide-y divide-gray-100 bg-white">
+                            {paginatedData.map((item, idx) => (
+                                <tr
+                                    key={item.id}
+                                    className={cn(
+                                        "hover:bg-gray-50 transition-colors",
+                                        idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"
+                                    )}
+                                >
                                     <td className="px-4 py-3">
-                                        {item.is_hallucinated ? (
-                                            <div className="flex items-center gap-1">
-                                                <XCircle className="w-4 h-4 text-red-500" />
-                                                <span className="text-xs text-red-600">Hallucinated</span>
-                                            </div>
-                                        ) : item.is_reachable ? (
-                                            <div className="flex items-center gap-1">
-                                                <CheckCircle className="w-4 h-4 text-green-500" />
-                                                <span className="text-xs text-green-600">Verified</span>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center gap-1">
-                                                <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                                                <span className="text-xs text-yellow-600">Unknown</span>
-                                            </div>
-                                        )}
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedRows.has(item.id)}
+                                            onChange={() => toggleRowSelection(item.id)}
+                                            className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                                        />
                                     </td>
-                                    <td className="px-4 py-3 max-w-xs">
-                                        <a
-                                            href={item.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-                                        >
-                                            {item.domain}
-                                            <ExternalLink className="w-3 h-3" />
-                                        </a>
-                                        {item.title && (
-                                            <p className="text-xs text-gray-500 truncate">{item.title}</p>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        <span className={cn("text-sm", CATEGORY_CONFIG[item.citation_category]?.color)}>
-                                            {CATEGORY_CONFIG[item.citation_category]?.label || item.citation_category}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        <Badge variant="outline" className="text-xs">{item.model || "Unknown"}</Badge>
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        <span className={cn(
-                                            "px-2 py-1 text-xs rounded-full",
-                                            item.opportunity_level === 'easy' ? 'bg-green-100 text-green-700' :
-                                                item.opportunity_level === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                                                    'bg-red-100 text-red-700'
-                                        )}>
-                                            {item.opportunity_level === 'easy' ? 'Easy Win' :
-                                                item.opportunity_level === 'medium' ? 'Medium' : 'Difficult'}
-                                        </span>
-                                    </td>
+                                    {visibleColumns.status && (
+                                        <td className="px-4 py-3">
+                                            {item.is_hallucinated ? (
+                                                <div className="flex items-center gap-1">
+                                                    <XCircle className="w-4 h-4 text-red-500" />
+                                                    <span className="text-xs text-red-600">Hallucinated</span>
+                                                </div>
+                                            ) : item.is_reachable ? (
+                                                <div className="flex items-center gap-1">
+                                                    <CheckCircle className="w-4 h-4 text-green-500" />
+                                                    <span className="text-xs text-green-600">Verified</span>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-1">
+                                                    <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                                                    <span className="text-xs text-yellow-600">Unknown</span>
+                                                </div>
+                                            )}
+                                        </td>
+                                    )}
+                                    {visibleColumns.url && (
+                                        <td className="px-4 py-3 max-w-xs">
+                                            <a
+                                                href={item.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                                            >
+                                                {item.domain}
+                                                <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                            {item.title && (
+                                                <p className="text-xs text-gray-500 truncate">{item.title}</p>
+                                            )}
+                                        </td>
+                                    )}
+                                    {visibleColumns.category && (
+                                        <td className="px-4 py-3">
+                                            <span className={cn("text-sm", CATEGORY_CONFIG[item.citation_category]?.color)}>
+                                                {CATEGORY_CONFIG[item.citation_category]?.label || item.citation_category}
+                                            </span>
+                                        </td>
+                                    )}
+                                    {visibleColumns.model && (
+                                        <td className="px-4 py-3">
+                                            <Badge variant="outline" className="text-xs">{item.model || "Unknown"}</Badge>
+                                        </td>
+                                    )}
+                                    {visibleColumns.opportunity && (
+                                        <td className="px-4 py-3">
+                                            <span className={cn(
+                                                "px-2 py-1 text-xs rounded-full font-medium",
+                                                item.opportunity_level === 'easy' ? 'bg-green-100 text-green-700' :
+                                                    item.opportunity_level === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                                        'bg-red-100 text-red-700'
+                                            )}>
+                                                {item.opportunity_level === 'easy' ? 'Easy Win' :
+                                                    item.opportunity_level === 'medium' ? 'Medium' : 'Difficult'}
+                                            </span>
+                                        </td>
+                                    )}
                                     <td className="px-4 py-3 text-right">
-                                        <Button size="sm" variant="ghost" onClick={() => window.open(item.url, '_blank')}>
-                                            <ExternalLink className="w-4 h-4" />
-                                        </Button>
+                                        <div className="flex items-center justify-end gap-1">
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => window.open(item.url, '_blank')}
+                                                className="h-8 w-8 p-0"
+                                            >
+                                                <ExternalLink className="w-4 h-4" />
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => handleDeleteSingle(item.id)}
+                                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
+
+                {/* Pagination Controls */}
+                {totalPagesCount > 1 && (
+                    <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200">
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                            Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filtered.length)} of {filtered.length} results
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                            >
+                                Previous
+                            </Button>
+                            <div className="flex items-center gap-1">
+                                {Array.from({ length: Math.min(5, totalPagesCount) }, (_, i) => {
+                                    let pageNum;
+                                    if (totalPagesCount <= 5) {
+                                        pageNum = i + 1;
+                                    } else if (currentPage <= 3) {
+                                        pageNum = i + 1;
+                                    } else if (currentPage >= totalPagesCount - 2) {
+                                        pageNum = totalPagesCount - 4 + i;
+                                    } else {
+                                        pageNum = currentPage - 2 + i;
+                                    }
+                                    return (
+                                        <Button
+                                            key={pageNum}
+                                            variant={currentPage === pageNum ? "default" : "outline"}
+                                            size="sm"
+                                            onClick={() => setCurrentPage(pageNum)}
+                                            className="w-8 h-8 p-0"
+                                        >
+                                            {pageNum}
+                                        </Button>
+                                    );
+                                })}
+                            </div>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setCurrentPage(p => Math.min(totalPagesCount, p + 1))}
+                                disabled={currentPage === totalPagesCount}
+                            >
+                                Next
+                            </Button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <label className="text-sm text-gray-600">Per page:</label>
+                            <select
+                                value={itemsPerPage}
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                }}
+                                className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="10">10</option>
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     };
@@ -590,6 +1262,15 @@ export default function CitationIntelligence({
                     >
                         <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
                         Refresh
+                    </Button>
+                    <Button
+                        onClick={exportReport}
+                        variant="outline"
+                        className="bg-white"
+                        disabled={intelligence.length === 0}
+                    >
+                        <Download className="h-4 w-4 mr-2" />
+                        Export Report
                     </Button>
                     <Button
                         onClick={analyzeAllCitations}
@@ -961,6 +1642,49 @@ export default function CitationIntelligence({
                                 </Button>
                             )}
                         </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Confirmation Dialog */}
+            <Dialog open={deleteDialog.open} onOpenChange={(open) => !deleting && setDeleteDialog({ open, ids: [] })}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-red-600">
+                            <AlertTriangle className="w-5 h-5" />
+                            Confirm Deletion
+                        </DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to delete {deleteDialog.ids.length} record(s)? This action cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex justify-end gap-2 mt-4">
+                        <Button
+                            variant="outline"
+                            onClick={() => setDeleteDialog({ open: false, ids: [] })}
+                            disabled={deleting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={confirmDelete}
+                            disabled={deleting}
+                            className="flex items-center gap-2"
+                        >
+                            {deleting ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Deleting...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete
+                                </>
+                            )}
+                        </Button>
                     </div>
                 </DialogContent>
             </Dialog>
