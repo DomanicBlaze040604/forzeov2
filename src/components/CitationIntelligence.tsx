@@ -38,8 +38,6 @@ import {
     ChevronDown,
     Settings,
     Save,
-    Grid,
-    List,
     ArrowUpDown
 } from "lucide-react";
 
@@ -220,7 +218,6 @@ export default function CitationIntelligence({
         opportunity: true
     });
     const [savedPresets, setSavedPresets] = useState<Array<{ id: string; name: string; filters: typeof filters }>>([]);
-    const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
 
     // Content generation state
     const [generatingContent, setGeneratingContent] = useState<string | null>(null);
@@ -615,11 +612,6 @@ export default function CitationIntelligence({
             setFilters(preset.filters);
             showMessage('success', `Loaded preset "${preset.name}"`);
         }
-    };
-
-    const deleteFilterPreset = (presetId: string) => {
-        setSavedPresets(prev => prev.filter(p => p.id !== presetId));
-        showMessage('success', 'Preset deleted');
     };
 
     const toggleColumn = (column: keyof typeof visibleColumns) => {
