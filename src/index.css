@@ -1,9 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* ===== GOOGLE FONTS ===== */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @layer base {
   :root {
@@ -27,14 +26,14 @@
     --input: 220 13% 91%;
     --ring: 222 47% 11%;
     --radius: 0.75rem;
-    
+
     /* Premium Color Palette */
     --premium-blue: 217 91% 60%;
     --premium-purple: 262 83% 58%;
     --premium-emerald: 160 84% 39%;
     --premium-amber: 43 96% 56%;
     --premium-rose: 350 89% 60%;
-    
+
     /* Shadows */
     --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
     --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
@@ -271,8 +270,13 @@ button:active:not(:disabled):not([type="text"]),
 }
 
 @keyframes progressShine {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 /* ===== PREMIUM INPUT FOCUS ===== */
@@ -284,7 +288,9 @@ select:focus {
   border-color: #3b82f6;
 }
 
-input, textarea, select {
+input,
+textarea,
+select {
   transition: all 0.2s ease;
 }
 
@@ -337,6 +343,7 @@ a:hover {
     opacity: 0;
     transform: scale(0.95) translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -344,13 +351,18 @@ a:hover {
 }
 
 /* Dialog backdrop */
-[data-state="open"][data-radix-portal] > div:first-child {
+[data-state="open"][data-radix-portal]>div:first-child {
   animation: backdropFade 0.3s ease;
 }
 
 @keyframes backdropFade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 /* ===== PREMIUM SIDEBAR ===== */
@@ -389,21 +401,24 @@ aside {
 
 /* ===== PREMIUM LOADING SKELETON ===== */
 .skeleton {
-  background: linear-gradient(
-    90deg, 
-    rgba(229, 231, 235, 0.5) 0%, 
-    rgba(209, 213, 219, 0.5) 20%, 
-    rgba(229, 231, 235, 0.5) 40%,
-    rgba(229, 231, 235, 0.5) 100%
-  );
+  background: linear-gradient(90deg,
+      rgba(229, 231, 235, 0.5) 0%,
+      rgba(209, 213, 219, 0.5) 20%,
+      rgba(229, 231, 235, 0.5) 40%,
+      rgba(229, 231, 235, 0.5) 100%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
   border-radius: 8px;
 }
 
 @keyframes shimmer {
-  0% { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 /* ===== PREMIUM STAT CARD ===== */
@@ -455,6 +470,7 @@ aside {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -470,6 +486,7 @@ aside {
     opacity: 0;
     transform: translateX(-20px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -485,6 +502,7 @@ aside {
     opacity: 0;
     transform: translateX(20px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -500,6 +518,7 @@ aside {
     opacity: 0;
     transform: scale(0.95);
   }
+
   to {
     opacity: 1;
     transform: scale(1);
@@ -511,8 +530,15 @@ aside {
 }
 
 @keyframes pulseSoft {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .bounce-in {
@@ -524,12 +550,15 @@ aside {
     opacity: 0;
     transform: scale(0.3);
   }
+
   50% {
     transform: scale(1.05);
   }
+
   70% {
     transform: scale(0.9);
   }
+
   100% {
     opacity: 1;
     transform: scale(1);
@@ -542,8 +571,15 @@ aside {
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-5px);
+  }
 }
 
 /* ===== GLOW EFFECTS ===== */
@@ -620,12 +656,29 @@ tbody tr:nth-child(even) {
 }
 
 /* ===== STAGGERED ANIMATION ===== */
-.stagger-1 { animation-delay: 0.05s; }
-.stagger-2 { animation-delay: 0.1s; }
-.stagger-3 { animation-delay: 0.15s; }
-.stagger-4 { animation-delay: 0.2s; }
-.stagger-5 { animation-delay: 0.25s; }
-.stagger-6 { animation-delay: 0.3s; }
+.stagger-1 {
+  animation-delay: 0.05s;
+}
+
+.stagger-2 {
+  animation-delay: 0.1s;
+}
+
+.stagger-3 {
+  animation-delay: 0.15s;
+}
+
+.stagger-4 {
+  animation-delay: 0.2s;
+}
+
+.stagger-5 {
+  animation-delay: 0.25s;
+}
+
+.stagger-6 {
+  animation-delay: 0.3s;
+}
 
 /* ===== GRADIENT TEXT ===== */
 .gradient-text {
@@ -678,8 +731,15 @@ tbody tr:nth-child(even) {
 }
 
 @keyframes countUp {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ===== RIPPLE EFFECT ===== */
@@ -711,6 +771,7 @@ tbody tr:nth-child(even) {
     transform: scale(0) translate(-50%, -50%);
     opacity: 1;
   }
+
   100% {
     transform: scale(20) translate(-50%, -50%);
     opacity: 0;
@@ -724,7 +785,7 @@ tbody tr:nth-child(even) {
   left: 0;
   right: 0;
   bottom: 0;
-  background: 
+  background:
     radial-gradient(ellipse at 20% 20%, rgba(59, 130, 246, 0.05) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 50%),
     radial-gradient(ellipse at 50% 50%, rgba(16, 185, 129, 0.03) 0%, transparent 50%);

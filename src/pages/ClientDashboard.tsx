@@ -3,7 +3,7 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Zap, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb, Target, LogOut } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Zap, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb, Target, LogOut } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { UserManagement } from "@/components/UserManagement";
@@ -417,17 +417,18 @@ export default function ClientDashboard() {
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
-          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 text-left transition-all"><Tag className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Tags</span></button>
-          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Company</div>
+
           {isAdmin && (
-            <button onClick={() => setUserManagementOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all">
-              <Users className="h-4 w-4 flex-shrink-0 text-gray-400" />
-              <span className="flex-1 truncate">Users</span>
-              <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-purple-100 text-purple-600">Admin</span>
-            </button>
+            <>
+              <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Company</div>
+              <button onClick={() => setUserManagementOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all">
+                <Users className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                <span className="flex-1 truncate">Users</span>
+                <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-purple-100 text-purple-600">Admin</span>
+              </button>
+            </>
           )}
-          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Key className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">API Keys</span></button>
-          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 text-left transition-all"><CreditCard className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Billing</span></button>
+
         </nav>
         <div className="p-3 border-t border-gray-100 flex-shrink-0">
           <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-4 mb-3 shadow-lg overflow-hidden">
@@ -1142,7 +1143,6 @@ export default function ClientDashboard() {
                         {Logo && <Logo className="h-6 w-6" style={{ color }} />}
                         <span className={cn("text-sm font-medium", isSelected ? "text-gray-900" : "text-gray-700")}>{model.name}</span>
                       </div>
-                      <span className="text-xs text-gray-600 font-mono bg-gray-100 px-2 py-1 rounded">${model.costPerQuery.toFixed(3)}</span>
                     </div>
                   );
                 })}
