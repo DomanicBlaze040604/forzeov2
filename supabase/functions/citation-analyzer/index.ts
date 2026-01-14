@@ -937,17 +937,43 @@ serve(async (req: Request) => {
                     let aiAnalysis = {};
                     let recommendation: Recommendation | null = null;
 
-                    if (!isHallucinated && GROQ_API_KEY) {
-                        const groqResult = await analyzeWithGroq(
-                            citation,
-                            classification.category,
-                            request.brand_name,
-                            request.competitors || [],
-                            extractedContent
-                        );
-                        aiAnalysis = groqResult.analysis;
-                        recommendation = groqResult.recommendation;
-                        await sleep(2000); // Rate limiting for Groq (30 req/min = 2s per request)
+                    if (!isHallucinated) {
+                        if (GROQ_API_KEY) {
+                            const groqResult = await analyzeWithGroq(
+                                citation,
+                                classification.category,
+                                request.brand_name,
+                                request.competitors || [],
+                                extractedContent
+                            );
+                            aiAnalysis = groqResult.analysis;
+                            recommendation = groqResult.recommendation;
+                            await sleep(2000); // Rate limiting for Groq (30 req/min = 2s per request)
+                        }
+
+                        // Fallback: If Groq failed, wasn't configured, or didn't return a recommendation
+                        if (!recommendation) {
+                            console.log(`[Citation Analyzer] Generating fallback recommendation for ${citation.url}`);
+                            // Map opportunity level to priority
+                            const priorityMap: Record<string, string> = {
+                                'easy': 'high',
+                                'medium': 'medium',
+                                'difficult': 'low'
+                            };
+
+                            const fallbackAnalysis = {
+                                priority: priorityMap[classification.opportunityLevel] || 'medium',
+                                effort_estimate: classification.opportunityLevel === 'easy' ? '2h' : '3days',
+                                // Let generateRecommendation handle content generation using defaults
+                            };
+
+                            recommendation = generateRecommendation(
+                                citation,
+                                classification.category,
+                                fallbackAnalysis,
+                                request.brand_name
+                            );
+                        }
                     }
 
                     const intelligence: CitationIntelligence = {

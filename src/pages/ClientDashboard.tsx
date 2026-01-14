@@ -1658,7 +1658,9 @@ export default function ClientDashboard() {
       }
     });
     if (tavilyInsights.length > 0) {
-      aggregatedRecommendations.push(`Discovery Engine insight: ${tavilyInsights[0]}`);
+      tavilyInsights.slice(0, 3).forEach(insight => {
+        aggregatedRecommendations.push(`Discovery Engine insight: ${insight}`);
+      });
     }
 
     // High-priority prompts need attention

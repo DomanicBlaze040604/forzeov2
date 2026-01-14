@@ -1998,6 +1998,9 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
     const fallbackRecs = [];
     if (sov < 50) fallbackRecs.push(`Improve visibility - currently only appearing in ${sov}% of AI responses`);
     if (competitorsInResponse.length > 0) fallbackRecs.push(`Target competitor gap: ${competitorsInResponse[0]} is appearing where you're not`);
+    if (tavilyData?.analysis?.insights?.length > 0) {
+      fallbackRecs.push(`Insight from web analysis: ${tavilyData.analysis.insights[0]}`);
+    }
     if (topCitations) fallbackRecs.push(`Build relationships with cited sources: ${topCitations}`);
 
     return {
@@ -2153,6 +2156,9 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     }
     if (aggregatedData.topDomains.length > 0) {
       fallbackRecs.push(`Target high-authority sources: ${aggregatedData.topDomains.slice(0, 3).join(', ')}`);
+    }
+    if (aggregatedData.tavilyInsights.length > 0) {
+      fallbackRecs.push(`Web Analysis Insight: ${aggregatedData.tavilyInsights[0]}`);
     }
 
     return {

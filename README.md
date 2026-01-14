@@ -122,6 +122,11 @@ The Citation Intelligence dashboard now includes comprehensive personalization a
 - Exportable reports for external analysis
 - Professional, modern UI throughout
 
+### v7.5 Features (Reliability Update)
+- ✅ **Robust Recommendation Engine** - Improved fallback logic ensures recommendations are always generated, even if primary AI services are unavailable.
+- ✅ **Intelligence Tab Reliability** - Edge functions now include self-healing logic to generate fallback strategies based on citation classification.
+- ✅ **Enhanced Visualizations** - Dashboard now displays up to 3 distinct discovery insights instead of one.
+
 ---
 
 📘 **[Read the Full Feature Architecture Guide](./FEATURE_GUIDE.md)** for detailed logic explanations.
