@@ -3,7 +3,7 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Zap, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb, Target, LogOut } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Zap, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb, Target, LogOut, Circle } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { UserManagement } from "@/components/UserManagement";
@@ -174,12 +174,41 @@ export default function ClientDashboard() {
   const getPromptResult = (promptId: string) => filteredAuditResults.find(r => r.prompt_id === promptId);
 
   const domainStats = useMemo(() => {
-    const stats: Record<string, { count: number; type: string; avg: number; prompts: Set<string> }> = {};
-    filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { mr.citations.forEach(c => { if (!stats[c.domain]) stats[c.domain] = { count: 0, type: classifyDomain(c.domain), avg: 0, prompts: new Set() }; stats[c.domain].count++; stats[c.domain].prompts.add(result.prompt_text); }); }); });
+    const stats: Record<string, { count: number; type: string; avg: number; prompts: Map<string, { text: string; visible: boolean; competitors: Set<string> }> }> = {};
+    filteredAuditResults.forEach(result => {
+      const pText = result.prompt_text;
+      result.model_results.forEach(mr => {
+        const response = mr.raw_response?.toLowerCase() || "";
+        const mentionedComps = selectedClient?.competitors.filter(c => response.includes(c.toLowerCase())) || [];
+
+        mr.citations.forEach(c => {
+          if (!stats[c.domain]) stats[c.domain] = { count: 0, type: classifyDomain(c.domain), avg: 0, prompts: new Map() };
+          stats[c.domain].count++;
+
+          if (!stats[c.domain].prompts.has(pText)) {
+            stats[c.domain].prompts.set(pText, { text: pText, visible: false, competitors: new Set() });
+          }
+          const pInfo = stats[c.domain].prompts.get(pText)!;
+          if (mr.brand_mentioned) pInfo.visible = true;
+          mentionedComps.forEach(comp => pInfo.competitors.add(comp));
+        });
+      });
+    });
     const total = filteredAuditResults.length || 1;
     Object.keys(stats).forEach(d => { stats[d].avg = Math.round((stats[d].count / total) * 10) / 10; });
-    return Object.entries(stats).map(([domain, data]) => ({ domain, count: data.count, type: data.type, avg: data.avg, promptCount: data.prompts.size, prompts: Array.from(data.prompts) })).sort((a, b) => b.count - a.count);
-  }, [filteredAuditResults]);
+    return Object.entries(stats).map(([domain, data]) => ({
+      domain,
+      count: data.count,
+      type: data.type,
+      avg: data.avg,
+      promptCount: data.prompts.size,
+      prompts: Array.from(data.prompts.values()).map(p => ({
+        text: p.text,
+        visible: p.visible,
+        competitors: Array.from(p.competitors)
+      }))
+    })).sort((a, b) => b.count - a.count);
+  }, [filteredAuditResults, selectedClient]);
 
   // Group citations by domain type for pie chart
   const typeSegments = useMemo(() => {
@@ -413,7 +442,7 @@ export default function ClientDashboard() {
         </div>
         <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">General</div>
-          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true }, { id: "intelligence", label: "Intelligence", icon: Target }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Zap }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: FileText }].filter(item => isAdmin || !["campaigns", "intelligence", "analytics", "schedules", "signals"].includes(item.id)).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
+          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true }, { id: "intelligence", label: "Intelligence", icon: Target }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Zap }, { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "content", label: "Content", icon: FileText }].filter(item => isAdmin || !["campaigns", "intelligence", "analytics", "schedules", "signals"].includes(item.id)).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
@@ -453,7 +482,7 @@ export default function ClientDashboard() {
       <main className={cn("flex-1 min-h-screen transition-all duration-300", sidebarCollapsed ? "ml-0" : "ml-56")}>
         <header className="bg-white border-b border-gray-200 px-6 py-3 sticky top-0 z-10">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3"><button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>{sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button><h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-gray-400" />{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "analytics" ? "Visibility Analytics" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "signals" ? "Fresh Signal Intelligence" : activeTab === "campaigns" ? "Campaign Runs" : activeTab === "citations" ? "Citations" : activeTab === "content" ? "Content Generator" : "Sources"}</h1>{(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs">Filtered</Badge>}</div>
+            <div className="flex items-center gap-3"><button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>{sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button><h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-gray-400" />{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "analytics" ? "Visibility Analytics" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "signals" ? "Fresh Signal Intelligence" : activeTab === "campaigns" ? "Campaign Runs" : activeTab === "content" ? "Content Generator" : "Citations"}</h1>{(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs">Filtered</Badge>}</div>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
                 <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white shadow-sm text-gray-900"><div className="h-4 w-4 rounded flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white text-[10px] font-bold">{selectedClient?.brand_name?.charAt(0)}</span></div>{selectedClient?.brand_name}</button>
@@ -920,10 +949,25 @@ export default function ClientDashboard() {
                                   <div>
                                     <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Cited in prompts ({s.prompts.length})</div>
                                     <div className="flex flex-wrap gap-2">
-                                      {s.prompts.slice(0, 8).map((prompt, j) => (
-                                        <Badge key={j} variant="secondary" className="text-xs max-w-xs truncate bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors px-2 py-1">{prompt}</Badge>
+                                      {s.prompts.map((prompt: any, j: number) => (
+                                        <Badge key={j} variant="secondary" className={cn(
+                                          "text-xs max-w-full bg-white border transition-colors px-2 py-1 flex items-center gap-1.5 h-auto whitespace-normal text-left",
+                                          prompt.visible ? "border-green-200 hover:border-green-300 bg-green-50/30" : "border-gray-200 hover:border-blue-200 hover:bg-gray-50"
+                                        )}>
+                                          {prompt.visible ? (
+                                            <CheckCircle className="h-3 w-3 text-green-600 flex-shrink-0" />
+                                          ) : (
+                                            <Circle className="h-3 w-3 text-gray-300 flex-shrink-0" />
+                                          )}
+                                          <span className={cn("truncate max-w-[300px]", prompt.visible ? "text-green-900" : "text-gray-700")}>{prompt.text}</span>
+                                          {prompt.competitors && prompt.competitors.length > 0 && (
+                                            <span className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium border border-orange-200" title={`Competitors mentioned: ${prompt.competitors.join(", ")}`}>
+                                              <AlertTriangle className="h-3 w-3" />
+                                              {prompt.competitors.length}
+                                            </span>
+                                          )}
+                                        </Badge>
                                       ))}
-                                      {s.prompts.length > 8 && <Badge variant="outline" className="text-xs bg-white text-gray-500">+{s.prompts.length - 8} more</Badge>}
                                     </div>
                                   </div>
                                 )}
