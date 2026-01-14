@@ -731,13 +731,9 @@ export function VisibilityGraphs({ clientId, brandName }: VisibilityGraphsProps)
                                         {selectedRun.average_rank ? `#${selectedRun.average_rank}` : "N/A"}
                                     </div>
                                 </div>
-                                <div className="p-4 bg-purple-50 rounded-xl border border-purple-100">
-                                    <div className="text-sm text-purple-600 font-medium mb-1">Citations</div>
+                                <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-4 text-center">
                                     <div className="text-3xl font-bold text-purple-700">{selectedRun.total_citations}</div>
-                                </div>
-                                <div className="p-4 bg-amber-50 rounded-xl border border-amber-100">
-                                    <div className="text-sm text-amber-600 font-medium mb-1">Cost</div>
-                                    <div className="text-3xl font-bold text-amber-700">${selectedRun.total_cost.toFixed(4)}</div>
+                                    <div className="text-sm font-medium text-purple-600 mt-1">Citations</div>
                                 </div>
                             </div>
 

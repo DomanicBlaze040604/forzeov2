@@ -1100,12 +1100,12 @@ export function useClientDashboard() {
 
   const exportToCSV = useCallback(() => {
     if (!selectedClient || auditResults.length === 0) return;
-    const rows = [["Prompt", "Category", "Niche Level", "SOV", "Rank", "Citations", "Cost"]];
+    const rows = [["Prompt", "Category", "Niche Level", "SOV", "Rank", "Citations"]];
     for (const r of auditResults) {
       const prompt = prompts.find(p => p.id === r.prompt_id);
       rows.push([r.prompt_text, prompt?.category || "custom", prompt?.niche_level || "broad",
       `${r.summary.share_of_voice}%`, r.summary.average_rank?.toString() || "-",
-      r.summary.total_citations.toString(), `$${r.summary.total_cost.toFixed(4)}`]);
+      r.summary.total_citations.toString()]);
     }
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -1146,13 +1146,13 @@ export function useClientDashboard() {
     report += `Industry: ${selectedClient.industry}\nRegion: ${selectedClient.target_region}\nDate: ${date}\n\n`;
     report += `SUMMARY\n${"-".repeat(40)}\nShare of Voice: ${summary?.overall_sov || 0}%\n`;
     report += `Average Rank: ${summary?.average_rank ? `#${summary.average_rank}` : 'N/A'}\n`;
-    report += `Total Citations: ${summary?.total_citations || 0}\nTotal Cost: $${(summary?.total_cost || 0).toFixed(4)}\n\n`;
+    report += `Total Citations: ${summary?.total_citations || 0}\n\n`;
     report += `Status: ${ins.statusText}\n\nRecommendations:\n${ins.recommendations.map(r => `  • ${r}`).join('\n')}\n\n`;
     report += `VISIBILITY BY MODEL\n${"-".repeat(40)}\n`;
     AI_MODELS.forEach(model => {
       const s = stats[model.id] || { visible: 0, total: 0, cost: 0 };
       const pct = s.total > 0 ? Math.round((s.visible / s.total) * 100) : 0;
-      report += `${model.name.padEnd(20)} ${s.visible}/${s.total} (${pct}%)  $${s.cost.toFixed(4)}\n`;
+      report += `${model.name.padEnd(20)} ${s.visible}/${s.total} (${pct}%)\n`;
     });
     report += `\nCOMPETITOR ANALYSIS\n${"-".repeat(40)}\n`;
     gap.forEach((c, idx) => { report += `${idx + 1}. ${c.name.padEnd(25)} ${c.percentage}% (${c.mentions})\n`; });

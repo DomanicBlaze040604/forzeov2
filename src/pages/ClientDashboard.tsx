@@ -165,7 +165,7 @@ export default function ClientDashboard() {
 
   const filteredPrompts = useMemo(() => !searchQuery ? filteredPromptsByTab : filteredPromptsByTab.filter(p => p.prompt_text.toLowerCase().includes(searchQuery.toLowerCase())), [filteredPromptsByTab, searchQuery]);
   const pendingPrompts = prompts.filter(p => p.is_active !== false && !auditResults.find(r => r.prompt_id === p.id)).length;
-  const totalCost = Object.values(modelStats).reduce((sum, m) => sum + m.cost, 0);
+
   const getPromptResult = (promptId: string) => filteredAuditResults.find(r => r.prompt_id === promptId);
 
   const domainStats = useMemo(() => {
@@ -269,7 +269,7 @@ export default function ClientDashboard() {
     txt += "  * Completed Audits: " + auditResults.length + "\n";
     txt += "  * Citations Found: " + allCitations.length + "\n";
     txt += "  * Unique Sources: " + domainStats.length + "\n";
-    txt += "  * Total API Cost: $" + totalCost.toFixed(4) + "\n\n";
+
     txt += "Priority Breakdown:\n";
     txt += "  [CRITICAL] <30%: " + highCount + " prompts\n";
     txt += "  [MODERATE] 30-60%: " + medCount + " prompts\n";
@@ -419,11 +419,11 @@ export default function ClientDashboard() {
         </nav>
         <div className="p-3 border-t border-gray-100 flex-shrink-0">
           <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-4 mb-3 shadow-lg overflow-hidden">
-            <div className="text-xs font-medium text-gray-400 mb-1">API Cost</div>
-            <div className="text-xl font-bold text-white truncate">${totalCost.toFixed(4)}</div>
+            <div className="text-xs font-medium text-gray-400 mb-1">Audits Completed</div>
+            <div className="text-xl font-bold text-white truncate">{auditResults.length}</div>
             <div className="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
               <span className="inline-block w-2 h-2 rounded-full bg-green-400 flex-shrink-0 animate-pulse"></span>
-              <span className="truncate">{auditResults.length} audits run</span>
+              <span className="truncate">Total audits run</span>
             </div>
           </div>
           <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 text-left transition-colors">
@@ -530,13 +530,13 @@ export default function ClientDashboard() {
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">API Cost</div>
+              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Audits Completed</div>
               <div className="p-2.5 bg-amber-50 rounded-lg"><CreditCard className="h-5 w-5 text-amber-600" /></div>
             </div>
             <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-gray-950">${totalCost.toFixed(2)}</span>
+              <span className="text-4xl font-bold text-gray-950">{filteredAuditResults.length}</span>
             </div>
-            <div className="mt-3 text-xs font-medium text-gray-400">{filteredAuditResults.length} audits completed</div>
+            <div className="mt-3 text-xs font-medium text-gray-400">{domainStats.length} unique domains</div>
           </div>
         </div>
         <div className="grid grid-cols-5 gap-6">
@@ -1913,10 +1913,7 @@ export default function ClientDashboard() {
                   <div className="text-3xl font-bold text-purple-700">{result.summary.total_citations}</div>
                   <div className="text-sm font-medium text-purple-600 mt-1">Citations</div>
                 </div>
-                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 text-center">
-                  <div className="text-3xl font-bold text-amber-700">${result.summary.total_cost.toFixed(4)}</div>
-                  <div className="text-sm font-medium text-amber-600 mt-1">Cost</div>
-                </div>
+
               </div>
 
               {/* Tabs */}
