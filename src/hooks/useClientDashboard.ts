@@ -419,7 +419,7 @@ export function useClientDashboard() {
         .select("*")
         .order("created_at", { ascending: false });
 
-      if (!fetchError && data && data.length > 0) {
+      if (!fetchError && data) {
         const mappedClients: Client[] = data.map(c => ({
           id: c.id, name: c.name, brand_name: c.brand_name, brand_domain: c.brand_domain,
           brand_tags: c.brand_tags || [], slug: c.slug, target_region: c.target_region,
@@ -428,9 +428,12 @@ export function useClientDashboard() {
         }));
         setClients(mappedClients);
         saveToStorage(STORAGE_KEYS.CLIENTS, mappedClients);
-        const lastSelectedId = loadFromStorage<string>(STORAGE_KEYS.SELECTED_CLIENT, mappedClients[0]?.id);
-        const lastSelected = mappedClients.find(c => c.id === lastSelectedId) || mappedClients[0];
-        setSelectedClient(lastSelected);
+
+        if (mappedClients.length > 0) {
+          const lastSelectedId = loadFromStorage<string>(STORAGE_KEYS.SELECTED_CLIENT, mappedClients[0]?.id);
+          const lastSelected = mappedClients.find(c => c.id === lastSelectedId) || mappedClients[0];
+          setSelectedClient(lastSelected);
+        }
         return;
       }
     } catch (err) { console.log("Supabase fetch failed, using localStorage:", err); }
@@ -456,6 +459,31 @@ export function useClientDashboard() {
   }, []);
 
   const addClient = useCallback(async (clientData: Partial<Client>): Promise<Client> => {
+    // Check 1-brand limit for normal users
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
+    // Fetch user's role
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    const isAdmin = profile?.role === 'admin';
+
+    // Check if normal user already has a brand
+    if (!isAdmin) {
+      const { data: existingAssignments } = await supabase
+        .from('user_clients')
+        .select('client_id')
+        .eq('user_id', user.id);
+
+      if (existingAssignments && existingAssignments.length >= 1) {
+        throw new Error('Normal users can only create 1 brand. Please contact admin to add more brands.');
+      }
+    }
+
     const newClient: Client = {
       id: crypto.randomUUID(),
       name: clientData.name || "New Client",
@@ -480,8 +508,22 @@ export function useClientDashboard() {
         industry: newClient.industry, primary_color: newClient.primary_color,
         brand_tags: newClient.brand_tags, competitors: newClient.competitors,
       });
-      if (insertError) console.error("Supabase insert error:", insertError);
-    } catch (err) { console.log("Supabase insert failed:", err); }
+      if (insertError) throw insertError;
+
+      // Auto-assign brand to user who created it
+      const { error: assignError } = await supabase
+        .from('user_clients')
+        .insert({
+          user_id: user.id,
+          client_id: newClient.id,
+          granted_by: user.id
+        });
+
+      if (assignError) console.error('Error auto-assigning brand:', assignError);
+    } catch (err) {
+      console.log("Supabase insert failed:", err);
+      throw err;
+    }
 
     const newClients = [...clients, newClient];
     setClients(newClients);

@@ -708,6 +708,25 @@ CREATE TABLE forzeo_prompts (
 );
 ```
 
+### profiles Table (User Management)
+
+Stores user role information and profile data. Linked to Supabase Auth `auth.users`.
+
+```sql
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY,               -- Matches auth.users.id
+  email TEXT,
+  role TEXT DEFAULT 'user',          -- "admin" or "user"
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ,
+  last_login_at TIMESTAMPTZ
+);
+```
+
+**RLS Policies:**
+- Users can view/edit their own profile.
+- **Admins** can view all profiles. (Updated in v2.1)
+
 ---
 
 ## API Integration

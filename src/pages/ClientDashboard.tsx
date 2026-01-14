@@ -3,7 +3,10 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Sparkles, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb, Target } from "lucide-react";
+import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Tag, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, Key, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Zap, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb, Target, LogOut } from "lucide-react";
+import { useAuth } from "../hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import { UserManagement } from "@/components/UserManagement";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -86,6 +89,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 
 export default function ClientDashboard() {
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { isAdmin } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns" | "insights" | "intelligence">("overview");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
@@ -93,6 +97,7 @@ export default function ClientDashboard() {
   const [newPrompt, setNewPrompt] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [userManagementOpen, setUserManagementOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [editClientOpen, setEditClientOpen] = useState(false);
   const [manageBrandsOpen, setManageBrandsOpen] = useState(false);
@@ -408,12 +413,19 @@ export default function ClientDashboard() {
         </div>
         <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">General</div>
-          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "insights", label: "Insights", icon: Lightbulb }, { id: "intelligence", label: "Intelligence", icon: Target }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Sparkles }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: Wand2 }].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}</button>))}
+          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true }, { id: "intelligence", label: "Intelligence", icon: Target }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Zap }, { id: "citations", label: "Citations", icon: Link2, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "sources", label: "Sources", icon: Globe }, { id: "content", label: "Content", icon: FileText }].filter(item => isAdmin || !["campaigns", "intelligence", "analytics", "schedules", "signals"].includes(item.id)).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 text-left transition-all"><Tag className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Tags</span></button>
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Company</div>
+          {isAdmin && (
+            <button onClick={() => setUserManagementOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all">
+              <Users className="h-4 w-4 flex-shrink-0 text-gray-400" />
+              <span className="flex-1 truncate">Users</span>
+              <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-purple-100 text-purple-600">Admin</span>
+            </button>
+          )}
           <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Key className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">API Keys</span></button>
           <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 text-left transition-all"><CreditCard className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Billing</span></button>
         </nav>
@@ -430,6 +442,10 @@ export default function ClientDashboard() {
             <HelpCircle className="h-4 w-4 flex-shrink-0 text-gray-400" />
             <span className="flex-1 truncate">Help & Support</span>
           </button>
+          <button onClick={() => supabase.auth.signOut()} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 text-left transition-colors mt-1">
+            <LogOut className="h-4 w-4 flex-shrink-0" />
+            <span className="flex-1 truncate">Sign Out</span>
+          </button>
         </div>
       </aside>
 
@@ -443,7 +459,12 @@ export default function ClientDashboard() {
                 <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors", dateRangeFilter !== "all" ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Calendar className="h-3.5 w-3.5" /> {dateRangeLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setDateRangeFilter("7d")} className={cn(dateRangeFilter === "7d" && "bg-blue-50")}>Last 7 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("30d")} className={cn(dateRangeFilter === "30d" && "bg-blue-50")}>Last 30 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("90d")} className={cn(dateRangeFilter === "90d" && "bg-blue-50")}>Last 90 days</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setDateRangeFilter("all")} className={cn(dateRangeFilter === "all" && "bg-blue-50")}>All Time</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
                 <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors", modelFilter.length > 0 ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Filter className="h-3.5 w-3.5" /> {modelFilterLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; const isSelected = modelFilter.length === 0 || modelFilter.includes(model.id); return (<DropdownMenuItem key={model.id} onClick={() => toggleModelFilter(model.id)} className={cn(isSelected && "bg-blue-50")}><div className="flex items-center gap-2 w-full">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="flex-1">{model.name}</span>{isSelected && <CheckCircle className="h-3 w-3 text-blue-600" />}</div></DropdownMenuItem>); })}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setModelFilter([])}>Clear Filters</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               </div>
-              {activeTab === "prompts" && <Button onClick={() => setBulkPromptsOpen(true)} variant="outline" size="sm"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>}
+              {activeTab === "prompts" && (
+                <>
+                  {!isAdmin && <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= 30 ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/30 Prompts</span>}
+                  <Button onClick={() => setBulkPromptsOpen(true)} variant="outline" size="sm" disabled={!isAdmin && prompts.length >= 30}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+                </>
+              )}
               <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Forzeo Discovery Engine"><span className={cn("w-2 h-2 rounded-full", includeTavily ? "bg-amber-500" : "bg-gray-300")} />{includeTavily ? "Discovery On" : "Discovery Off"}</button>
               <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>
@@ -486,6 +507,7 @@ export default function ClientDashboard() {
         </div>
       </main>
       {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{ImportDialog()}{RunCampaignDialog()}
+      <UserManagement open={userManagementOpen} onOpenChange={setUserManagementOpen} />
       <input ref={fileInputRef} type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileImport} />
     </div>
   );
@@ -645,8 +667,12 @@ export default function ClientDashboard() {
             <Button onClick={() => setRunCampaignOpen(true)} variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-800">
               <Play className="h-4 w-4 mr-2" /> Run Campaign
             </Button>
-            <span className="text-sm text-gray-500">{prompts.length} total prompts</span>
-            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+            {isAdmin ? (
+              <span className="text-sm text-gray-500">{prompts.length} total prompts</span>
+            ) : (
+              <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= 30 ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/30 Prompts</span>
+            )}
+            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800" disabled={!isAdmin && prompts.length >= 30}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
           </div>
         </div>
 
@@ -770,7 +796,8 @@ export default function ClientDashboard() {
                   <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                   <p className="text-gray-600 font-medium">No prompts yet</p>
                   <p className="text-sm text-gray-500 mt-1">Add your first prompt to get started with audits.</p>
-                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4"><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4" disabled={!isAdmin && prompts.length >= 30}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+                  {!isAdmin && prompts.length >= 30 && <p className="text-xs text-red-500 mt-2">Free prompt limit reached (30/30)</p>}
                 </>
               )}
             </div>
@@ -1043,7 +1070,7 @@ export default function ClientDashboard() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="article">Article</SelectItem><SelectItem value="listicle">Listicle (Top 10)</SelectItem><SelectItem value="comparison">Comparison Guide</SelectItem><SelectItem value="guide">How-To Guide</SelectItem><SelectItem value="faq">FAQ Section</SelectItem></SelectContent></Select></div></div>
               <div className="p-4 bg-gray-50 rounded-lg"><Label className="text-sm font-medium">Content will include:</Label><div className="mt-3 flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><Building2 className="h-3.5 w-3.5" />{c}</span>)}</div></div>
-              <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : <><Sparkles className="h-4 w-4 mr-2" /> Generate Content</>}</Button>
+              <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : "Generate Content"}</Button>
               {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="prose prose-sm max-w-none p-4 bg-gray-50 rounded-lg border max-h-[500px] overflow-y-auto"><pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans">{generatedContent}</pre></div></div>)}
             </div>
           </div>
@@ -1241,7 +1268,7 @@ export default function ClientDashboard() {
                   disabled={isAutoFinding || !newClientForm.brand_name}
                   className="h-6 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
                 >
-                  {isAutoFinding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                  {isAutoFinding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
                   {isAutoFinding ? "Finding..." : "Auto-Find"}
                 </Button>
               </div>
@@ -1395,7 +1422,7 @@ export default function ClientDashboard() {
                   disabled={isAutoFinding || !editClientForm.brand_name}
                   className="h-6 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
                 >
-                  {isAutoFinding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                  {isAutoFinding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
                   {isAutoFinding ? "Finding..." : "Auto-Find"}
                 </Button>
               </div>
@@ -1548,7 +1575,7 @@ export default function ClientDashboard() {
               className="bg-white"
             />
             <Button onClick={handleGeneratePrompts} disabled={generatingPrompts}>
-              {generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-purple-200" />}
+              {generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             </Button>
           </div>
         </div>
@@ -1722,7 +1749,7 @@ export default function ClientDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-purple-600" />
+
                   AI-Powered Pinpoint Insights
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">Strategic recommendations using Advanced AI + aggregated data</p>
@@ -1730,9 +1757,9 @@ export default function ClientDashboard() {
               <Button
                 onClick={handleGenerateAiInsights}
                 disabled={generatingAiInsights || filteredAuditResults.length === 0}
-                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md"
+                className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white shadow-md"
               >
-                {generatingAiInsights ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                {generatingAiInsights ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 {generatingAiInsights ? "Generating..." : aiInsights ? "Refresh" : "Generate AI Insights"}
               </Button>
             </div>
@@ -1779,7 +1806,7 @@ export default function ClientDashboard() {
             ) : (
               <div className="text-center py-8">
                 <div className="p-4 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                  <Sparkles className="h-8 w-8 text-purple-600" />
+                  <Lightbulb className="h-8 w-8 text-purple-600" />
                 </div>
                 <h4 className="font-semibold text-gray-900">Get AI-Powered Insights</h4>
                 <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">
@@ -1794,7 +1821,7 @@ export default function ClientDashboard() {
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-amber-50 via-yellow-50 to-orange-50">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-amber-600" />
+              <Lightbulb className="h-5 w-5 text-amber-600" />
               Top Recommendations
             </h3>
             <p className="text-sm text-gray-500 mt-1">Actionable insights aggregated from all audits</p>
@@ -1921,7 +1948,7 @@ export default function ClientDashboard() {
                 <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
                   <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
                   <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Citations ({uniqueCitations.length})</button>
-                  <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}><Sparkles className="h-3.5 w-3.5" />Discovery Engine</button>
+                  <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Discovery Engine</button>
                   <button onClick={() => { if (recommendations) setDetailTab("insights"); else handleGenerateRecommendations(); }} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "insights" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>
                     {generatingRecommendations ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
                     Insights
@@ -2079,7 +2106,7 @@ export default function ClientDashboard() {
                       {tavilyData.answer && (
                         <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-4">
                           <div className="text-xs font-semibold text-purple-600 uppercase tracking-wide mb-2 flex items-center gap-2">
-                            <Sparkles className="h-3.5 w-3.5" />AI-Generated Answer
+                            AI-Generated Answer
                           </div>
                           <p className="text-gray-800 leading-relaxed">{tavilyData.answer}</p>
                         </div>
@@ -2188,7 +2215,7 @@ export default function ClientDashboard() {
                     </>
                   ) : (
                     <div className="text-center py-12 bg-gray-50 rounded-xl border border-gray-200">
-                      <Sparkles className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                      <FileText className="h-12 w-12 mx-auto mb-3 text-gray-300" />
                       <p className="text-gray-600 font-medium mb-2">No Discovery Engine data available</p>
                       <p className="text-sm text-gray-500 mb-4">Enable "Discovery On" and re-run this prompt to see AI source analysis.</p>
                     </div>
@@ -2204,7 +2231,7 @@ export default function ClientDashboard() {
                       <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl shadow-lg shadow-purple-200">
-                            <Wand2 className="h-5 w-5 text-white" />
+                            <FileText className="h-5 w-5 text-white" />
                           </div>
                           <div>
                             <span className="font-semibold text-gray-900">AI-Generated Visibility Content</span>
@@ -2241,7 +2268,7 @@ export default function ClientDashboard() {
                       <div className="p-4 border-t border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
                         <div className="flex items-start gap-3">
                           <div className="p-2 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex-shrink-0 shadow-sm">
-                            <Sparkles className="h-4 w-4 text-white" />
+                            <Lightbulb className="h-4 w-4 text-white" />
                           </div>
                           <div>
                             <p className="text-sm font-semibold text-gray-800">How to maximize AI visibility</p>
@@ -2258,7 +2285,7 @@ export default function ClientDashboard() {
                       <p className="text-gray-800 font-semibold text-lg mb-2">Generate AI-Optimized Content</p>
                       <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Create humanized, E-E-A-T optimized content based on your audit results, Discovery Engine source analysis, and competitor insights.</p>
                       <Button onClick={handleGenerateVisibilityContent} disabled={generatingVisibilityContent} size="lg" className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-lg shadow-purple-200 transition-all">
-                        {generatingVisibilityContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating humanized content...</> : <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>}
+                        {generatingVisibilityContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating humanized content...</> : "Generate Content"}
                       </Button>
                       <div className="flex items-center justify-center gap-4 mt-6 text-xs text-gray-400">
                         <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Audit-based</span>
@@ -2333,7 +2360,7 @@ export default function ClientDashboard() {
                       <div className="p-4 border-t border-gray-100 bg-gradient-to-r from-amber-50 to-orange-50">
                         <div className="flex items-start gap-3">
                           <div className="p-2 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex-shrink-0 shadow-sm">
-                            <Sparkles className="h-4 w-4 text-white" />
+                            <Lightbulb className="h-4 w-4 text-white" />
                           </div>
                           <div>
                             <p className="text-sm font-semibold text-gray-800">Powered by AI Analysis</p>

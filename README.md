@@ -94,6 +94,14 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates (January 2026)
 
+### v2.1 - RBAC & Usability Improvements (Jan 14, 2026)
+- **Role-Based Access Control (RBAC)**: Enhanced admin capabilities to view all user profiles while restricting standard users to their own data.
+- **Prompt Limits**: Increased free prompt limit from 5 to **30 prompts**. Added visual usage indicators (e.g., "12/30 Prompts") in header and tabs.
+- **UI Refinements**: 
+  - Added **Sign Out** button to sidebar footer.
+  - Updated **Generate AI Insights** button to a high-visibility Red/Rose gradient.
+  - Improved handling of empty states and redirect URLs.
+
 ### Citation Intelligence - Major UI/UX Overhaul
 The Citation Intelligence dashboard now includes comprehensive personalization and data management features:
 
