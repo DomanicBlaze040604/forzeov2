@@ -231,6 +231,20 @@ ALTER TABLE tavily_results ENABLE ROW LEVEL SECURITY;
 -- Step 19: Grant permissions
 GRANT ALL ON user_clients TO authenticated;
 
+-- Allow authenticated users to create clients
+DROP POLICY IF EXISTS "Users can create clients" ON clients;
+CREATE POLICY "Users can create clients"
+ON clients FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+-- Allow authenticated users to link themselves to clients
+DROP POLICY IF EXISTS "Users can create client associations" ON user_clients;
+CREATE POLICY "Users can create client associations"
+ON user_clients FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
 -- ============================================
 -- SUCCESS! Now run these commands separately:
 -- ============================================

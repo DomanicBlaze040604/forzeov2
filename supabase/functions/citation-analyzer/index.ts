@@ -134,6 +134,37 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Retry logic with exponential backoff
+async function fetchWithRetry(
+    url: string,
+    options: RequestInit,
+    maxRetries: number = 2
+): Promise<Response> {
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            if (response.ok || response.status < 500) {
+                return response;
+            }
+            // Server error, retry
+            console.log(`[Retry] Attempt ${attempt + 1} failed with ${response.status}, retrying...`);
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            console.log(`[Retry] Attempt ${attempt + 1} failed: ${lastError.message}`);
+        }
+        if (attempt < maxRetries) {
+            await sleep(1000 * Math.pow(2, attempt)); // 1s, 2s backoff
+        }
+    }
+    throw lastError || new Error('Max retries exceeded');
+}
+
+// Rate limiting constants (optimized for reliability)
+const GROQ_DELAY_MS = 1000; // Reduced from 2000ms
+const TAVILY_DELAY_MS = 250; // Reduced from 500ms
+const URL_VERIFY_DELAY_MS = 200; // Reduced from 300ms
+
 // ============================================
 // URL VERIFICATION
 // ============================================
@@ -252,7 +283,7 @@ async function extractContentWithTavily(url: string): Promise<string | null> {
     if (!TAVILY_API_KEY) return null;
     try {
         console.log(`[Tavily] Extracting content for: ${url}`);
-        const response = await fetch("https://api.tavily.com/search", {
+        const response = await fetchWithRetry("https://api.tavily.com/search", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -264,7 +295,7 @@ async function extractContentWithTavily(url: string): Promise<string | null> {
                 include_raw_content: true,
                 max_results: 1
             })
-        });
+        }, 1); // 1 retry for Tavily
 
         if (!response.ok) {
             console.error(`[Tavily] Error: ${response.status}`);
@@ -324,7 +355,7 @@ Return JSON:
 }`;
 
     try {
-        const response = await fetch(GROQ_API_URL, {
+        const response = await fetchWithRetry(GROQ_API_URL, {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${GROQ_API_KEY}`,
@@ -340,7 +371,7 @@ Return JSON:
                 max_tokens: 800,
                 response_format: { type: "json_object" }
             })
-        });
+        }, 2); // 2 retries for Groq
 
         if (!response.ok) {
             console.error(`[Groq] HTTP ${response.status}`);
@@ -733,7 +764,7 @@ Generate the press release now. Make it newsworthy, not promotional.`;
     }
 
     try {
-        const response = await fetch(GROQ_API_URL, {
+        const response = await fetchWithRetry(GROQ_API_URL, {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${GROQ_API_KEY}`,
@@ -748,7 +779,7 @@ Generate the press release now. Make it newsworthy, not promotional.`;
                 temperature: 0.8,
                 max_tokens: 1500
             })
-        });
+        }, 2); // 2 retries for Groq
 
         if (!response.ok) {
             console.error(`[Groq] HTTP ${response.status}`);
@@ -855,8 +886,10 @@ serve(async (req: Request) => {
                         query = query.gte('created_at', date.toISOString());
                     } else if (request.scope === 'all') {
                         // Fetch all for this client, limit to avoid timeout (Edge Functions have 60s limit)
-                        // Processing 50 citations with verification + AI takes ~40-50 seconds
-                        query = query.limit(50);
+                        // With deep analysis (Tavily), limit to 20. Without, can do 35.
+                        const batchLimit = request.use_tavily ? 20 : 35;
+                        query = query.limit(batchLimit);
+                        console.log(`[Citation Analyzer] Using batch limit: ${batchLimit} (deep analysis: ${request.use_tavily})`);
                     } else {
                         // Default: Latest audit only
                         if (request.audit_result_id) {
@@ -910,7 +943,7 @@ serve(async (req: Request) => {
                     // Verify URL
                     console.log(`[Citation Analyzer] Verifying: ${citation.url.substring(0, 50)}...`);
                     const verification = await verifyUrl(citation.url);
-                    await sleep(300); // Rate limiting
+                    await sleep(URL_VERIFY_DELAY_MS); // Rate limiting
 
                     // Classify citation
                     const classification = classifyCitation(
@@ -930,7 +963,7 @@ serve(async (req: Request) => {
                     let extractedContent: string | null = null;
                     if (request.use_tavily && !isHallucinated && TAVILY_API_KEY) {
                         extractedContent = await extractContentWithTavily(citation.url);
-                        await sleep(500); // Additional rate limiting for Tavily
+                        await sleep(TAVILY_DELAY_MS); // Rate limiting for Tavily
                     }
 
                     // AI analysis with Groq
@@ -948,7 +981,7 @@ serve(async (req: Request) => {
                             );
                             aiAnalysis = groqResult.analysis;
                             recommendation = groqResult.recommendation;
-                            await sleep(2000); // Rate limiting for Groq (30 req/min = 2s per request)
+                            await sleep(GROQ_DELAY_MS); // Rate limiting for Groq
                         }
 
                         // Fallback: If Groq failed, wasn't configured, or didn't return a recommendation

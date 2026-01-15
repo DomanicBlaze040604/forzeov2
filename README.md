@@ -94,6 +94,15 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates (January 2026)
 
+### v2.2 - Comprehensive Schema & Reliability (Jan 15, 2026)
+- **Complete Production Schema**: Single SQL file (`database/complete_production_schema.sql`) with all 27 tables, 12 functions, 7 views, and 28+ RLS policies for easy Supabase setup.
+- **Deep Analysis Reliability**: Citation analyzer now uses retry logic with exponential backoff, reduced batch sizes (50→20), and optimized delays for consistent results.
+- **Performance Optimizations**:
+  - Groq API delay: 2000ms → 1000ms
+  - Tavily delay: 500ms → 250ms  
+  - URL verification: 300ms → 200ms
+- **Schema Additions**: Added `title`, `model`, `last_verified_at`, `hallucination_reason`, `subcategory`, `processed_at` to citation_intelligence; `estimated_effort` to citation_recommendations.
+
 ### v2.1 - RBAC & Usability Improvements (Jan 14, 2026)
 - **Role-Based Access Control (RBAC)**: Enhanced admin capabilities to view all user profiles while restricting standard users to their own data.
 - **Prompt Limits**: Increased free prompt limit from 5 to **30 prompts**. Added visual usage indicators (e.g., "12/30 Prompts") in header and tabs.

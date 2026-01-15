@@ -88,12 +88,13 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
   const { isAdmin } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns" | "insights" | "intelligence">("overview");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [newPrompt, setNewPrompt] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -102,6 +103,9 @@ export default function ClientDashboard() {
   const [editClientOpen, setEditClientOpen] = useState(false);
   const [manageBrandsOpen, setManageBrandsOpen] = useState(false);
   const [selectedPromptDetail, setSelectedPromptDetail] = useState<string | null>(null);
+  const [editPromptOpen, setEditPromptOpen] = useState(false);
+  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  const [editingPromptText, setEditingPromptText] = useState("");
   const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
   const [newTag, setNewTag] = useState("");
   const [newCompetitor, setNewCompetitor] = useState("");
@@ -131,6 +135,7 @@ export default function ClientDashboard() {
   const [isAutoFinding, setIsAutoFinding] = useState(false);
   const [aiInsights, setAiInsights] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string; keyActions: string[] } | null>(null);
   const [generatingAiInsights, setGeneratingAiInsights] = useState(false);
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
@@ -238,8 +243,28 @@ export default function ClientDashboard() {
   const citationsByPrompt = useMemo(() => { const map: Record<string, typeof allCitations> = {}; filteredAuditResults.forEach(r => { const promptCitations: typeof allCitations = []; r.model_results.forEach(mr => { mr.citations.forEach(c => { promptCitations.push({ ...c, count: 1, prompts: [r.prompt_text] }); }); }); if (promptCitations.length > 0) map[r.prompt_id] = promptCitations; }); return map; }, [filteredAuditResults]);
   const exportCitations = () => { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `citations-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); };
 
-  const handleAddPrompt = async () => { if (newPrompt.trim()) { await addCustomPrompt(newPrompt.trim()); setNewPrompt(""); } };
-  const handleBulkAdd = () => { if (bulkPrompts.trim()) { addMultiplePrompts(bulkPrompts.split("\n").filter(l => l.trim().length > 3)); setBulkPrompts(""); setBulkPromptsOpen(false); } };
+  const handleAddPrompt = async () => {
+    if (newPrompt.trim()) {
+      try {
+        await addCustomPrompt(newPrompt.trim());
+        setNewPrompt("");
+      } catch (err: any) {
+        alert(err.message || "Failed to add prompt.");
+        // Keep input value so user can retry
+      }
+    }
+  };
+  const handleBulkAdd = async () => {
+    if (bulkPrompts.trim()) {
+      try {
+        await addMultiplePrompts(bulkPrompts.split("\n").filter(l => l.trim().length > 3));
+        setBulkPrompts("");
+        setBulkPromptsOpen(false);
+      } catch (err: any) {
+        alert(err.message || "Failed to add prompts.");
+      }
+    }
+  };
   const handleGeneratePrompts = async () => {
     if (!keywordsInput.trim()) return;
     setGeneratingPrompts(true);
@@ -260,7 +285,32 @@ export default function ClientDashboard() {
   const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType); if (c) setGeneratedContent(c); } finally { setGeneratingContent(false); } };
   const handleImport = () => { if (importText.trim()) { importData(importText); setImportText(""); setImportDialogOpen(false); } };
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = (ev) => importData(ev.target?.result as string); r.readAsText(f); } };
-  const handleCreateClient = async () => { if (!newClientForm.name.trim()) return; const comps = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); const finalIndustry = newClientForm.industry === "Custom" && newClientForm.customIndustry.trim() ? newClientForm.customIndustry.trim() : newClientForm.industry; await addClient({ name: newClientForm.name, brand_name: newClientForm.brand_name || newClientForm.name, brand_domain: newClientForm.website.trim() || undefined, target_region: newClientForm.target_region, location_code: locations[newClientForm.target_region] || 2840, industry: finalIndustry, competitors: comps.length > 0 ? comps : industries[newClientForm.industry]?.competitors || [], primary_color: newClientForm.primary_color }); setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" }); setAddClientOpen(false); };
+  const handleCreateClient = async () => {
+    if (!newClientForm.name.trim()) return;
+    setIsCreatingClient(true);
+    try {
+      const comps = newClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean);
+      const finalIndustry = newClientForm.industry === "Custom" && newClientForm.customIndustry.trim() ? newClientForm.customIndustry.trim() : newClientForm.industry;
+      await addClient({
+        name: newClientForm.name,
+        brand_name: newClientForm.brand_name || newClientForm.name,
+        brand_domain: newClientForm.website.trim() || undefined,
+        target_region: newClientForm.target_region,
+        location_code: locations[newClientForm.target_region] || 2840,
+        industry: finalIndustry,
+        competitors: comps.length > 0 ? comps : industries[newClientForm.industry]?.competitors || [],
+        primary_color: newClientForm.primary_color
+      });
+      setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" });
+      setAddClientOpen(false);
+    } catch (err: any) {
+      console.error("Failed to create client:", err);
+      // Use explicit alert for user feedback since we don't have a toast component ready-to-hand in this file
+      alert(err.message || "Failed to create brand. Please check if you have reached your limit.");
+    } finally {
+      setIsCreatingClient(false);
+    }
+  };
   const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; const comps = editClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); const finalIndustry = editClientForm.industry === "Custom" && editClientForm.customIndustry.trim() ? editClientForm.customIndustry.trim() : editClientForm.industry; await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, brand_domain: editClientForm.website.trim() || undefined, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: finalIndustry, primary_color: editClientForm.primary_color, competitors: comps }); setEditClientOpen(false); };
   const handleDeleteClient = async () => { if (!selectedClient || clients.length <= 1) return; if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
   const handleAddTag = () => { if (newTag.trim() && selectedClient) { updateBrandTags([...selectedClient.brand_tags, newTag.trim()]); setNewTag(""); } };
@@ -433,8 +483,15 @@ export default function ClientDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      <aside className={cn("bg-white border-r border-gray-200 flex flex-col fixed h-full z-20 transition-all duration-300 shadow-sm overflow-hidden", sidebarCollapsed ? "w-0 opacity-0" : "w-56 opacity-100")}>
-        <div className="p-4 border-b border-gray-100 flex-shrink-0">
+      <aside className={cn(
+        "bg-white border-r border-gray-200 flex flex-col fixed h-full z-40 transition-all duration-300 shadow-sm overflow-hidden",
+        // Mobile: Fixed overlay, toggled by mobileMenuOpen
+        "md:translate-x-0 w-56",
+        mobileMenuOpen ? "translate-x-0 shadow-xl" : "-translate-x-full md:translate-x-0",
+        // Desktop: Toggled by sidebarCollapsed
+        sidebarCollapsed && "md:w-0 md:-translate-x-full"
+      )}>
+        <div className="p-4 border-b border-gray-100 flex-shrink-0 flex items-center justify-between">
           <DropdownMenu>
             <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors"><div className="h-8 w-8 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span></div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" /></button></DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-52">{clients.map(c => (<DropdownMenuItem key={c.id} onClick={() => switchClient(c)} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-5 w-5 rounded flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: c.primary_color }}><span className="text-white text-xs font-bold">{c.brand_name.charAt(0)}</span></div><span className="truncate">{c.brand_name}</span></div>{c.id === selectedClient?.id && <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />}</DropdownMenuItem>))}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setAddClientOpen(true)}><Plus className="h-4 w-4 mr-2 flex-shrink-0" /> Add Brand</DropdownMenuItem></DropdownMenuContent>
@@ -479,15 +536,34 @@ export default function ClientDashboard() {
         </div>
       </aside>
 
-      <main className={cn("flex-1 min-h-screen transition-all duration-300", sidebarCollapsed ? "ml-0" : "ml-56")}>
-        <header className="bg-white border-b border-gray-200 px-6 py-3 sticky top-0 z-10">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3"><button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>{sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button><h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-gray-400" />{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "analytics" ? "Visibility Analytics" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "signals" ? "Fresh Signal Intelligence" : activeTab === "campaigns" ? "Campaign Runs" : activeTab === "content" ? "Content Generator" : "Citations"}</h1>{(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs">Filtered</Badge>}</div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white shadow-sm text-gray-900"><div className="h-4 w-4 rounded flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white text-[10px] font-bold">{selectedClient?.brand_name?.charAt(0)}</span></div>{selectedClient?.brand_name}</button>
-                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors", dateRangeFilter !== "all" ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Calendar className="h-3.5 w-3.5" /> {dateRangeLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setDateRangeFilter("7d")} className={cn(dateRangeFilter === "7d" && "bg-blue-50")}>Last 7 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("30d")} className={cn(dateRangeFilter === "30d" && "bg-blue-50")}>Last 30 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("90d")} className={cn(dateRangeFilter === "90d" && "bg-blue-50")}>Last 90 days</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setDateRangeFilter("all")} className={cn(dateRangeFilter === "all" && "bg-blue-50")}>All Time</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
-                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors", modelFilter.length > 0 ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Filter className="h-3.5 w-3.5" /> {modelFilterLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; const isSelected = modelFilter.length === 0 || modelFilter.includes(model.id); return (<DropdownMenuItem key={model.id} onClick={() => toggleModelFilter(model.id)} className={cn(isSelected && "bg-blue-50")}><div className="flex items-center gap-2 w-full">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="flex-1">{model.name}</span>{isSelected && <CheckCircle className="h-3 w-3 text-blue-600" />}</div></DropdownMenuItem>); })}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setModelFilter([])}>Clear Filters</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+      {/* Mobile Overlay */}
+      {mobileMenuOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setMobileMenuOpen(false)} />}
+
+      <main className={cn("flex-1 min-h-screen transition-all duration-300", sidebarCollapsed ? "ml-0" : "md:ml-56")}>
+        <header className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-20">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              {/* Mobile Toggle */}
+              <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="md:hidden p-2 rounded-lg hover:bg-gray-100 text-gray-500">
+                <PanelLeft className="h-5 w-5" />
+              </button>
+              {/* Desktop Toggle */}
+              <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="hidden md:block p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>
+                {sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+              </button>
+              <h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2 truncate">
+                <FileText className="h-5 w-5 text-gray-400 hidden sm:block" />
+                <span className="truncate">{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "analytics" ? "Visibility Analytics" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "signals" ? "Fresh Signal Intelligence" : activeTab === "campaigns" ? "Campaign Runs" : activeTab === "content" ? "Content Generator" : "Citations"}</span>
+              </h1>
+              {(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs hidden sm:inline-flex">Filtered</Badge>}
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
+              {/* Client Badge - Hidden on small mobile to save space if needed, or kept compact */}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white shadow-sm text-gray-900 whitespace-nowrap"><div className="h-4 w-4 rounded flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white text-[10px] font-bold">{selectedClient?.brand_name?.charAt(0)}</span></div>{selectedClient?.brand_name}</button>
+                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap", dateRangeFilter !== "all" ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Calendar className="h-3.5 w-3.5" /> {dateRangeLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setDateRangeFilter("7d")} className={cn(dateRangeFilter === "7d" && "bg-blue-50")}>Last 7 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("30d")} className={cn(dateRangeFilter === "30d" && "bg-blue-50")}>Last 30 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("90d")} className={cn(dateRangeFilter === "90d" && "bg-blue-50")}>Last 90 days</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setDateRangeFilter("all")} className={cn(dateRangeFilter === "all" && "bg-blue-50")}>All Time</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap", modelFilter.length > 0 ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Filter className="h-3.5 w-3.5" /> {modelFilterLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; const isSelected = modelFilter.length === 0 || modelFilter.includes(model.id); return (<DropdownMenuItem key={model.id} onClick={() => toggleModelFilter(model.id)} className={cn(isSelected && "bg-blue-50")}><div className="flex items-center gap-2 w-full">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="flex-1">{model.name}</span>{isSelected && <CheckCircle className="h-3 w-3 text-blue-600" />}</div></DropdownMenuItem>); })}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setModelFilter([])}>Clear Filters</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               </div>
               {activeTab === "prompts" && (
                 <>
@@ -536,7 +612,7 @@ export default function ClientDashboard() {
           )}
         </div>
       </main>
-      {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{ImportDialog()}{RunCampaignDialog()}
+      {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{EditPromptDialog()}{ImportDialog()}{RunCampaignDialog()}
       <UserManagement open={userManagementOpen} onOpenChange={setUserManagementOpen} />
       <input ref={fileInputRef} type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileImport} />
     </div>
@@ -546,7 +622,7 @@ export default function ClientDashboard() {
     const overallVisibility = filteredAuditResults.length > 0 ? Math.round(filteredAuditResults.reduce((sum, r) => sum + r.summary.share_of_voice, 0) / filteredAuditResults.length) : 0;
     return (
       <div className="space-y-6 fade-in">
-        <div className="grid grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Overall Visibility</div>
@@ -591,20 +667,20 @@ export default function ClientDashboard() {
             <div className="mt-3 text-xs font-medium text-gray-400">{domainStats.length} unique domains</div>
           </div>
         </div>
-        <div className="grid grid-cols-5 gap-6">
-          <div className="col-span-3 bg-white rounded-xl border border-gray-200 p-5">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+          <div className="col-span-1 md:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Eye className="h-4 w-4 text-gray-400" /> Visibility by Model</h3><p className="text-xs text-gray-500 mt-0.5">Percentage of responses mentioning your brand</p></div></div>
             <div className="space-y-4 mt-6">{AI_MODELS.filter(m => selectedModels.includes(m.id)).map(model => { const stats = modelStats[model.id] || { visible: 0, total: 0, cost: 0 }; const pct = stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0; const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; return (<div key={model.id} className="flex items-center gap-3"><div className="w-32 flex items-center gap-2">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="text-sm text-gray-700 truncate">{model.name}</span></div><div className="flex-1 h-8 bg-gray-100 rounded-full overflow-hidden relative"><div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: color }} /><span className="absolute inset-0 flex items-center justify-center text-xs font-medium" style={{ color: pct > 50 ? "white" : "#374151" }}>{pct}%</span></div><span className="text-sm font-medium text-gray-600 w-16 text-right">{stats.visible}/{stats.total}</span></div>); })}</div>
             {filteredAuditResults.length === 0 && <div className="text-center py-8 text-gray-500"><BarChart3 className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p className="text-sm">Run audits to see visibility data</p></div>}
           </div>
-          <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-5">
+          <div className="col-span-1 md:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Brand Visibility</h3></div>
             <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><Building2 className="h-5 w-5 text-gray-400" /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
           </div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Globe className="h-4 w-4 text-gray-400" /> Top Sources</h3><p className="text-xs text-gray-500 mt-0.5">Most cited domains across all models</p></div><button onClick={() => setActiveTab("sources")} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">View All <ChevronRight className="h-3.5 w-3.5" /></button></div>
-          <div className="grid grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="flex flex-col items-center justify-center">
               <DonutChart value={allCitations.length} size={160} segments={typeSegments} />
               <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 mt-4 text-xs">
@@ -621,7 +697,7 @@ export default function ClientDashboard() {
                 })}
               </div>
             </div>
-            <div className="col-span-2 overflow-hidden">
+            <div className="col-span-1 md:col-span-2 overflow-hidden overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-100">
@@ -657,13 +733,13 @@ export default function ClientDashboard() {
           </div>
         </div>
         <div>
-          <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><MessageSquare className="h-4 w-4 text-gray-400" /> Recent Audits</h3><div className="flex items-center gap-2"><span className="text-sm text-gray-500">{selectedClient?.brand_name} mentioned</span><button onClick={() => setShowBrandOnly(!showBrandOnly)} className={cn("relative w-10 h-5 rounded-full transition-colors", showBrandOnly ? "bg-blue-500" : "bg-gray-200")}><span className={cn("absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform", showBrandOnly ? "translate-x-5" : "translate-x-0.5")} /></button></div></div>
-          <div className="grid grid-cols-3 gap-4">{recentPrompts.filter(r => !showBrandOnly || r.summary.share_of_voice > 0).slice(0, 9).map((r, i) => (<div key={i} onClick={() => setSelectedPromptDetail(r.prompt_id)} className="bg-white rounded-xl border border-gray-200 p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer"><h4 className="font-medium text-gray-900 text-sm line-clamp-2 mb-2">{r.prompt_text}</h4><p className="text-xs text-gray-500 line-clamp-2 mb-3">{r.model_results[0]?.raw_response?.substring(0, 100) || "No response"}...</p><div className="flex items-center justify-between"><div className="flex items-center gap-1">{r.model_results.slice(0, 4).map((mr, j) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return Logo ? (<div key={j} className={cn("p-1 rounded", mr.brand_mentioned ? "bg-green-50" : "bg-gray-50")}><Logo className="h-3.5 w-3.5" style={{ color: mr.brand_mentioned ? color : "#9ca3af" }} /></div>) : null; })}</div><span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(r.created_at).toLocaleDateString()}</span></div></div>))}</div>
+          <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><MessageSquare className="h-4 w-4 text-gray-400" /> Recent Audits</h3><div className="flex items-center gap-2"><span className="text-sm text-gray-500 hidden sm:inline">{selectedClient?.brand_name} mentioned</span><button onClick={() => setShowBrandOnly(!showBrandOnly)} className={cn("relative w-10 h-5 rounded-full transition-colors", showBrandOnly ? "bg-blue-500" : "bg-gray-200")}><span className={cn("absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform", showBrandOnly ? "translate-x-5" : "translate-x-0.5")} /></button></div></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{recentPrompts.filter(r => !showBrandOnly || r.summary.share_of_voice > 0).slice(0, 9).map((r, i) => (<div key={i} onClick={() => setSelectedPromptDetail(r.prompt_id)} className="bg-white rounded-xl border border-gray-200 p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer"><h4 className="font-medium text-gray-900 text-sm line-clamp-2 mb-2">{r.prompt_text}</h4><p className="text-xs text-gray-500 line-clamp-2 mb-3">{r.model_results[0]?.raw_response?.substring(0, 100) || "No response"}...</p><div className="flex items-center justify-between"><div className="flex items-center gap-1">{r.model_results.slice(0, 4).map((mr, j) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return Logo ? (<div key={j} className={cn("p-1 rounded", mr.brand_mentioned ? "bg-green-50" : "bg-gray-50")}><Logo className="h-3.5 w-3.5" style={{ color: mr.brand_mentioned ? color : "#9ca3af" }} /></div>) : null; })}</div><span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(r.created_at).toLocaleDateString()}</span></div></div>))}</div>
           {recentPrompts.length === 0 && (<div className="bg-white rounded-xl border border-gray-200 p-12 text-center"><MessageSquare className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No recent audits. Run some prompts to see results here.</p></div>)}
         </div>
         {/* Import Section */}
         <div className="mt-6">
-          {selectedClient && <UniversalImport clientId={selectedClient.id} onImportComplete={() => window.location.reload()} />}
+          {selectedClient && selectedClient.id && <UniversalImport clientId={selectedClient.id} onImportComplete={() => window.location.reload()} />}
         </div>
       </div>
     );
@@ -679,8 +755,8 @@ export default function ClientDashboard() {
     return (
       <div className="space-y-4">
         {/* Header with Tabs */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 overflow-x-auto pb-1 md:pb-0">
             <div className="flex items-center bg-gray-100 rounded-lg p-1">
               <button onClick={() => setPromptsTabView("active")} className={cn("px-4 py-2 rounded-md text-sm font-medium transition-all", promptsTabView === "active" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>
                 <span className="flex items-center gap-2">Active <span className={cn("px-1.5 py-0.5 rounded text-xs", promptsTabView === "active" ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500")}>{activeCount}</span></span>
@@ -694,15 +770,17 @@ export default function ClientDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => setRunCampaignOpen(true)} variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-800">
-              <Play className="h-4 w-4 mr-2" /> Run Campaign
-            </Button>
+            {isAdmin && (
+              <Button onClick={() => setRunCampaignOpen(true)} variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-800">
+                <Play className="h-4 w-4 mr-2" /> Run Campaign
+              </Button>
+            )}
             {isAdmin ? (
-              <span className="text-sm text-gray-500">{prompts.length} total prompts</span>
+              <span className="text-sm text-gray-500 hidden sm:inline"> {prompts.length} total prompts</span>
             ) : (
               <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= 30 ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/30 Prompts</span>
             )}
-            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800" disabled={!isAdmin && prompts.length >= 30}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800 whitespace-nowrap" disabled={!isAdmin && prompts.length >= 30}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
           </div>
         </div>
 
@@ -727,7 +805,7 @@ export default function ClientDashboard() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200">
               <tr>
@@ -791,6 +869,13 @@ export default function ClientDashboard() {
                           <>
                             <Button variant="ghost" size="sm" onClick={() => setSelectedPromptDetail(p.id)} className="h-7 px-2 text-gray-500 hover:text-gray-700" title="View details">
                               <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => {
+                              setEditingPromptId(p.id);
+                              setEditingPromptText(p.prompt_text);
+                              setEditPromptOpen(true);
+                            }} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Edit prompt">
+                              <Settings className="h-3.5 w-3.5" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Run audit">
                               {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -1353,8 +1438,10 @@ export default function ClientDashboard() {
             </div>
           </div>
           <DialogFooter className="border-t border-gray-100 pt-4">
-            <Button variant="outline" onClick={() => setAddClientOpen(false)} className="border-gray-300 text-gray-700 hover:bg-gray-50">Cancel</Button>
-            <Button onClick={handleCreateClient} disabled={!newClientForm.name.trim()} className="bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">Create Brand</Button>
+            <Button variant="outline" onClick={() => setAddClientOpen(false)} className="border-gray-300 text-gray-700 hover:bg-gray-50" disabled={isCreatingClient}>Cancel</Button>
+            <Button onClick={handleCreateClient} disabled={!newClientForm.name.trim() || isCreatingClient} className="bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">
+              {isCreatingClient ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Creating...</> : "Create Brand"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1518,6 +1605,41 @@ export default function ClientDashboard() {
       </Dialog>
     );
   }
+
+  function EditPromptDialog() {
+    return (
+      <Dialog open={editPromptOpen} onOpenChange={setEditPromptOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Prompt</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="prompt-text" className="mb-2 block">Prompt Text</Label>
+            <Textarea
+              id="prompt-text"
+              value={editingPromptText}
+              onChange={(e) => setEditingPromptText(e.target.value)}
+              className="min-h-[100px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPromptOpen(false)}>Cancel</Button>
+            <Button onClick={async () => {
+              if (editingPromptId && editingPromptText.trim()) {
+                try {
+                  await updatePrompt(editingPromptId, editingPromptText.trim());
+                  setEditPromptOpen(false);
+                } catch (err: any) {
+                  alert(err.message || "Failed to update prompt");
+                }
+              }
+            }} disabled={!editingPromptText.trim()}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   function ManageBrandsDialog() {
     return (
       <Dialog open={manageBrandsOpen} onOpenChange={setManageBrandsOpen}>

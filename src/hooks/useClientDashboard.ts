@@ -578,7 +578,7 @@ export function useClientDashboard() {
     // Load prompts from Supabase first
     try {
       const { data: promptsData } = await supabase
-        .from("prompts").select("*").eq("client_id", client.id).eq("is_active", true);
+        .from("prompts").select("*").eq("client_id", client.id);
       if (promptsData && promptsData.length > 0) {
         const mappedPrompts: Prompt[] = promptsData.map(p => ({
           id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
@@ -667,21 +667,26 @@ export function useClientDashboard() {
       category: detectedCategory, is_custom: true, is_active: true, niche_level: nicheLevel,
     };
 
-    // Save to Supabase first
+    // Save to Supabase first - THROW on error
     try {
       const { error: insertError } = await supabase.from("prompts").insert({
         id: newPrompt.id, client_id: newPrompt.client_id, prompt_text: newPrompt.prompt_text,
         category: newPrompt.category, is_custom: newPrompt.is_custom, is_active: newPrompt.is_active,
       });
-      if (insertError) console.error("Supabase prompt insert error:", insertError);
-    } catch (err) { console.log("Supabase prompt insert failed:", err); }
+      if (insertError) throw insertError;
 
-    const newPrompts = [...prompts, newPrompt];
-    setPrompts(newPrompts);
-    const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-    storedPrompts[selectedClient.id] = newPrompts;
-    saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
-    return newPrompt;
+      // Only update local state if DB insert succeeded
+      const newPrompts = [...prompts, newPrompt];
+      setPrompts(newPrompts);
+      const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+      storedPrompts[selectedClient.id] = newPrompts;
+      saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+
+      return newPrompt;
+    } catch (err) {
+      console.error("Supabase prompt insert failed:", err);
+      throw err; // Propagate error to UI
+    }
   }, [selectedClient, prompts]);
 
   const addMultiplePrompts = useCallback(async (promptTexts: string[], category?: PromptCategory) => {
@@ -703,14 +708,18 @@ export function useClientDashboard() {
           category: p.category, is_custom: p.is_custom, is_active: p.is_active,
         }))
       );
-      if (insertError) console.error("Supabase bulk insert error:", insertError);
-    } catch (err) { console.log("Supabase bulk insert failed:", err); }
+      if (insertError) throw insertError;
 
-    const allPrompts = [...prompts, ...newPrompts];
-    setPrompts(allPrompts);
-    const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-    storedPrompts[selectedClient.id] = allPrompts;
-    saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+      // Only update local state if DB insert succeeded
+      const allPrompts = [...prompts, ...newPrompts];
+      setPrompts(allPrompts);
+      const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+      storedPrompts[selectedClient.id] = allPrompts;
+      saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+    } catch (err) {
+      console.error("Supabase bulk insert failed:", err);
+      throw err;
+    }
   }, [selectedClient, prompts]);
 
   const generateNichePrompts = useCallback(async () => {
@@ -772,6 +781,30 @@ export function useClientDashboard() {
       });
     }
   }, [selectedClient, prompts, auditResults]);
+
+  const updatePrompt = useCallback(async (promptId: string, newText: string) => {
+    if (!selectedClient || !newText.trim()) return;
+
+    // Update in Supabase - THROW on error to bubble up to UI
+    try {
+      const { error: updateError } = await supabase
+        .from("prompts")
+        .update({ prompt_text: newText.trim() })
+        .eq("id", promptId);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      const updatedPrompts = prompts.map(p => p.id === promptId ? { ...p, prompt_text: newText.trim() } : p);
+      setPrompts(updatedPrompts);
+      const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+      storedPrompts[selectedClient.id] = updatedPrompts;
+      saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+    } catch (err) {
+      console.error("Supabase update prompt failed:", err);
+      throw err;
+    }
+  }, [selectedClient, prompts]);
 
   const reactivatePrompt = useCallback(async (promptId: string) => {
     if (!selectedClient) return;
@@ -2186,7 +2219,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     runFullAudit, runSinglePrompt, runCampaign, clearResults,
 
     // Prompts
-    addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, reactivatePrompt, clearAllPrompts,
+    addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt,
 
     // Export/Import
     exportToCSV, exportPrompts, exportFullReport, importData,
