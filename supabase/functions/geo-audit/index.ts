@@ -186,6 +186,8 @@ interface ModelResult {
   authority_type?: "authority" | "alternative" | "mentioned";
   ai_search_volume?: number;
   response_time_ms?: number;
+  potential_competitors?: string[];
+  is_ai_overview?: boolean; // Flag to indicate if actual AI Overview was returned vs fallback SERP
 }
 
 interface AuditRequest {
@@ -533,6 +535,147 @@ function findWinnerBrand(response: string, brandName: string, competitors: strin
   return winner;
 }
 
+/**
+ * Find potential UNKNOWN competitors in response
+ * Uses multiple patterns to detect brand/company names that are NOT in the known list
+ */
+function findPotentialCompetitors(response: string, knownBrands: string[]): string[] {
+  if (!response) return [];
+
+  const potential = new Set<string>();
+  const knownLower = new Set(knownBrands.map(b => b.toLowerCase()));
+
+  // Common false positives to filter out - expanded list
+  const stopWords = new Set([
+    // Articles & prepositions
+    "The", "A", "An", "In", "On", "At", "For", "To", "With", "By", "And", "Or", "Of", "As",
+    // Adjectives & descriptors
+    "Key", "Top", "Best", "Main", "Major", "Leading", "Quality", "Premium", "Primary", "Secondary",
+    "New", "Old", "Large", "Small", "Good", "Bad", "Great", "Important", "Notable", "Popular",
+    // Pronouns & demonstratives
+    "Here", "There", "These", "Those", "Some", "Many", "Most", "All", "Other", "Such",
+    // Numbers
+    "First", "Second", "Third", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+    // Action words
+    "Read", "More", "Click", "See", "View", "Learn", "Find", "Get", "Check", "Visit", "Contact", "Call",
+    // Generic business terms - EXPANDED
+    "Brands", "Companies", "Suppliers", "Providers", "Options", "Alternatives", "Competitors",
+    "Description", "Website", "Products", "Services", "Business", "Industry", "Market", "Sector",
+    "Report", "Focus", "Note", "Specialization", "Overview", "Summary", "Details", "Information",
+    "Features", "Benefits", "Solutions", "Offerings", "Portfolio", "Catalog", "Directory",
+    // Document & report terms
+    "Report Name", "Annual Reports", "Company Official", "Official Websites", "Annual Report",
+    // Generic web terms
+    "Homepage", "Page", "Link", "Source", "Reference", "Article", "Content", "Data", "Info",
+    // Location generic terms
+    "Region", "Area", "Country", "City", "Location", "Zone", "Territory",
+    // Time terms
+    "Year", "Month", "Day", "Week", "Today", "Tomorrow", "Yesterday", "Recent", "Current",
+    // Generic organizational terms
+    "Department", "Division", "Unit", "Group", "Team", "Organization", "Association", "Federation",
+    "Chamber", "Board", "Committee", "Council", "Agency", "Authority", "Office", "Bureau",
+    // Single common words that appear in patterns
+    "Limited", "Company", "Corporation", "Inc", "Ltd", "LLC", "Corp", "Group", "Holdings",
+    "International", "Global", "National", "Regional", "Local", "General", "Special"
+  ]);
+
+  const addCandidate = (name: string) => {
+    const trimmed = name.trim();
+    if (trimmed.length < 3 || trimmed.length > 50) return;
+    if (stopWords.has(trimmed)) return;
+    if (knownLower.has(trimmed.toLowerCase())) return;
+    // Must start with capital letter
+    if (!/^[A-Z]/.test(trimmed)) return;
+
+    // STRICTER VALIDATION: Must look like a real brand/company name
+    const words = trimmed.split(/\s+/);
+
+    // Reject if any word is in stopWords
+    for (const word of words) {
+      if (stopWords.has(word)) return;
+    }
+
+    // Reject if it's just 1 generic word (must be 2+ words OR have company suffix OR be short trademark-style)
+    const hasCompanySuffix = /(?:Ltd|LLC|Inc|Corp|Co|Group|Company|Foods|Products|Limited|Solutions|Services|Thailand|India|Asia|Global)$/i.test(trimmed);
+    const isTrademarkStyle = /^[A-Z][a-z]+$/.test(trimmed) && trimmed.length <= 12; // Like "Jagota", "Makro"
+    const isMultiWord = words.length >= 2;
+
+    if (!hasCompanySuffix && !isTrademarkStyle && !isMultiWord) {
+      return; // Single generic word without company suffix
+    }
+
+    // Reject if it's a phrase (too many words without company suffix)
+    if (words.length > 4 && !hasCompanySuffix) {
+      return;
+    }
+
+    // Reject common patterns that are NOT brands
+    const genericPhrases = [
+      /^Top \d+/i, /^Best \d+/i, /^The Top/i, /^The Best/i,
+      /Distributors?$/i, /Suppliers?$/i, /Manufacturers?$/i, /Importers?$/i, /Exporters?$/i,
+      /^[A-Z][a-z]+ Market$/i, /Website$/i, /^Official /i
+    ];
+    for (const pattern of genericPhrases) {
+      if (pattern.test(trimmed)) return;
+    }
+
+    potential.add(trimmed);
+  };
+
+  // Pattern 1: List items - "1. Name", "• Name", "- Name"
+  const listRegex = /^\s*(?:\d+[.)]|\*|-|•)\s+\**([A-Z][a-zA-Z0-9&'.\s]+?)(?:\**[:\-–]|\**\s*[-–:]|\s*\(|\s*$)/gm;
+  let match;
+  while ((match = listRegex.exec(response)) !== null) {
+    addCandidate(match[1].replace(/\*+/g, '').trim());
+  }
+
+  // Pattern 2: "companies/brands like X, Y, and Z" patterns
+  const likePatternRegex = /(?:companies|brands|providers|suppliers|competitors|alternatives|businesses|firms|players)\s+(?:like|such as|including|e\.g\.|e\.g|for example)\s+([^.!?\n]+)/gi;
+  while ((match = likePatternRegex.exec(response)) !== null) {
+    const namesStr = match[1];
+    // Split by commas and "and"
+    const names = namesStr.split(/,|\s+and\s+/).map(n => n.trim());
+    for (const name of names) {
+      // Extract just the brand name (first few capitalized words)
+      const brandMatch = name.match(/^([A-Z][a-zA-Z0-9&']+(?:\s+[A-Z][a-zA-Z0-9&']+){0,2})/);
+      if (brandMatch) {
+        addCandidate(brandMatch[1]);
+      }
+    }
+  }
+
+  // Pattern 3: Bolded names **Name** or *Name*
+  const boldRegex = /\*\*([A-Z][a-zA-Z0-9&'\s]+?)\*\*|\*([A-Z][a-zA-Z0-9&'\s]+?)\*/g;
+  while ((match = boldRegex.exec(response)) !== null) {
+    const name = match[1] || match[2];
+    if (name && name.length < 40) {
+      addCandidate(name.trim());
+    }
+  }
+
+  // Pattern 4: Quoted names "Name" or 'Name'
+  const quotedRegex = /["']([A-Z][a-zA-Z0-9&'\s]+?)["']/g;
+  while ((match = quotedRegex.exec(response)) !== null) {
+    if (match[1].length < 40) {
+      addCandidate(match[1].trim());
+    }
+  }
+
+  // Pattern 5: "Name:" at start of description (common in AI responses)
+  const colonRegex = /^([A-Z][a-zA-Z0-9&'\s]{2,30}):/gm;
+  while ((match = colonRegex.exec(response)) !== null) {
+    addCandidate(match[1].trim());
+  }
+
+  // Pattern 6: Sentence patterns like "X is a leading..." or "X offers..."
+  const sentenceRegex = /\b([A-Z][a-zA-Z0-9&']+(?:\s+[A-Z][a-zA-Z0-9&']+){0,2})\s+(?:is a|is the|is one of|offers|provides|specializes|focuses|has been|was founded)/g;
+  while ((match = sentenceRegex.exec(response)) !== null) {
+    addCandidate(match[1].trim());
+  }
+
+  return Array.from(potential).slice(0, 10); // Return top 10 (increased from 5)
+}
+
 // ============================================
 // TAVILY SEARCH API
 // ============================================
@@ -765,6 +908,7 @@ async function getGoogleAIOverview(
   cost: number;
   error?: string;
   response_time_ms?: number;
+  is_ai_overview: boolean; // True if actual AI Overview was found, false if fallback to SERP
 }> {
   console.log("[Google AI Overview] Querying...");
   const startTime = Date.now();
@@ -780,7 +924,7 @@ async function getGoogleAIOverview(
   const responseTime = Date.now() - startTime;
 
   if (result.error) {
-    return { success: false, response: "", citations: [], cost: 0, error: result.error, response_time_ms: responseTime };
+    return { success: false, response: "", citations: [], cost: 0, error: result.error, response_time_ms: responseTime, is_ai_overview: false };
   }
 
   const data = result.data as { tasks?: Array<{ result?: Array<{ items?: unknown[] }>; cost?: number }> };
@@ -799,12 +943,28 @@ async function getGoogleAIOverview(
 
   let response = "";
   const citations: Citation[] = [];
+  let hasAiOverview = false; // Track if we found actual AI Overview
 
   // Look for AI overview or featured snippet
   for (const item of items) {
     if (item.type === "ai_overview" && item.items) {
+      hasAiOverview = true; // Found actual AI Overview!
       for (const subItem of item.items) {
-        if (subItem.text) response += subItem.text + "\n";
+        // Handle standard text
+        if (subItem.type === "text" && subItem.text) response += subItem.text + "\n\n";
+
+        // Handle lists (bullets/numbered)
+        if (subItem.type === "list" && subItem.items) {
+          subItem.items.forEach((li: any) => {
+            const bullet = li.text || "";
+            if (bullet) response += `• ${bullet}\n`;
+          });
+          response += "\n";
+        }
+
+        // Fallback for simple structure
+        if (!subItem.type && subItem.text) response += subItem.text + "\n\n";
+
         if (subItem.references) {
           subItem.references.forEach((ref, idx) => {
             citations.push({
@@ -831,27 +991,16 @@ async function getGoogleAIOverview(
     }
   }
 
-  // Fallback to top organic results if no AI overview
+  // NO FALLBACK - If no AI Overview found, return empty response with is_ai_overview: false
+  // The frontend will display "No AI Overview available for this prompt"
   if (!response) {
-    const organicItems = items.filter(i => i.type === "organic").slice(0, 5);
-    for (const item of organicItems) {
-      response += `${item.title}\n${item.description || ""}\n\n`;
-      if (item.url) {
-        citations.push({
-          url: item.url,
-          title: item.title || "",
-          domain: item.domain || extractDomain(item.url),
-          position: item.rank_absolute,
-          snippet: item.description,
-        });
-      }
-    }
+    console.log("[Google AI Overview] No AI Overview found - NOT falling back to SERP results");
   }
 
   response = response.trim();
-  console.log(`[Google AI Overview] Got ${response.length} chars, ${citations.length} citations, cost: ${cost}`);
+  console.log(`[Google AI Overview] Got ${response.length} chars, ${citations.length} citations, cost: ${cost}, hasAiOverview: ${hasAiOverview}`);
 
-  return { success: response.length > 0, response, citations, cost, response_time_ms: responseTime };
+  return { success: response.length > 0, response, citations, cost, response_time_ms: responseTime, is_ai_overview: hasAiOverview };
 }
 
 /**
@@ -1699,6 +1848,7 @@ function createModelResult(
     is_cited?: boolean;
     ai_search_volume?: number;
     response_time_ms?: number;
+    is_ai_overview?: boolean;
   }
 ): ModelResult {
   const config = AI_MODELS[modelId] || {
@@ -1749,14 +1899,8 @@ function createModelResult(
     ) : false
   }));
 
-  const competitorData = response ? parseCompetitors(response, competitors) : [];
-  const winnerBrand = response ? findWinnerBrand(response, brandName, competitors) : "";
-
-  // Determine authority type
-  let authorityType: "authority" | "alternative" | "mentioned" = "mentioned";
-  if (isCited) {
-    authorityType = brandMentionCount > 2 ? "authority" : "alternative";
-  }
+  const competitorsFound = parseCompetitors(response, competitors);
+  const potentialCompetitors = findPotentialCompetitors(response, [brandName, ...competitors]);
 
   return {
     model: modelId,
@@ -1773,15 +1917,16 @@ function createModelResult(
     brand_rank: brandRank,
     brand_sentiment: brandSentiment,
     matched_terms: matchedTerms,
-    winner_brand: winnerBrand,
-    competitors_found: competitorData,
+    winner_brand: findWinnerBrand(response, brandName, competitors),
+    competitors_found: competitorsFound,
     citations: citationsWithBrandFlag,
     citation_count: citations.length,
     api_cost: cost,
     is_cited: isCited,
-    authority_type: authorityType,
     ai_search_volume: extraData?.ai_search_volume,
     response_time_ms: extraData?.response_time_ms,
+    potential_competitors: potentialCompetitors,
+    is_ai_overview: extraData?.is_ai_overview
   };
 }
 
@@ -2026,6 +2171,7 @@ serve(async (req: Request) => {
             brand_mention_count: brandData.count,
             is_cited: isCited,
             response_time_ms: aiResult.response_time_ms,
+            is_ai_overview: aiResult.is_ai_overview, // Pass flag indicating if actual AI Overview was found
           }
         ));
       })());

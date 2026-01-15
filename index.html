@@ -1,16 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Forzeo GEO Dashboard - AI Visibility Analytics Platform" />
-    <title>Forzeo GEO Dashboard</title>
-    
-    <!-- Amplitude Analytics -->
-    <script src="https://cdn.amplitude.com/script/b2a237240a0d7c68fdaefda780b6f012.js"></script>
-    <script>
-      window.amplitude.add(window.sessionReplay.plugin({sampleRate: 1}));
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Forzeo GEO Dashboard - AI Visibility Analytics Platform" />
+  <title>Forzeo GEO Dashboard</title>
+
+  <!-- Amplitude Analytics -->
+  <script src="https://cdn.amplitude.com/script/b2a237240a0d7c68fdaefda780b6f012.js"></script>
+  <script>
+    if (window.amplitude) {
+      window.amplitude.add(window.sessionReplay.plugin({ sampleRate: 1 }));
       window.amplitude.init('b2a237240a0d7c68fdaefda780b6f012', {
         "fetchRemoteConfig": true,
         "autocapture": {
@@ -25,10 +27,13 @@
           "frustrationInteractions": true
         }
       });
-    </script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+    }
+  </script>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
-export type UserRole = 'admin' | 'user';
+export type UserRole = 'admin' | 'agency' | 'user';
 
 export interface AuthUser extends User {
     role?: UserRole;
@@ -13,6 +13,7 @@ export interface UseAuthReturn {
     user: AuthUser | null;
     role: UserRole;
     isAdmin: boolean;
+    isAgency: boolean;
     isActive: boolean;
     loading: boolean;
     assignedClientIds: string[];
@@ -111,6 +112,22 @@ export function useAuth(): UseAuthReturn {
         // Admin has all permissions
         if (role === 'admin') return true;
 
+        // Agency permissions (expanded access)
+        const agencyPermissions = [
+            'view_overview',
+            'view_prompts',
+            'add_prompts',
+            'run_audits',
+            'view_sources',
+            'view_content',
+            'generate_content',
+            'view_insights',
+            'export_data',
+            'view_intelligence',
+            'view_signals',
+            'manage_brands'
+        ];
+
         // Define permission mappings for normal users
         const userPermissions = [
             'view_overview',
@@ -128,16 +145,21 @@ export function useAuth(): UseAuthReturn {
         const adminPermissions = [
             'view_campaigns',
             'create_campaigns',
-            'view_intelligence',
             'view_analytics',
             'view_schedules',
             'create_schedules',
-            'view_signals',
             'manage_users',
-            'manage_brands',
             'view_all_data'
         ];
 
+        // Check agency permissions first
+        if (role === 'agency') {
+            if (agencyPermissions.includes(permission)) return true;
+            if (adminPermissions.includes(permission)) return false;
+            return false;
+        }
+
+        // Normal user permissions
         if (userPermissions.includes(permission)) return true;
         if (adminPermissions.includes(permission)) return false;
 
@@ -148,6 +170,7 @@ export function useAuth(): UseAuthReturn {
         user,
         role,
         isAdmin: role === 'admin',
+        isAgency: role === 'agency',
         isActive,
         loading,
         assignedClientIds,

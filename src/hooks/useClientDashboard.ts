@@ -147,6 +147,7 @@ export interface ModelResult {
   matched_terms?: string[];
   winner_brand?: string;
   competitors_found?: Array<{ name: string; count: number; rank: number | null; sentiment?: string }>;
+  potential_competitors?: string[];
   citations: Array<{ url: string; title: string; domain: string }>;
   citation_count: number;
   api_cost: number;
@@ -155,10 +156,12 @@ export interface ModelResult {
   is_cited?: boolean;
   authority_type?: string;
   ai_search_volume?: number;
+  is_ai_overview?: boolean; // True if actual AI Overview was found, false if fallback to SERP
 }
 
 export interface AuditResult {
   id: string;
+  client_id?: string;
   prompt_id: string;
   prompt_text: string;
   model_results: ModelResult[];
@@ -471,15 +474,24 @@ export function useClientDashboard() {
       .single();
 
     const isAdmin = profile?.role === 'admin';
+    const isAgency = profile?.role === 'agency';
 
-    // Check if normal user already has a brand
+    // Check brand limits based on role
     if (!isAdmin) {
       const { data: existingAssignments } = await supabase
         .from('user_clients')
         .select('client_id')
         .eq('user_id', user.id);
 
-      if (existingAssignments && existingAssignments.length >= 1) {
+      const currentBrandCount = existingAssignments?.length || 0;
+
+      // Agency users: 5 brand limit
+      if (isAgency && currentBrandCount >= 5) {
+        throw new Error('Agency users can create up to 5 brands. You have reached your limit.');
+      }
+
+      // Normal users: 1 brand limit
+      if (!isAgency && currentBrandCount >= 1) {
         throw new Error('Normal users can only create 1 brand. Please contact admin to add more brands.');
       }
     }
@@ -558,16 +570,23 @@ export function useClientDashboard() {
   }, [clients, selectedClient]);
 
   const deleteClient = useCallback(async (clientId: string): Promise<boolean> => {
-    if (clients.length <= 1) return false;
-
     try {
-      await supabase.from("clients").delete().eq("id", clientId);
-    } catch (err) { console.log("Supabase delete failed:", err); }
+      const { error } = await supabase.from("clients").delete().eq("id", clientId);
+      if (error) {
+        console.error("Supabase delete failed:", error);
+        throw error;
+      }
+    } catch (err) {
+      console.error("Delete client failed:", err);
+      throw err;
+    }
 
     const newClients = clients.filter(c => c.id !== clientId);
     setClients(newClients);
     saveToStorage(STORAGE_KEYS.CLIENTS, newClients);
-    if (selectedClient?.id === clientId) setSelectedClient(newClients[0]);
+    if (selectedClient?.id === clientId) {
+      setSelectedClient(newClients.length > 0 ? newClients[0] : null);
+    }
     return true;
   }, [clients, selectedClient]);
 
@@ -603,7 +622,7 @@ export function useClientDashboard() {
         .from("audit_results").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
       if (resultsData && resultsData.length > 0) {
         const mappedResults: AuditResult[] = resultsData.map(r => ({
-          id: r.id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
+          id: r.id, client_id: r.client_id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
           model_results: r.model_results || [],
           // Build summary from individual columns (database stores them separately, not as JSONB)
           summary: r.summary || {
@@ -659,6 +678,22 @@ export function useClientDashboard() {
 
   const addCustomPrompt = useCallback(async (promptText: string, category?: PromptCategory): Promise<Prompt | null> => {
     if (!selectedClient) return null;
+
+    // Check agency prompt limit (10 prompts per brand)
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role === 'agency') {
+        const { count } = await supabase
+          .from('prompts')
+          .select('*', { count: 'exact', head: true })
+          .eq('client_id', selectedClient.id);
+        if ((count || 0) >= 15) {
+          throw new Error('Agency users are limited to 15 prompts per brand. Delete some prompts or contact admin.');
+        }
+      }
+    }
+
     const nicheLevel = detectNicheLevel(promptText);
     const detectedCategory = category || (nicheLevel === "super_niche" ? "super_niche" : nicheLevel === "niche" ? "niche" : "custom");
 
@@ -691,7 +726,31 @@ export function useClientDashboard() {
 
   const addMultiplePrompts = useCallback(async (promptTexts: string[], category?: PromptCategory) => {
     if (!selectedClient) return;
-    const newPrompts: Prompt[] = promptTexts.filter(t => t.trim()).map(text => {
+
+    // Check agency prompt limit (15 prompts per brand)
+    const { data: { user } } = await supabase.auth.getUser();
+    let maxPromptsToAdd = promptTexts.length;
+    if (user) {
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+      if (profile?.role === 'agency') {
+        const { count } = await supabase
+          .from('prompts')
+          .select('*', { count: 'exact', head: true })
+          .eq('client_id', selectedClient.id);
+        const currentCount = count || 0;
+        const remainingSlots = 15 - currentCount;
+        if (remainingSlots <= 0) {
+          throw new Error('Agency users are limited to 15 prompts per brand. Delete some prompts or contact admin.');
+        }
+        // Limit the number of prompts to add
+        maxPromptsToAdd = Math.min(promptTexts.length, remainingSlots);
+        if (maxPromptsToAdd < promptTexts.length) {
+          console.warn(`Agency limit: Only adding ${maxPromptsToAdd} of ${promptTexts.length} prompts (limit: 15 per brand)`);
+        }
+      }
+    }
+
+    const newPrompts: Prompt[] = promptTexts.slice(0, maxPromptsToAdd).filter(t => t.trim()).map(text => {
       const nicheLevel = detectNicheLevel(text);
       return {
         id: crypto.randomUUID(), client_id: selectedClient.id, prompt_text: text.trim(),
@@ -967,7 +1026,7 @@ export function useClientDashboard() {
         }
         await new Promise(r => setTimeout(r, 300));
       } catch (err) {
-        console.error("Audit error:", err);
+        console.error("Audit error CRITICAL:", err);
         setError(err instanceof Error ? err.message : "Audit failed");
       }
     }
@@ -1051,7 +1110,7 @@ export function useClientDashboard() {
         setError(fnError?.message || data?.error || "Audit failed");
       }
     } catch (err) {
-      console.error("Single audit error:", err);
+      console.error("Single audit error CRITICAL:", err);
       setError(err instanceof Error ? err.message : "Audit failed");
     } finally {
       setLoadingPromptId(null);
@@ -1529,9 +1588,18 @@ export function useClientDashboard() {
     return [];
   }, [selectedClient]);
 
-  const generateContent = useCallback(async (topic: string, contentType: string): Promise<string | null> => {
+  const generateContent = useCallback(async (topic: string, contentType: string, tone?: string, audience?: string, keywords?: string): Promise<string | null> => {
     if (!selectedClient) return null;
-    const prompt = `Write a ${contentType} about: ${topic}\n\nBrand: ${selectedClient.brand_name}\nIndustry: ${selectedClient.industry}\nCompetitors: ${selectedClient.competitors.join(", ")}\nRegion: ${selectedClient.target_region}\n\nMake it SEO-optimized. Format in Markdown.`;
+    let prompt = `Write a ${contentType} about: ${topic}\n\nBrand: ${selectedClient.brand_name}\nIndustry: ${selectedClient.industry}\nCompetitors: ${selectedClient.competitors.join(", ")}\nRegion: ${selectedClient.target_region}`;
+
+    if (audience?.trim()) prompt += `\nTarget Audience: ${audience.trim()}`;
+    if (keywords?.trim()) prompt += `\nKey Selling Points / Keywords: ${keywords.trim()}`;
+
+    if (tone?.trim()) {
+      prompt += `\n\nTONE OF VOICE / STYLE REFERENCE:\n"${tone.trim()}"\n\nINSTRUCTION: Analyze the style, vocabulary, and sentence structure of the reference text above. Generate the desired content strictly mimicking this tone and style.`;
+    }
+
+    prompt += `\n\nMake it SEO-optimized. Format in Markdown.`;
 
     try {
       const { data, error } = await supabase.functions.invoke("generate-content", {
@@ -2232,5 +2300,8 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
     // Constants
     INDUSTRY_PRESETS, LOCATION_CODES,
+
+    // State setters
+    setClients,
   };
 }

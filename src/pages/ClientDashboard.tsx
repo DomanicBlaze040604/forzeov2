@@ -3,7 +3,9 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { BarChart3, FileText, Globe, Play, Plus, Loader2, ChevronDown, X, CheckCircle, ExternalLink, Users, Download, Settings, Trash2, Search, AlertTriangle, Eye, RefreshCw, Calendar, Home, MessageSquare, CreditCard, HelpCircle, Building2, Clock, Filter, ArrowUpDown, Link2, Zap, Copy, TrendingUp, TrendingDown, Minus, Upload, ChevronRight, PanelLeft, PanelLeftClose, RotateCcw, Archive, Wand2, Layers, Lightbulb, Target, LogOut, Circle } from "lucide-react";
+import { ChevronDown, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield } from 'lucide-react';
+import { AgencyOverview } from "@/components/AgencyOverview";
+import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
 import { useAuth } from "../hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { UserManagement } from "@/components/UserManagement";
@@ -19,7 +21,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useClientDashboard, AI_MODELS } from "@/hooks/useClientDashboard";
 import { MODEL_LOGOS } from "@/components/ModelLogos";
-import { VisibilityGraphs } from "@/components/VisibilityGraphs";
 import { ScheduleManager } from "@/components/ScheduleManager";
 import { UniversalImport } from "@/components/UniversalImport";
 import { CampaignsList } from "@/components/CampaignsList";
@@ -89,9 +90,9 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 
 export default function ClientDashboard() {
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isAgency, user, role } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "analytics" | "schedules" | "signals" | "campaigns" | "insights" | "intelligence">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">("overview");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -121,8 +122,11 @@ export default function ClientDashboard() {
   const [runCampaignOpen, setRunCampaignOpen] = useState(false);
   const [campaignName, setCampaignName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [contentType, setContentType] = useState<string>("article");
+  const [toneOfVoice, setToneOfVoice] = useState("");
+  const [targetAudience, setTargetAudience] = useState("");
+  const [contentKeywords, setContentKeywords] = useState("");
   const [contentTopic, setContentTopic] = useState("");
-  const [contentType, setContentType] = useState("article");
   const [generatedContent, setGeneratedContent] = useState("");
   const [generatingContent, setGeneratingContent] = useState(false);
   const [showBrandOnly, setShowBrandOnly] = useState(false);
@@ -135,7 +139,13 @@ export default function ClientDashboard() {
   const [isAutoFinding, setIsAutoFinding] = useState(false);
   const [aiInsights, setAiInsights] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string; keyActions: string[] } | null>(null);
   const [generatingAiInsights, setGeneratingAiInsights] = useState(false);
+
   const [isCreatingClient, setIsCreatingClient] = useState(false);
+
+  // Prompts Tab Filters
+  const [promptsFilterModel, setPromptsFilterModel] = useState<string>("all");
+  const [promptsFilterVisibility, setPromptsFilterVisibility] = useState<"all" | "visible" | "not_visible">("all");
+  const [promptsFilterCompetitor, setPromptsFilterCompetitor] = useState<string>("all");
 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
@@ -173,7 +183,37 @@ export default function ClientDashboard() {
     switch (promptsTabView) { case "active": return activePrompts; case "suggested": return suggestedPrompts; case "inactive": return inactivePrompts; default: return activePrompts; }
   }, [prompts, auditResults, promptsTabView]);
 
-  const filteredPrompts = useMemo(() => !searchQuery ? filteredPromptsByTab : filteredPromptsByTab.filter(p => p.prompt_text.toLowerCase().includes(searchQuery.toLowerCase())), [filteredPromptsByTab, searchQuery]);
+  const filteredPrompts = useMemo(() => {
+    let result = !searchQuery ? filteredPromptsByTab : filteredPromptsByTab.filter(p => p.prompt_text.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    // Apply filters
+    if (promptsFilterModel !== "all") {
+      result = result.filter(p => {
+        const r = auditResults.find(ar => ar.prompt_id === p.id);
+        return r?.model_results.some(mr => mr.model === promptsFilterModel) ?? false;
+      });
+    }
+
+    if (promptsFilterVisibility !== "all") {
+      result = result.filter(p => {
+        const r = auditResults.find(ar => ar.prompt_id === p.id);
+        if (!r) return false;
+        // Check if brand mentioned in ANY model
+        const isVisible = r.model_results.some(mr => mr.brand_mentioned);
+        return promptsFilterVisibility === "visible" ? isVisible : !isVisible;
+      });
+    }
+
+    if (promptsFilterCompetitor !== "all") {
+      result = result.filter(p => {
+        const r = auditResults.find(ar => ar.prompt_id === p.id);
+        if (!r) return false;
+        return r.model_results.some(mr => mr.raw_response?.toLowerCase().includes(promptsFilterCompetitor.toLowerCase()));
+      });
+    }
+
+    return result;
+  }, [filteredPromptsByTab, searchQuery, promptsFilterModel, promptsFilterVisibility, promptsFilterCompetitor, auditResults]);
   const pendingPrompts = prompts.filter(p => p.is_active !== false && !auditResults.find(r => r.prompt_id === p.id)).length;
 
   const getPromptResult = (promptId: string) => filteredAuditResults.find(r => r.prompt_id === promptId);
@@ -282,7 +322,18 @@ export default function ClientDashboard() {
       setGeneratingPrompts(false);
     }
   };
-  const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType); if (c) setGeneratedContent(c); } finally { setGeneratingContent(false); } };
+  const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType, toneOfVoice, targetAudience, contentKeywords); if (c) setGeneratedContent(c); } finally { setGeneratingContent(false); } };
+
+  const handleAddCompetitor = async (competitorName: string) => {
+    if (!selectedClient) return;
+    // Check (case-insensitive)
+    if (selectedClient.competitors.some(c => c.toLowerCase() === competitorName.toLowerCase())) return;
+
+    const updatedCompetitors = [...selectedClient.competitors, competitorName];
+
+    // Use the hook's updateCompetitors function which handles both state and Supabase
+    await updateCompetitors(updatedCompetitors);
+  };
   const handleImport = () => { if (importText.trim()) { importData(importText); setImportText(""); setImportDialogOpen(false); } };
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = (ev) => importData(ev.target?.result as string); r.readAsText(f); } };
   const handleCreateClient = async () => {
@@ -312,9 +363,8 @@ export default function ClientDashboard() {
     }
   };
   const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; const comps = editClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); const finalIndustry = editClientForm.industry === "Custom" && editClientForm.customIndustry.trim() ? editClientForm.customIndustry.trim() : editClientForm.industry; await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, brand_domain: editClientForm.website.trim() || undefined, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: finalIndustry, primary_color: editClientForm.primary_color, competitors: comps }); setEditClientOpen(false); };
-  const handleDeleteClient = async () => { if (!selectedClient || clients.length <= 1) return; if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
+  const handleDeleteClient = async () => { if (!selectedClient) return; if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
   const handleAddTag = () => { if (newTag.trim() && selectedClient) { updateBrandTags([...selectedClient.brand_tags, newTag.trim()]); setNewTag(""); } };
-  const handleAddCompetitor = () => { if (newCompetitor.trim() && selectedClient) { updateCompetitors([...selectedClient.competitors, newCompetitor.trim()]); setNewCompetitor(""); } };
   const toggleModel = (id: string) => { if (selectedModels.includes(id)) { if (selectedModels.length > 1) setSelectedModels(selectedModels.filter(m => m !== id)); } else { setSelectedModels([...selectedModels, id]); } };
   const toggleModelFilter = (id: string) => { if (modelFilter.includes(id)) { setModelFilter(modelFilter.filter(m => m !== id)); } else { setModelFilter([...modelFilter, id]); } };
 
@@ -446,26 +496,26 @@ export default function ClientDashboard() {
     await runCampaign(campaignName, activePromptIds);
     setCampaignName("");
     setRunCampaignOpen(false);
-    setActiveTab("campaigns"); // Switch to campaigns tab to see progress
+    setActiveTab("topics"); // Switch to topics tab to see progress
   };
 
   const RunCampaignDialog = () => (
     <Dialog open={runCampaignOpen} onOpenChange={setRunCampaignOpen}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Run Massive Campaign</DialogTitle>
+          <DialogTitle>Run Massive Topic Audit</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="space-y-4">
             <div className="grid gap-2">
-              <Label>Campaign Name</Label>
+              <Label>Topic Name</Label>
               <Input
                 value={campaignName}
                 onChange={(e) => setCampaignName(e.target.value)}
                 placeholder="e.g. Q1 Competitor Audit"
               />
               <p className="text-sm text-gray-500">
-                This will run all {prompts.filter(p => p.is_active !== false).length} active prompts as a single campaign.
+                This will run all {prompts.filter(p => p.is_active !== false).length} active prompts as a single topic audit.
               </p>
             </div>
           </div>
@@ -474,7 +524,7 @@ export default function ClientDashboard() {
           <Button onClick={() => setRunCampaignOpen(false)} variant="outline">Cancel</Button>
           <Button onClick={handleRunCampaign} disabled={!campaignName.trim() || loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}
-            Start Campaign
+            Start Topic Audit
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -494,12 +544,43 @@ export default function ClientDashboard() {
         <div className="p-4 border-b border-gray-100 flex-shrink-0 flex items-center justify-between">
           <DropdownMenu>
             <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors"><div className="h-8 w-8 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span></div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" /></button></DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-52">{clients.map(c => (<DropdownMenuItem key={c.id} onClick={() => switchClient(c)} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-5 w-5 rounded flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: c.primary_color }}><span className="text-white text-xs font-bold">{c.brand_name.charAt(0)}</span></div><span className="truncate">{c.brand_name}</span></div>{c.id === selectedClient?.id && <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />}</DropdownMenuItem>))}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setAddClientOpen(true)}><Plus className="h-4 w-4 mr-2 flex-shrink-0" /> Add Brand</DropdownMenuItem></DropdownMenuContent>
+            <DropdownMenuContent align="start" className="w-52">
+              {/* Agency Dashboard option for agency users */}
+              {isAgency && (
+                <>
+                  <DropdownMenuItem onClick={() => switchClient(null as any)} className="flex items-center gap-2 text-blue-600 font-medium">
+                    <Shield className="h-4 w-4" />
+                    Agency Dashboard
+                    {!selectedClient && <CheckCircle className="h-4 w-4 text-green-500 ml-auto" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              {clients.map(c => (<DropdownMenuItem key={c.id} onClick={() => switchClient(c)} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-5 w-5 rounded flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: c.primary_color }}><span className="text-white text-xs font-bold">{c.brand_name.charAt(0)}</span></div><span className="truncate">{c.brand_name}</span></div>{c.id === selectedClient?.id && <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />}</DropdownMenuItem>))}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setAddClientOpen(true)}><Plus className="h-4 w-4 mr-2 flex-shrink-0" /> Add Brand</DropdownMenuItem></DropdownMenuContent>
           </DropdownMenu>
         </div>
         <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">General</div>
-          {[{ id: "overview", label: "Overview", icon: Home }, { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null }, { id: "campaigns", label: "Campaigns", icon: Layers }, { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true }, { id: "intelligence", label: "Intelligence", icon: Target }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "schedules", label: "Schedules", icon: Clock }, { id: "signals", label: "Signals", icon: Zap }, { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null }, { id: "content", label: "Content", icon: FileText }].filter(item => isAdmin || !["campaigns", "intelligence", "analytics", "schedules", "signals"].includes(item.id)).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
+          {[
+            { id: "overview", label: "Overview", icon: Home },
+            { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null },
+            { id: "topics", label: "Topics", icon: Layers },
+            { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true },
+            { id: "intelligence", label: "Intelligence", icon: Target, betaBadge: true },
+            { id: "schedules", label: "Schedules", icon: Clock },
+            { id: "future-citations", label: "Future Citations", icon: Zap, betaBadge: true },
+            { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null },
+            { id: "content", label: "Content", icon: FileText }
+          ].filter(item => {
+            // Admin sees all tabs
+            if (isAdmin) return true;
+            // Agency sees specific tabs
+            if (isAgency) {
+              return ["overview", "prompts", "insights", "intelligence", "future-citations", "sources", "content", "brands"].includes(item.id);
+            }
+            // Normal users see limited tabs
+            return !["topics", "intelligence", "schedules", "future-citations"].includes(item.id);
+          }).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
@@ -525,6 +606,24 @@ export default function ClientDashboard() {
               <span className="truncate">Total audits run</span>
             </div>
           </div>
+          {/* User Profile Section */}
+          {user && (
+            <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-xs font-bold">{user.email?.charAt(0).toUpperCase()}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-900 truncate">{user.email?.split('@')[0]}</div>
+                  <div className="flex items-center gap-1">
+                    {role === 'admin' && <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-[10px] font-semibold">Admin</span>}
+                    {role === 'agency' && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-semibold">Agency</span>}
+                    {role === 'user' && <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] font-semibold">User</span>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 text-left transition-colors">
             <HelpCircle className="h-4 w-4 flex-shrink-0 text-gray-400" />
             <span className="flex-1 truncate">Help & Support</span>
@@ -553,7 +652,7 @@ export default function ClientDashboard() {
               </button>
               <h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2 truncate">
                 <FileText className="h-5 w-5 text-gray-400 hidden sm:block" />
-                <span className="truncate">{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "analytics" ? "Visibility Analytics" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "signals" ? "Fresh Signal Intelligence" : activeTab === "campaigns" ? "Campaign Runs" : activeTab === "content" ? "Content Generator" : "Citations"}</span>
+                <span className="truncate">{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "future-citations" ? "Future Citations" : activeTab === "topics" ? "Topics" : activeTab === "content" ? "Content Generator" : activeTab === "insights" ? "Insights" : activeTab === "intelligence" ? "Intelligence" : "Citations"}</span>
               </h1>
               {(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs hidden sm:inline-flex">Filtered</Badge>}
             </div>
@@ -567,8 +666,8 @@ export default function ClientDashboard() {
               </div>
               {activeTab === "prompts" && (
                 <>
-                  {!isAdmin && <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= 30 ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/30 Prompts</span>}
-                  <Button onClick={() => setBulkPromptsOpen(true)} variant="outline" size="sm" disabled={!isAdmin && prompts.length >= 30}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+                  {!isAdmin && <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= (isAgency ? 15 : 30) ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/{isAgency ? 15 : 30} Prompts</span>}
+                  <Button onClick={() => setBulkPromptsOpen(true)} variant="outline" size="sm" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 30)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
                 </>
               )}
               <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
@@ -580,11 +679,11 @@ export default function ClientDashboard() {
         {error && <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2 text-sm"><AlertTriangle className="h-4 w-4" /> {error}</div>}
         <div className="p-6">
           {activeTab === "overview" && OverviewTab()}
+          {activeTab === "brands" && BrandsTab()}
           {activeTab === "prompts" && PromptsTab()}
-          {activeTab === "analytics" && selectedClient && <VisibilityGraphs clientId={selectedClient.id} brandName={selectedClient.brand_name} />}
           {activeTab === "schedules" && selectedClient && <ScheduleManager clientId={selectedClient.id} prompts={prompts} selectedModels={selectedModels} />}
-          {activeTab === "signals" && selectedClient && <SignalsDashboard clientId={selectedClient.id} brandName={selectedClient.brand_name} />}
-          {activeTab === "campaigns" && selectedClient && (
+          {activeTab === "future-citations" && selectedClient && <SignalsDashboard clientId={selectedClient.id} brandName={selectedClient.brand_name} />}
+          {activeTab === "topics" && selectedClient && (
             <div className="animate-in fade-in">
               {selectedCampaignId ? (
                 <CampaignDetail
@@ -619,32 +718,50 @@ export default function ClientDashboard() {
   );
 
   function OverviewTab() {
-    const overallVisibility = filteredAuditResults.length > 0 ? Math.round(filteredAuditResults.reduce((sum, r) => sum + r.summary.share_of_voice, 0) / filteredAuditResults.length) : 0;
+    if (isAgency && !selectedClient) {
+      return <AgencyOverview clients={clients} prompts={prompts} auditResults={auditResults} onNavigateToBrand={(id) => { const c = clients.find(x => x.id === id); if (c) switchClient(c); }} />;
+    }
+
     return (
       <div className="space-y-6 fade-in">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Overall Visibility</div>
-              <div className="p-2.5 bg-green-50 rounded-lg"><Eye className="h-5 w-5 text-green-600" /></div>
+              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Share of Voice</div>
+              <div className="p-2.5 bg-blue-50 rounded-lg"><Target className="h-5 w-5 text-blue-600" /></div>
             </div>
             <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-gray-950">{overallVisibility}%</span>
+              <span className="text-4xl font-bold text-gray-950">{(() => {
+                const allResults = filteredAuditResults.flatMap(r => r.model_results || []);
+                const brandMentions = allResults.filter(mr => mr.brand_mentioned).length;
+                const competitorMentions = allResults.reduce((total, mr) => {
+                  const competitors = selectedClient?.competitors || [];
+                  const response = (mr.raw_response || "").toLowerCase();
+                  return total + competitors.filter(c => response.includes(c.toLowerCase())).length;
+                }, 0);
+                const totalMentions = brandMentions + competitorMentions;
+                return totalMentions > 0 ? Math.round((brandMentions / totalMentions) * 100) : 0;
+              })()}%</span>
               <TrendIndicator value={0} />
             </div>
-            <div className="mt-3 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-green-400 to-green-600 rounded-full transition-all duration-500" style={{ width: `${overallVisibility}%` }} /></div>
+            <div className="mt-3 text-xs font-medium text-gray-400">Brand vs competitors in AI</div>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Prompts</div>
-              <div className="p-2.5 bg-blue-50 rounded-lg"><MessageSquare className="h-5 w-5 text-blue-600" /></div>
+              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Citation Rate</div>
+              <div className="p-2.5 bg-green-50 rounded-lg"><Link2 className="h-5 w-5 text-green-600" /></div>
             </div>
             <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-gray-950">{prompts.filter(p => p.is_active !== false).length}</span>
-              <span className="text-sm text-gray-500 font-medium">active</span>
+              <span className="text-4xl font-bold text-gray-950">{(() => {
+                const totalResults = filteredAuditResults.flatMap(r => r.model_results || []);
+                const citedResults = totalResults.filter(mr => mr.is_cited);
+                return totalResults.length > 0 ? Math.round((citedResults.length / totalResults.length) * 100) : 0;
+              })()}%</span>
+              <TrendIndicator value={0} />
             </div>
-            <div className="mt-3 text-xs font-medium text-gray-400">{pendingPrompts} pending • {prompts.filter(p => p.is_active === false).length} archived</div>
+            <div className="mt-3 text-xs font-medium text-gray-400">% of responses citing your site</div>
           </div>
+
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Citations Found</div>
@@ -658,13 +775,21 @@ export default function ClientDashboard() {
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Audits Completed</div>
-              <div className="p-2.5 bg-amber-50 rounded-lg"><CreditCard className="h-5 w-5 text-amber-600" /></div>
+              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Average Rank</div>
+              <div className="p-2.5 bg-amber-50 rounded-lg"><BarChart3 className="h-5 w-5 text-amber-600" /></div>
             </div>
             <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-gray-950">{filteredAuditResults.length}</span>
+              <span className="text-4xl font-bold text-gray-950">
+                {(() => {
+                  const ranksWithValue = filteredAuditResults.filter(r => r.summary?.average_rank != null);
+                  if (ranksWithValue.length === 0) return "—";
+                  const avgRank = Math.round(ranksWithValue.reduce((sum, r) => sum + (r.summary.average_rank || 0), 0) / ranksWithValue.length * 10) / 10;
+                  return `#${avgRank}`;
+                })()}
+              </span>
+              <TrendIndicator value={0} />
             </div>
-            <div className="mt-3 text-xs font-medium text-gray-400">{domainStats.length} unique domains</div>
+            <div className="mt-3 text-xs font-medium text-gray-400">{filteredAuditResults.length} audits completed</div>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
@@ -745,6 +870,12 @@ export default function ClientDashboard() {
     );
   }
 
+  function BrandsTab() {
+    return (
+      <AgencyBrandsManager clients={clients} onSelectClient={(id) => { const c = clients.find(x => x.id === id); if (c) switchClient(c); }} />
+    );
+  }
+
   function PromptsTab() {
     const activeCount = prompts.filter(p => p.is_active !== false).length;
     const runPromptIds = new Set(auditResults.map(r => r.prompt_id));
@@ -754,6 +885,8 @@ export default function ClientDashboard() {
 
     return (
       <div className="space-y-4">
+        {/* Cache Buster: Force re-render 2026-01-15-v3 */}
+        {(() => { console.log("PromptsTab rendering - checking for stale code v3"); return null; })()}
         {/* Header with Tabs */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3 overflow-x-auto pb-1 md:pb-0">
@@ -769,31 +902,72 @@ export default function ClientDashboard() {
               </button>
             </div>
           </div>
+
           <div className="flex items-center gap-3">
+            {/* Filters */}
+            <Select value={promptsFilterModel} onValueChange={setPromptsFilterModel}>
+              <SelectTrigger className="w-[130px] h-9 text-xs bg-white border-gray-200">
+                <SelectValue placeholder="Model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Models</SelectItem>
+                <SelectItem value="google_ai_overview">Google AI</SelectItem>
+                <SelectItem value="chatgpt">ChatGPT</SelectItem>
+                <SelectItem value="claude">Claude</SelectItem>
+                <SelectItem value="gemini">Gemini</SelectItem>
+                <SelectItem value="perplexity">Perplexity</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={promptsFilterCompetitor} onValueChange={setPromptsFilterCompetitor}>
+              <SelectTrigger className="w-[130px] h-9 text-xs bg-white border-gray-200">
+                <SelectValue placeholder="Competitor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Competitors</SelectItem>
+                {selectedClient?.competitors.map((c: string) => (
+                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={promptsFilterVisibility} onValueChange={(v: any) => setPromptsFilterVisibility(v)}>
+              <SelectTrigger className="w-[130px] h-9 text-xs bg-white border-gray-200">
+                <SelectValue placeholder="Visibility" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Visibility</SelectItem>
+                <SelectItem value="visible">Visible Only</SelectItem>
+                <SelectItem value="not_visible">Not Visible</SelectItem>
+              </SelectContent>
+            </Select>
+
             {isAdmin && (
               <Button onClick={() => setRunCampaignOpen(true)} variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-800">
-                <Play className="h-4 w-4 mr-2" /> Run Campaign
+                <Play className="h-4 w-4 mr-2" /> Run Topic
               </Button>
             )}
             {isAdmin ? (
               <span className="text-sm text-gray-500 hidden sm:inline"> {prompts.length} total prompts</span>
             ) : (
-              <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= 30 ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/30 Prompts</span>
+              <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= (isAgency ? 15 : 30) ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/{isAgency ? 15 : 30} Prompts</span>
             )}
-            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800 whitespace-nowrap" disabled={!isAdmin && prompts.length >= 30}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800 whitespace-nowrap" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 30)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
           </div>
         </div>
 
         {/* Info banner for archived view */}
-        {isInactiveView && inactiveCount > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-            <div className="p-2 bg-amber-100 rounded-lg"><Archive className="h-5 w-5 text-amber-600" /></div>
-            <div>
-              <h4 className="font-medium text-amber-900">Archived Prompts</h4>
-              <p className="text-sm text-amber-700 mt-0.5">These prompts are archived but their data is preserved. You can restore them anytime by clicking the restore button.</p>
+        {
+          isInactiveView && inactiveCount > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+              <div className="p-2 bg-amber-100 rounded-lg"><Archive className="h-5 w-5 text-amber-600" /></div>
+              <div>
+                <h4 className="font-medium text-amber-900">Archived Prompts</h4>
+                <p className="text-sm text-amber-700 mt-0.5">These prompts are archived but their data is preserved. You can restore them anytime by clicking the restore button.</p>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        }
 
         {/* Search & Export */}
         <div className="flex items-center gap-3">
@@ -911,14 +1085,14 @@ export default function ClientDashboard() {
                   <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                   <p className="text-gray-600 font-medium">No prompts yet</p>
                   <p className="text-sm text-gray-500 mt-1">Add your first prompt to get started with audits.</p>
-                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4" disabled={!isAdmin && prompts.length >= 30}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
-                  {!isAdmin && prompts.length >= 30 && <p className="text-xs text-red-500 mt-2">Free prompt limit reached (30/30)</p>}
+                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 30)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+                  {!isAdmin && prompts.length >= (isAgency ? 15 : 30) && <p className="text-xs text-red-500 mt-2">{isAgency ? 'Agency' : 'Free'} prompt limit reached ({isAgency ? '15/15' : '30/30'})</p>}
                 </>
               )}
             </div>
           )}
         </div>
-      </div>
+      </div >
     );
   }
 
@@ -1198,8 +1372,10 @@ export default function ClientDashboard() {
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-6">
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="article">Article</SelectItem><SelectItem value="listicle">Listicle (Top 10)</SelectItem><SelectItem value="comparison">Comparison Guide</SelectItem><SelectItem value="guide">How-To Guide</SelectItem><SelectItem value="faq">FAQ Section</SelectItem></SelectContent></Select></div></div>
-              <div className="p-4 bg-gray-50 rounded-lg"><Label className="text-sm font-medium">Content will include:</Label><div className="mt-3 flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><Building2 className="h-3.5 w-3.5" />{c}</span>)}</div></div>
+              <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="article">Article</SelectItem><SelectItem value="listicle">Listicle (Top 10)</SelectItem><SelectItem value="comparison">Comparison Guide</SelectItem><SelectItem value="guide">How-To Guide</SelectItem><SelectItem value="faq">FAQ Section</SelectItem><SelectItem value="press_release">Press Release</SelectItem><SelectItem value="product_description">Product Description</SelectItem></SelectContent></Select></div></div>
+              <div className="grid grid-cols-2 gap-4"><div><Label>Target Audience</Label><Input placeholder="e.g., Millennials, CTOs, Stay-at-home parents" value={targetAudience} onChange={(e) => setTargetAudience(e.target.value)} className="mt-1" /></div><div><Label>Keywords / Key Selling Points</Label><Input placeholder="e.g., affordable, AI-powered, 24/7 support" value={contentKeywords} onChange={(e) => setContentKeywords(e.target.value)} className="mt-1" /></div></div>
+              <div><Label>Tone of Voice Reference</Label><Textarea placeholder="Paste a sample press release or product description here. The AI will analyze and mimic its style." value={toneOfVoice} onChange={(e) => setToneOfVoice(e.target.value)} className="mt-1 h-24" /></div>
+              <div className="p-4 bg-gray-50 rounded-lg"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Content will include:</Label><Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(selectedClient?.industry || "") ? selectedClient?.industry : "Custom"; const customInd = Object.keys(industries).includes(selectedClient?.industry || "") ? "" : selectedClient?.industry || ""; setEditClientForm({ name: selectedClient?.name || "", brand_name: selectedClient?.brand_name || "", target_region: selectedClient?.target_region || "", industry: clientIndustry || "Custom", customIndustry: customInd, primary_color: selectedClient?.primary_color || "#3b82f6", logo_url: "", competitors: selectedClient?.competitors?.join(", ") || "", website: selectedClient?.brand_domain || "" }); setEditClientOpen(true); }} className="text-xs"><Settings className="h-3 w-3 mr-1" />Edit</Button></div><div className="flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><Building2 className="h-3.5 w-3.5" />{c}</span>)}</div></div>
               <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : "Generate Content"}</Button>
               {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="prose prose-sm max-w-none p-4 bg-gray-50 rounded-lg border max-h-[500px] overflow-y-auto"><pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans">{generatedContent}</pre></div></div>)}
             </div>
@@ -1251,8 +1427,8 @@ export default function ClientDashboard() {
                 {(!selectedClient?.competitors || selectedClient.competitors.length === 0) && <span className="text-sm text-gray-400 italic">No competitors added</span>}
               </div>
               <div className="flex gap-2">
-                <Input placeholder="Add competitor..." value={newCompetitor} onChange={(e) => setNewCompetitor(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddCompetitor()} className="bg-white" />
-                <Button size="sm" onClick={handleAddCompetitor} className="bg-green-600 hover:bg-green-700 text-white">Add</Button>
+                <Input placeholder="Add competitor..." value={newCompetitor} onChange={(e) => setNewCompetitor(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddCompetitor(newCompetitor)} className="bg-white" />
+                <Button size="sm" onClick={() => handleAddCompetitor(newCompetitor)} className="bg-green-600 hover:bg-green-700 text-white">Add</Button>
               </div>
             </div>
             <div>
@@ -1663,7 +1839,7 @@ export default function ClientDashboard() {
                     {client.id === selectedClient?.id && <Badge className="bg-blue-100 text-blue-700">Active</Badge>}
                     <Button variant="outline" size="sm" onClick={() => { switchClient(client); setManageBrandsOpen(false); }} className="text-gray-600"><Eye className="h-4 w-4 mr-1" /> View</Button>
                     <Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(client.industry) ? client.industry : "Custom"; const customInd = Object.keys(industries).includes(client.industry) ? "" : client.industry; setEditClientForm({ name: client.name, brand_name: client.brand_name, target_region: client.target_region, industry: clientIndustry, customIndustry: customInd, primary_color: client.primary_color, logo_url: "", competitors: client.competitors?.join(", ") || "", website: client.brand_domain || "" }); switchClient(client); setManageBrandsOpen(false); setEditClientOpen(true); }} className="text-gray-600"><Settings className="h-4 w-4 mr-1" /> Edit</Button>
-                    {clients.length > 1 && (<Button variant="outline" size="sm" onClick={() => { if (confirm("Delete " + client.name + "?")) deleteClient(client.id); }} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>)}
+                    <Button variant="outline" size="sm" onClick={() => { if (confirm("Delete " + client.name + "?")) deleteClient(client.id); }} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </div>
               ))}
@@ -2108,8 +2284,72 @@ export default function ClientDashboard() {
                   <div className="text-3xl font-bold text-purple-700">{result.summary.total_citations}</div>
                   <div className="text-sm font-medium text-purple-600 mt-1">Citations</div>
                 </div>
-
+                {/* Competitor Suggestions */}
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 text-center">
+                  {(() => {
+                    const allSuggestions = new Set<string>();
+                    result.model_results.forEach(mr => {
+                      if (mr.potential_competitors) {
+                        mr.potential_competitors.forEach((c: string) => allSuggestions.add(c));
+                      }
+                    });
+                    const count = allSuggestions.size;
+                    return (
+                      <>
+                        <div className="text-3xl font-bold text-amber-700">{count}</div>
+                        <div className="text-sm font-medium text-amber-600 mt-1">{count === 1 ? 'New Competitor' : 'New Competitors'}</div>
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
+
+              {/* Suggestions Panel */}
+              {(() => {
+                const allSuggestions = new Set<string>();
+                result.model_results.forEach(mr => {
+                  if (mr.potential_competitors) {
+                    mr.potential_competitors.forEach((c: string) => allSuggestions.add(c));
+                  }
+                });
+                const suggestions = Array.from(allSuggestions);
+
+                if (suggestions.length > 0) {
+                  return (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start justify-between gap-4">
+                      <div>
+                        <h4 className="font-semibold text-amber-900 text-sm flex items-center gap-2">
+                          <Lightbulb className="h-4 w-4" /> AI Suggested Competitors
+                        </h4>
+                        <p className="text-xs text-amber-700 mt-1">Found in AI responses but not currently tracked.</p>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {suggestions.map(s => (
+                            <div key={s} className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-amber-200 text-xs font-medium text-amber-800 shadow-sm">
+                              {s}
+                              <button
+                                onClick={() => {
+                                  const current = selectedClient?.competitors || [];
+                                  if (!current.includes(s)) {
+                                    const updated = [...current, s];
+                                    updateCompetitors(updated);
+                                  }
+                                }}
+                                className="hover:bg-amber-100 rounded p-0.5 transition-colors"
+                                title="Add to tracking"
+                              >
+                                <Plus className="h-3 w-3 text-amber-600" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
+
+                  );
+                }
+                return null;
+              })()}
 
               {/* Tabs */}
               <div className="flex items-center justify-between">
@@ -2160,7 +2400,13 @@ export default function ClientDashboard() {
                         <div className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-100">
                           <div className="flex items-center gap-3">
                             {Logo && <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-100"><Logo className="h-5 w-5" style={{ color }} /></div>}
-                            <span className="font-semibold text-gray-900">{mr.model_name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-gray-900">{mr.model_name}</span>
+                              {/* Show indicator for Google AI Overview when actual AI Overview not available */}
+                              {mr.model === "google_ai_overview" && !mr.raw_response && (
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">No AI Data</span>
+                              )}
+                            </div>
                           </div>
                           <div className="flex items-center gap-2">
                             {mr.brand_mentioned ? (
@@ -2192,16 +2438,36 @@ export default function ClientDashboard() {
                                   {competitorMentions.length > 0 && (
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <span className="text-xs text-gray-400 font-medium uppercase">Competitors mentioned:</span>
-                                      {competitorMentions.map((comp, k) => (
-                                        <Badge key={k} variant="secondary" className="text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-200">
-                                          {comp.name} ({comp.count}x)
-                                        </Badge>
-                                      ))}
+                                      {competitorMentions.map((comp, k) => {
+                                        const isTracked = selectedClient?.competitors.some(c => c.toLowerCase() === comp.name.toLowerCase());
+                                        return (
+                                          <div key={k} className="flex items-center gap-1">
+                                            <Badge variant="secondary" className="text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-200">
+                                              {comp.name} ({comp.count}x)
+                                            </Badge>
+                                            {!isTracked && (
+                                              <button onClick={() => handleAddCompetitor(comp.name)} className="text-blue-600 hover:bg-blue-50 rounded-full p-0.5 transition-colors" title="Add to competitors">
+                                                <Plus className="h-3 w-3" />
+                                              </button>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
                               </div>
                             )}
+                          </div>
+                        )}
+                        {/* Show 'No AI Overview available' message when Google AI Overview has no response */}
+                        {!mr.raw_response && mr.model === "google_ai_overview" && (
+                          <div className="p-4 border-b border-gray-100">
+                            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">AI Response</div>
+                            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-center">
+                              <span className="text-amber-700 font-medium">No AI Overview available for this prompt</span>
+                              <p className="text-xs text-amber-600 mt-1">Google did not generate an AI Overview for this query.</p>
+                            </div>
                           </div>
                         )}
 
@@ -2299,11 +2565,21 @@ export default function ClientDashboard() {
                         <div className="bg-white border border-gray-200 rounded-xl p-4">
                           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Competitor Mentions</div>
                           <div className="flex flex-wrap gap-2">
-                            {Object.entries(tavilyData.analysis?.competitor_mentions || {}).filter(([_, v]) => (v as number) > 0).map(([name, count]) => (
-                              <Badge key={name} variant="outline" className="text-orange-600 bg-orange-50 border-orange-200">
-                                {name}: {count as number}x
-                              </Badge>
-                            ))}
+                            {Object.entries(tavilyData.analysis?.competitor_mentions || {}).filter(([_, v]) => (v as number) > 0).map(([name, count]) => {
+                              const isTracked = selectedClient?.competitors.some(c => c.toLowerCase() === name.toLowerCase());
+                              return (
+                                <div key={name} className="flex items-center gap-1">
+                                  <Badge variant="outline" className="text-orange-600 bg-orange-50 border-orange-200">
+                                    {name}: {count as number}x
+                                  </Badge>
+                                  {!isTracked && (
+                                    <button onClick={() => handleAddCompetitor(name)} className="text-blue-600 hover:bg-blue-50 rounded-full p-0.5 transition-colors" title="Add to competitors">
+                                      <Plus className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
                             {Object.values(tavilyData.analysis?.competitor_mentions || {}).every((v) => (v as number) === 0) && (
                               <span className="text-sm text-gray-400">No competitors found</span>
                             )}
@@ -2565,7 +2841,7 @@ export default function ClientDashboard() {
             </div>
           )}
         </DialogContent>
-      </Dialog>
+      </Dialog >
     );
   }
 

@@ -94,6 +94,18 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates (January 2026)
 
+### v2.3 - Master Schema & UI Polish (Jan 16, 2026)
+- **Master Schema**: New single-file `database/master_schema.sql` with agency role support, auto-profile trigger, and RLS disabled by default for easy setup.
+- **Role-Based UI**: User profile section in sidebar shows email and role badge (Admin/Agency/User) with color coding.
+- **Improved Stats**: 
+  - "Share of Voice" replaces "Overall Visibility" (brand vs competitors share)
+  - "Citation Rate" replaces duplicate metric (% of responses citing your site)
+- **Competitor Detection Fix**: Expanded stop words list (100+ terms) to filter false positives like "Description", "Website", "Products".
+- **AI Overview Fix**: No longer shows SERP fallback - displays "No AI Overview available" when actual AI content isn't returned.
+- **Agency Limits**: 5 brands max, 15 prompts/brand enforced in frontend.
+- **Admin Brand Deletion**: Admins can now delete any brand, including their last one.
+- **Agency Data Isolation**: Fixed issue where agencies could see all brands; now restricted to their own brands via `fix_agency_isolation.sql`.
+
 ### v2.2 - Comprehensive Schema & Reliability (Jan 15, 2026)
 - **Complete Production Schema**: Single SQL file (`database/complete_production_schema.sql`) with all 27 tables, 12 functions, 7 views, and 28+ RLS policies for easy Supabase setup.
 - **Deep Analysis Reliability**: Citation analyzer now uses retry logic with exponential backoff, reduced batch sizes (50→20), and optimized delays for consistent results.
@@ -250,16 +262,26 @@ npm install
 ### 2. Environment Variables
 Create `.env` file:
 ```env
-VITE_SUPABASE_URL=https://pqvyyziaczzgaythgpyc.supabase.co
+VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
 ```
 
-### 3. Run Development Server
+### 3. Database Setup (New Supabase Project)
+1. Create a new Supabase project at https://supabase.com
+2. Go to SQL Editor
+3. Copy and paste the entire contents of `database/master_schema.sql`
+4. Run the script
+5. Create your first user via Auth UI, then make them admin:
+   ```sql
+   UPDATE profiles SET role = 'admin' WHERE email = 'your@email.com';
+   ```
+
+### 4. Run Development Server
 ```bash
 npm run dev
 ```
 
-### 4. Open Browser
+### 5. Open Browser
 Visit `http://localhost:5173`
 
 ---
