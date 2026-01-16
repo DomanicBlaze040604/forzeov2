@@ -94,6 +94,16 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates (January 2026)
 
+### v2.4 - Agency UX & Location Intelligence (Jan 16, 2026)
+- **Edit Prompt Location**: Users can now set a specific target location (Country/City) for individual prompts via a new 🌍 globe icon.
+- **Agency Dashboard**: 
+  - **Quota Tracking**: Sidebar now displays real-time usage for Brands (limit 5) and Prompts (limit 15/brand).
+  - **Quick Actions**: "View All Brands" button added to the overview stats.
+  - **Metrics**: Aggregated stats for Total Brands and Average Visibility.
+- **Security & RBAC**:
+  - **Restricted Deletion**: "Delete Brand" functionality is now strictly limited to **Admin** users only. Agency and Standard users cannot delete brands.
+- **UI Refinements**: Tighter spacing for high-density tables, removed duplicate headers, and global badge consistency.
+
 ### v2.3 - Master Schema & UI Polish (Jan 16, 2026)
 - **Master Schema**: New single-file `database/master_schema.sql` with agency role support, auto-profile trigger, and RLS disabled by default for easy setup.
 - **Role-Based UI**: User profile section in sidebar shows email and role badge (Admin/Agency/User) with color coding.

@@ -107,11 +107,15 @@ export default function ClientDashboard() {
   const [editPromptOpen, setEditPromptOpen] = useState(false);
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const [editingPromptText, setEditingPromptText] = useState("");
+  const [editLocationOpen, setEditLocationOpen] = useState(false);
+  const [editingLocationPromptId, setEditingLocationPromptId] = useState<string | null>(null);
+  const [editingLocationValue, setEditingLocationValue] = useState<string>("");
   const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
   const [newTag, setNewTag] = useState("");
   const [newCompetitor, setNewCompetitor] = useState("");
   const [bulkPromptsOpen, setBulkPromptsOpen] = useState(false);
   const [bulkPrompts, setBulkPrompts] = useState("");
+  const [promptLocation, setPromptLocation] = useState<string>(""); // Empty means use client default
   const [promptSentiment, setPromptSentiment] = useState<string>("Neutral");
   const [promptFocus, setPromptFocus] = useState<string>("General");
   const [selectedPromptCompetitors, setSelectedPromptCompetitors] = useState<string[]>([]);
@@ -286,8 +290,11 @@ export default function ClientDashboard() {
   const handleAddPrompt = async () => {
     if (newPrompt.trim()) {
       try {
-        await addCustomPrompt(newPrompt.trim());
+        const locationCode = promptLocation ? locations[promptLocation] : undefined;
+        const locationName = promptLocation || undefined;
+        await addCustomPrompt(newPrompt.trim(), undefined, locationCode, locationName);
         setNewPrompt("");
+        setPromptLocation(""); // Reset location after adding
       } catch (err: any) {
         alert(err.message || "Failed to add prompt.");
         // Keep input value so user can retry
@@ -303,6 +310,19 @@ export default function ClientDashboard() {
       } catch (err: any) {
         alert(err.message || "Failed to add prompts.");
       }
+    }
+  };
+  const handleSaveLocation = async () => {
+    if (!editingLocationPromptId) return;
+    try {
+      const locationCode = editingLocationValue && editingLocationValue !== "__default__" ? locations[editingLocationValue] : undefined;
+      const locationName = editingLocationValue && editingLocationValue !== "__default__" ? editingLocationValue : undefined;
+      await updatePrompt(editingLocationPromptId, { location_code: locationCode, location_name: locationName });
+      setEditLocationOpen(false);
+      setEditingLocationPromptId(null);
+      setEditingLocationValue("");
+    } catch (err: any) {
+      alert(err.message || "Failed to update location.");
     }
   };
   const handleGeneratePrompts = async () => {
@@ -363,7 +383,7 @@ export default function ClientDashboard() {
     }
   };
   const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; const comps = editClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); const finalIndustry = editClientForm.industry === "Custom" && editClientForm.customIndustry.trim() ? editClientForm.customIndustry.trim() : editClientForm.industry; await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, brand_domain: editClientForm.website.trim() || undefined, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: finalIndustry, primary_color: editClientForm.primary_color, competitors: comps }); setEditClientOpen(false); };
-  const handleDeleteClient = async () => { if (!selectedClient) return; if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
+  const handleDeleteClient = async () => { if (!selectedClient) return; if (!isAdmin) { alert("Only administrators can delete brands."); return; } if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
   const handleAddTag = () => { if (newTag.trim() && selectedClient) { updateBrandTags([...selectedClient.brand_tags, newTag.trim()]); setNewTag(""); } };
   const toggleModel = (id: string) => { if (selectedModels.includes(id)) { if (selectedModels.length > 1) setSelectedModels(selectedModels.filter(m => m !== id)); } else { setSelectedModels([...selectedModels, id]); } };
   const toggleModelFilter = (id: string) => { if (modelFilter.includes(id)) { setModelFilter(modelFilter.filter(m => m !== id)); } else { setModelFilter([...modelFilter, id]); } };
@@ -598,6 +618,33 @@ export default function ClientDashboard() {
 
         </nav>
         <div className="p-3 border-t border-gray-100 flex-shrink-0">
+          {/* Agency Quota Display */}
+          {isAgency && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-3">
+              <div className="text-[10px] font-bold text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1"><Shield className="h-3 w-3" /> Agency Plan</div>
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-gray-600">Brands</span>
+                    <span className={cn("font-medium", clients.length >= 5 ? "text-red-600" : "text-gray-900")}>{clients.length}/5</span>
+                  </div>
+                  <div className="h-1.5 bg-blue-200/50 rounded-full overflow-hidden">
+                    <div className={cn("h-full rounded-full transition-all duration-500", clients.length >= 5 ? "bg-red-500" : "bg-blue-500")} style={{ width: `${Math.min((clients.length / 5) * 100, 100)}%` }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-gray-600">Prompts <span className="text-[10px] text-gray-400 font-normal">(current)</span></span>
+                    <span className={cn("font-medium", prompts.length >= 15 ? "text-red-600" : "text-gray-900")}>{prompts.length}/15</span>
+                  </div>
+                  <div className="h-1.5 bg-blue-200/50 rounded-full overflow-hidden">
+                    <div className={cn("h-full rounded-full transition-all duration-500", prompts.length >= 15 ? "bg-red-500" : "bg-blue-500")} style={{ width: `${Math.min((prompts.length / 15) * 100, 100)}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-4 mb-3 shadow-lg overflow-hidden">
             <div className="text-xs font-medium text-gray-400 mb-1">Audits Completed</div>
             <div className="text-xl font-bold text-white truncate">{auditResults.length}</div>
@@ -664,12 +711,7 @@ export default function ClientDashboard() {
                 <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap", dateRangeFilter !== "all" ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Calendar className="h-3.5 w-3.5" /> {dateRangeLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setDateRangeFilter("7d")} className={cn(dateRangeFilter === "7d" && "bg-blue-50")}>Last 7 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("30d")} className={cn(dateRangeFilter === "30d" && "bg-blue-50")}>Last 30 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("90d")} className={cn(dateRangeFilter === "90d" && "bg-blue-50")}>Last 90 days</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setDateRangeFilter("all")} className={cn(dateRangeFilter === "all" && "bg-blue-50")}>All Time</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
                 <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap", modelFilter.length > 0 ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Filter className="h-3.5 w-3.5" /> {modelFilterLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; const isSelected = modelFilter.length === 0 || modelFilter.includes(model.id); return (<DropdownMenuItem key={model.id} onClick={() => toggleModelFilter(model.id)} className={cn(isSelected && "bg-blue-50")}><div className="flex items-center gap-2 w-full">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="flex-1">{model.name}</span>{isSelected && <CheckCircle className="h-3 w-3 text-blue-600" />}</div></DropdownMenuItem>); })}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setModelFilter([])}>Clear Filters</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               </div>
-              {activeTab === "prompts" && (
-                <>
-                  {!isAdmin && <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= (isAgency ? 15 : 30) ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/{isAgency ? 15 : 30} Prompts</span>}
-                  <Button onClick={() => setBulkPromptsOpen(true)} variant="outline" size="sm" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 30)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
-                </>
-              )}
+
               <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Forzeo Discovery Engine"><span className={cn("w-2 h-2 rounded-full", includeTavily ? "bg-amber-500" : "bg-gray-300")} />{includeTavily ? "Discovery On" : "Discovery Off"}</button>
               <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>
@@ -711,7 +753,7 @@ export default function ClientDashboard() {
           )}
         </div>
       </main>
-      {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{EditPromptDialog()}{ImportDialog()}{RunCampaignDialog()}
+      {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{EditPromptDialog()}{EditLocationDialog()}{ImportDialog()}{RunCampaignDialog()}
       <UserManagement open={userManagementOpen} onOpenChange={setUserManagementOpen} />
       <input ref={fileInputRef} type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileImport} />
     </div>
@@ -719,7 +761,7 @@ export default function ClientDashboard() {
 
   function OverviewTab() {
     if (isAgency && !selectedClient) {
-      return <AgencyOverview clients={clients} prompts={prompts} auditResults={auditResults} onNavigateToBrand={(id) => { const c = clients.find(x => x.id === id); if (c) switchClient(c); }} />;
+      return <AgencyOverview clients={clients} prompts={prompts} auditResults={auditResults} onNavigateToBrand={(id) => { const c = clients.find(x => x.id === id); if (c) switchClient(c); }} onViewAllBrands={() => setManageBrandsOpen(true)} />;
     }
 
     return (
@@ -983,15 +1025,15 @@ export default function ClientDashboard() {
           <table className="w-full">
             <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200">
               <tr>
-                <th className="w-12 px-6 py-4 text-left"><Checkbox /></th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="w-10 px-3 py-3 text-left"><Checkbox /></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Prompt <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
                 </th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Visibility</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Position</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Models</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Citations</th>
-                <th className="px-6 py-4 text-end text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Actions</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Visibility</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Position</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Models</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Citations</th>
+                <th className="px-4 py-3 text-end text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -1005,30 +1047,31 @@ export default function ClientDashboard() {
 
                 return (
                   <tr key={p.id} className={cn("hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0", isInactive && "opacity-60")}>
-                    <td className="px-6 py-4"><Checkbox /></td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
+                    <td className="px-3 py-2.5"><Checkbox /></td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {isInactive && <Archive className="h-4 w-4 text-gray-400 flex-shrink-0" />}
                         <span className={cn("text-sm font-medium", isInactive ? "text-gray-500" : "text-gray-900")}>{p.prompt_text}</span>
                         {p.niche_level && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 uppercase tracking-wide flex-shrink-0 bg-gray-50 text-gray-600 border-gray-200">{p.niche_level === "super_niche" ? "Super Niche" : p.niche_level === "niche" ? "Niche" : "Broad"}</Badge>}
+                        {p.location_name && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 flex-shrink-0 bg-blue-50 text-blue-600 border-blue-200 flex items-center gap-1"><Globe className="h-2.5 w-2.5" />{p.location_name}</Badge>}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className={cn("text-base font-bold", vis > 0 ? "text-green-600" : "text-gray-300")}>{r ? `${vis}%` : "—"}</span>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className={cn("text-sm font-bold", vis > 0 ? "text-green-600" : "text-gray-300")}>{r ? `${vis}%` : "—"}</span>
                     </td>
-                    <td className="px-6 py-4 text-center text-gray-500 font-medium">{pos ? `#${pos}` : "—"}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-center gap-1.5">
+                    <td className="px-4 py-2.5 text-center text-gray-500 font-medium text-sm">{pos ? `#${pos}` : "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center justify-center gap-1">
                         {r?.model_results.slice(0, 4).map((mr, i) => {
                           const Logo = MODEL_LOGOS[mr.model]?.Logo;
                           const color = MODEL_LOGOS[mr.model]?.color || "#666";
-                          return Logo ? <div key={i} className="transition-transform group-hover:scale-110"><Logo className="h-4 w-4" style={{ color: mr.brand_mentioned ? color : "#e5e7eb" }} /></div> : null;
+                          return Logo ? <div key={i} className="transition-transform group-hover:scale-110"><Logo className="h-3.5 w-3.5" style={{ color: mr.brand_mentioned ? color : "#e5e7eb" }} /></div> : null;
                         })}
                         {!r && <span className="text-xs text-gray-400 italic">Not run</span>}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-center">{cit > 0 ? <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">{cit}</Badge> : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-2.5 text-center">{cit > 0 ? <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs">{cit}</Badge> : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-4 py-2.5">
                       <div className="flex items-center justify-center gap-1">
                         {isInactive ? (
                           <>
@@ -1050,6 +1093,13 @@ export default function ClientDashboard() {
                               setEditPromptOpen(true);
                             }} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Edit prompt">
                               <Settings className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => {
+                              setEditingLocationPromptId(p.id);
+                              setEditingLocationValue(p.location_name || "");
+                              setEditLocationOpen(true);
+                            }} className={cn("h-7 px-2", p.location_name ? "text-blue-500 hover:text-blue-700" : "text-gray-500 hover:text-blue-600")} title={p.location_name ? `Location: ${p.location_name}` : "Set location"}>
+                              <Globe className="h-3.5 w-3.5" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Run audit">
                               {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -1769,9 +1819,11 @@ export default function ClientDashboard() {
             </div>
           </div>
           <DialogFooter className="border-t border-gray-100 pt-4 flex justify-between">
-            <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={handleDeleteClient}>
-              <Trash2 className="h-4 w-4 mr-2" /> Delete Brand
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={handleDeleteClient}>
+                <Trash2 className="h-4 w-4 mr-2" /> Delete Brand
+              </Button>
+            )}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setEditClientOpen(false)} className="border-gray-300 text-gray-700">Cancel</Button>
               <Button onClick={handleUpdateClient} disabled={!editClientForm.name.trim()} className="bg-blue-600 hover:bg-blue-700 text-white">Save Changes</Button>
@@ -1839,7 +1891,7 @@ export default function ClientDashboard() {
                     {client.id === selectedClient?.id && <Badge className="bg-blue-100 text-blue-700">Active</Badge>}
                     <Button variant="outline" size="sm" onClick={() => { switchClient(client); setManageBrandsOpen(false); }} className="text-gray-600"><Eye className="h-4 w-4 mr-1" /> View</Button>
                     <Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(client.industry) ? client.industry : "Custom"; const customInd = Object.keys(industries).includes(client.industry) ? "" : client.industry; setEditClientForm({ name: client.name, brand_name: client.brand_name, target_region: client.target_region, industry: clientIndustry, customIndustry: customInd, primary_color: client.primary_color, logo_url: "", competitors: client.competitors?.join(", ") || "", website: client.brand_domain || "" }); switchClient(client); setManageBrandsOpen(false); setEditClientOpen(true); }} className="text-gray-600"><Settings className="h-4 w-4 mr-1" /> Edit</Button>
-                    <Button variant="outline" size="sm" onClick={() => { if (confirm("Delete " + client.name + "?")) deleteClient(client.id); }} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                    {isAdmin && <Button variant="outline" size="sm" onClick={() => { if (confirm("Delete " + client.name + "?")) deleteClient(client.id); }} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>}
                   </div>
                 </div>
               ))}
@@ -1856,7 +1908,72 @@ export default function ClientDashboard() {
 
 
   function BulkPromptsDialog() {
-    return (<Dialog open={bulkPromptsOpen} onOpenChange={setBulkPromptsOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Add Prompts</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div><div><Label>Multiple Prompts (one per line)</Label><Textarea placeholder={"Best dating apps in India\nDating apps with verification\nSafe dating apps for women"} value={bulkPrompts} onChange={(e) => setBulkPrompts(e.target.value)} rows={6} className="mt-1" /></div>      <div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or generate with AI</span></div></div>
+    return (<Dialog open={bulkPromptsOpen} onOpenChange={setBulkPromptsOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Add Prompts</DialogTitle></DialogHeader><div className="space-y-4">
+      {/* Location Selector */}
+      <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100">
+        <Label className="text-xs text-blue-700 uppercase tracking-wider flex items-center gap-1"><Globe className="h-3 w-3" /> Target Location (Optional)</Label>
+        <Select value={promptLocation || "__default__"} onValueChange={(v) => setPromptLocation(v === "__default__" ? "" : v)}>
+          <SelectTrigger className="bg-white h-8 text-sm mt-1.5"><SelectValue placeholder="Use brand's default location" /></SelectTrigger>
+          <SelectContent className="max-h-80">
+            <SelectItem value="__default__">📍 Use brand's default location</SelectItem>
+            {/* Countries */}
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50">Countries</div>
+            <SelectItem value="United States">🇺🇸 United States</SelectItem>
+            <SelectItem value="United Kingdom">🇬🇧 United Kingdom</SelectItem>
+            <SelectItem value="India">🇮🇳 India</SelectItem>
+            <SelectItem value="Thailand">🇹🇭 Thailand</SelectItem>
+            <SelectItem value="Australia">🇦🇺 Australia</SelectItem>
+            <SelectItem value="Germany">🇩🇪 Germany</SelectItem>
+            <SelectItem value="UAE">🇦🇪 UAE</SelectItem>
+            <SelectItem value="Canada">🇨🇦 Canada</SelectItem>
+            <SelectItem value="Singapore">🇸🇬 Singapore</SelectItem>
+            {/* US Cities */}
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇺🇸 US Cities</div>
+            <SelectItem value="US: New York">New York, NY</SelectItem>
+            <SelectItem value="US: Los Angeles">Los Angeles, CA</SelectItem>
+            <SelectItem value="US: Chicago">Chicago, IL</SelectItem>
+            <SelectItem value="US: San Francisco">San Francisco, CA</SelectItem>
+            <SelectItem value="US: Miami">Miami, FL</SelectItem>
+            <SelectItem value="US: Seattle">Seattle, WA</SelectItem>
+            <SelectItem value="US: Boston">Boston, MA</SelectItem>
+            <SelectItem value="US: Dallas">Dallas, TX</SelectItem>
+            <SelectItem value="US: Austin">Austin, TX</SelectItem>
+            <SelectItem value="US: Denver">Denver, CO</SelectItem>
+            {/* UK Cities */}
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇬🇧 UK Cities</div>
+            <SelectItem value="UK: London">London</SelectItem>
+            <SelectItem value="UK: Manchester">Manchester</SelectItem>
+            <SelectItem value="UK: Birmingham">Birmingham</SelectItem>
+            <SelectItem value="UK: Edinburgh">Edinburgh</SelectItem>
+            {/* India Cities */}
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇮🇳 India Cities</div>
+            <SelectItem value="India: Mumbai">Mumbai</SelectItem>
+            <SelectItem value="India: Delhi">Delhi</SelectItem>
+            <SelectItem value="India: Bangalore">Bangalore</SelectItem>
+            <SelectItem value="India: Hyderabad">Hyderabad</SelectItem>
+            <SelectItem value="India: Chennai">Chennai</SelectItem>
+            {/* Thailand Cities */}
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇹🇭 Thailand Cities</div>
+            <SelectItem value="Thailand: Bangkok">Bangkok</SelectItem>
+            <SelectItem value="Thailand: Chiang Mai">Chiang Mai</SelectItem>
+            <SelectItem value="Thailand: Phuket">Phuket</SelectItem>
+            {/* Australia Cities */}
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇦🇺 Australia Cities</div>
+            <SelectItem value="Australia: Sydney">Sydney</SelectItem>
+            <SelectItem value="Australia: Melbourne">Melbourne</SelectItem>
+            {/* UAE Cities */}
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇦🇪 UAE Cities</div>
+            <SelectItem value="UAE: Dubai">Dubai</SelectItem>
+            <SelectItem value="UAE: Abu Dhabi">Abu Dhabi</SelectItem>
+            {/* Canada Cities */}
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇨🇦 Canada Cities</div>
+            <SelectItem value="Canada: Toronto">Toronto</SelectItem>
+            <SelectItem value="Canada: Vancouver">Vancouver</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-blue-600 mt-1">AI responses will be personalized for this location</p>
+      </div>
+      <div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div><div><Label>Multiple Prompts (one per line)</Label><Textarea placeholder={"Best dating apps in India\nDating apps with verification\nSafe dating apps for women"} value={bulkPrompts} onChange={(e) => setBulkPrompts(e.target.value)} rows={6} className="mt-1" /></div>      <div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or generate with AI</span></div></div>
 
       {/* Generator Options */}
       <div className="bg-gray-50/50 p-4 rounded-lg border border-gray-100 space-y-4">
@@ -2847,5 +2964,64 @@ export default function ClientDashboard() {
 
   function ImportDialog() {
     return (<Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Import Prompts</DialogTitle></DialogHeader><div className="space-y-4"><div><Label>Paste JSON or text (one prompt per line)</Label><Textarea placeholder={'{"prompts": ["prompt 1", "prompt 2"]}\nor\nprompt 1\nprompt 2'} value={importText} onChange={(e) => setImportText(e.target.value)} rows={8} className="mt-1 font-mono text-sm" /></div><div className="text-center text-sm text-gray-500">or</div><Button variant="outline" className="w-full" onClick={() => fileInputRef.current?.click()}>Upload File (.json, .csv, .txt)</Button></div><DialogFooter><Button variant="outline" onClick={() => setImportDialogOpen(false)}>Cancel</Button><Button onClick={handleImport}>Import</Button></DialogFooter></DialogContent></Dialog>);
+  }
+
+  function EditLocationDialog() {
+    const editingPrompt = prompts.find(p => p.id === editingLocationPromptId);
+    return (
+      <Dialog open={editLocationOpen} onOpenChange={setEditLocationOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Globe className="h-5 w-5 text-blue-500" /> Edit Prompt Location</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {editingPrompt && (
+              <div className="p-3 bg-gray-50 rounded-lg border text-sm text-gray-700">
+                "{editingPrompt.prompt_text}"
+              </div>
+            )}
+            <div>
+              <Label className="text-xs text-gray-500 uppercase tracking-wider">Select Location</Label>
+              <Select value={editingLocationValue || "__default__"} onValueChange={setEditingLocationValue}>
+                <SelectTrigger className="mt-1.5"><SelectValue placeholder="Choose location" /></SelectTrigger>
+                <SelectContent className="max-h-80">
+                  <SelectItem value="__default__">📍 Use brand's default location</SelectItem>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50">Countries</div>
+                  <SelectItem value="United States">🇺🇸 United States</SelectItem>
+                  <SelectItem value="United Kingdom">🇬🇧 United Kingdom</SelectItem>
+                  <SelectItem value="India">🇮🇳 India</SelectItem>
+                  <SelectItem value="Thailand">🇹🇭 Thailand</SelectItem>
+                  <SelectItem value="Australia">🇦🇺 Australia</SelectItem>
+                  <SelectItem value="Germany">🇩🇪 Germany</SelectItem>
+                  <SelectItem value="UAE">🇦🇪 UAE</SelectItem>
+                  <SelectItem value="Canada">🇨🇦 Canada</SelectItem>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇺🇸 US Cities</div>
+                  <SelectItem value="US: New York">New York, NY</SelectItem>
+                  <SelectItem value="US: Los Angeles">Los Angeles, CA</SelectItem>
+                  <SelectItem value="US: Chicago">Chicago, IL</SelectItem>
+                  <SelectItem value="US: San Francisco">San Francisco, CA</SelectItem>
+                  <SelectItem value="US: Miami">Miami, FL</SelectItem>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇬🇧 UK Cities</div>
+                  <SelectItem value="UK: London">London</SelectItem>
+                  <SelectItem value="UK: Manchester">Manchester</SelectItem>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇮🇳 India Cities</div>
+                  <SelectItem value="India: Mumbai">Mumbai</SelectItem>
+                  <SelectItem value="India: Delhi">Delhi</SelectItem>
+                  <SelectItem value="India: Bangalore">Bangalore</SelectItem>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇹🇭 Thailand Cities</div>
+                  <SelectItem value="Thailand: Bangkok">Bangkok</SelectItem>
+                  <SelectItem value="Thailand: Phuket">Phuket</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500 mt-2">AI responses will be personalized for this location when you run the audit.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditLocationOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveLocation} className="bg-blue-600 hover:bg-blue-700"><Globe className="h-4 w-4 mr-1" /> Save Location</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
   }
 }

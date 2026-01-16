@@ -132,6 +132,8 @@ export interface Prompt {
   is_active: boolean;
   niche_level?: "broad" | "niche" | "super_niche";
   tags?: string[];
+  location_code?: number; // Optional location override for this prompt
+  location_name?: string; // Display name for the location
 }
 
 export interface ModelResult {
@@ -219,9 +221,61 @@ export const INDUSTRY_PRESETS: Record<string, {
 };
 
 export const LOCATION_CODES: Record<string, number> = {
-  "India": 2356, "United States": 2840, "United Kingdom": 2826, "Thailand": 2764,
-  "Singapore": 2702, "Australia": 2036, "Canada": 2124, "Germany": 2276,
-  "France": 2250, "UAE": 2784,
+  // ===== COUNTRIES =====
+  // North America
+  "United States": 2840, "Canada": 2124, "Mexico": 2484,
+  // Europe
+  "United Kingdom": 2826, "Germany": 2276, "France": 2250, "Spain": 2724,
+  "Italy": 2380, "Netherlands": 2528, "Switzerland": 2756, "Sweden": 2752,
+  // Asia Pacific
+  "India": 2356, "Thailand": 2764, "Singapore": 2702, "Australia": 2036,
+  "Japan": 2392, "South Korea": 2410, "Malaysia": 2458, "Indonesia": 2360,
+  "Philippines": 2608, "Vietnam": 2704, "China": 2156,
+  // Middle East
+  "UAE": 2784, "Saudi Arabia": 2682, "Israel": 2376,
+  // South America
+  "Brazil": 2076, "Argentina": 2032,
+  // Africa
+  "South Africa": 2710, "Nigeria": 2566,
+
+  // ===== US CITIES =====
+  "US: New York": 1023191, "US: Los Angeles": 1013962, "US: Chicago": 1016367,
+  "US: Houston": 1026481, "US: Phoenix": 1023564, "US: San Francisco": 1014221,
+  "US: Dallas": 1026339, "US: Miami": 1015116, "US: Seattle": 1027744,
+  "US: Boston": 1018127, "US: Denver": 1014395, "US: Atlanta": 1015254,
+  "US: San Diego": 1014218, "US: Austin": 1026135, "US: Las Vegas": 1023163,
+
+  // ===== UK CITIES =====
+  "UK: London": 1006886, "UK: Manchester": 1006977, "UK: Birmingham": 1006632,
+  "UK: Leeds": 1006943, "UK: Glasgow": 1006822, "UK: Liverpool": 1006958,
+  "UK: Edinburgh": 1006789, "UK: Bristol": 1006682,
+
+  // ===== INDIA CITIES =====
+  "India: Mumbai": 1007788, "India: Delhi": 1007768, "India: Bangalore": 1007751,
+  "India: Hyderabad": 1007774, "India: Chennai": 1007762, "India: Kolkata": 1007780,
+  "India: Pune": 1007793, "India: Ahmedabad": 1007747,
+
+  // ===== THAILAND CITIES =====
+  "Thailand: Bangkok": 1012541, "Thailand: Chiang Mai": 1012551,
+  "Thailand: Phuket": 1012568, "Thailand: Pattaya": 1012565,
+
+  // ===== AUSTRALIA CITIES =====
+  "Australia: Sydney": 9069883, "Australia: Melbourne": 9069872,
+  "Australia: Brisbane": 9069858, "Australia: Perth": 9069878,
+
+  // ===== GERMANY CITIES =====
+  "Germany: Berlin": 1003854, "Germany: Munich": 1004047, "Germany: Hamburg": 1003938,
+  "Germany: Frankfurt": 1003906, "Germany: Cologne": 1003993,
+
+  // ===== UAE CITIES =====
+  "UAE: Dubai": 1013010, "UAE: Abu Dhabi": 1013002,
+
+  // ===== SINGAPORE =====
+  "Singapore: Central": 9076810,
+
+  // ===== CANADA CITIES =====
+  "Canada: Toronto": 9000984, "Canada: Vancouver": 9001009,
+  "Canada: Montreal": 9000930, "Canada: Calgary": 9000889,
 };
 
 // ============================================
@@ -676,10 +730,10 @@ export function useClientDashboard() {
   // PROMPT MANAGEMENT - Supabase Primary
   // ============================================
 
-  const addCustomPrompt = useCallback(async (promptText: string, category?: PromptCategory): Promise<Prompt | null> => {
+  const addCustomPrompt = useCallback(async (promptText: string, category?: PromptCategory, locationCode?: number, locationName?: string): Promise<Prompt | null> => {
     if (!selectedClient) return null;
 
-    // Check agency prompt limit (10 prompts per brand)
+    // Check agency prompt limit (15 prompts per brand)
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
@@ -700,6 +754,7 @@ export function useClientDashboard() {
     const newPrompt: Prompt = {
       id: crypto.randomUUID(), client_id: selectedClient.id, prompt_text: promptText,
       category: detectedCategory, is_custom: true, is_active: true, niche_level: nicheLevel,
+      location_code: locationCode, location_name: locationName,
     };
 
     // Save to Supabase first - THROW on error
@@ -707,6 +762,7 @@ export function useClientDashboard() {
       const { error: insertError } = await supabase.from("prompts").insert({
         id: newPrompt.id, client_id: newPrompt.client_id, prompt_text: newPrompt.prompt_text,
         category: newPrompt.category, is_custom: newPrompt.is_custom, is_active: newPrompt.is_active,
+        location_code: newPrompt.location_code, location_name: newPrompt.location_name,
       });
       if (insertError) throw insertError;
 
@@ -841,20 +897,32 @@ export function useClientDashboard() {
     }
   }, [selectedClient, prompts, auditResults]);
 
-  const updatePrompt = useCallback(async (promptId: string, newText: string) => {
-    if (!selectedClient || !newText.trim()) return;
+  const updatePrompt = useCallback(async (promptId: string, updates: string | { prompt_text?: string, location_code?: number, location_name?: string }) => {
+    if (!selectedClient) return;
+
+    const updateData: any = {};
+    if (typeof updates === 'string') {
+      if (!updates.trim()) return;
+      updateData.prompt_text = updates.trim();
+    } else {
+      if (updates.prompt_text !== undefined) updateData.prompt_text = updates.prompt_text.trim();
+      if (updates.location_code !== undefined) updateData.location_code = updates.location_code;
+      if (updates.location_name !== undefined) updateData.location_name = updates.location_name;
+    }
+
+    if (Object.keys(updateData).length === 0) return;
 
     // Update in Supabase - THROW on error to bubble up to UI
     try {
       const { error: updateError } = await supabase
         .from("prompts")
-        .update({ prompt_text: newText.trim() })
+        .update(updateData)
         .eq("id", promptId);
 
       if (updateError) throw updateError;
 
       // Update local state
-      const updatedPrompts = prompts.map(p => p.id === promptId ? { ...p, prompt_text: newText.trim() } : p);
+      const updatedPrompts = prompts.map(p => p.id === promptId ? { ...p, ...updateData } : p);
       setPrompts(updatedPrompts);
       const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
       storedPrompts[selectedClient.id] = updatedPrompts;

@@ -6,9 +6,10 @@ interface AgencyOverviewProps {
     prompts: any[];
     auditResults: any[];
     onNavigateToBrand: (clientId: string) => void;
+    onViewAllBrands: () => void;
 }
 
-export function AgencyOverview({ clients, prompts, auditResults, onNavigateToBrand }: AgencyOverviewProps) {
+export function AgencyOverview({ clients, prompts, auditResults, onNavigateToBrand, onViewAllBrands }: AgencyOverviewProps) {
     // Calculate aggregated metrics
     const totalClients = clients.length;
     const totalPrompts = prompts.length;
@@ -125,6 +126,12 @@ export function AgencyOverview({ clients, prompts, auditResults, onNavigateToBra
                             </div>
                         ))}
                         {clients.length === 0 && <div className="p-8 text-center text-gray-500">No brands assigned.</div>}
+                    </div>
+                    <div className="p-3 bg-gray-50 border-t border-gray-100">
+                        <button onClick={onViewAllBrands} className="w-full py-2 flex items-center justify-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50/50 rounded-lg transition-colors">
+                            View All Brands
+                            <ArrowRight className="h-4 w-4" />
+                        </button>
                     </div>
                 </div>
             </div>

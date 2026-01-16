@@ -919,18 +919,26 @@ async function getGoogleAIOverview(
     language_code: "en",
     device: "desktop",
     depth: 10,
+    load_async_ai_overview: true,
+    expand_ai_overview: true,
   }]);
 
   const responseTime = Date.now() - startTime;
 
   if (result.error) {
+    console.log(`[Google AI Overview] ERROR: ${result.error}`);
     return { success: false, response: "", citations: [], cost: 0, error: result.error, response_time_ms: responseTime, is_ai_overview: false };
   }
 
-  const data = result.data as { tasks?: Array<{ result?: Array<{ items?: unknown[] }>; cost?: number }> };
+  const data = result.data as { tasks?: Array<{ result?: Array<{ items?: unknown[] }>; cost?: number; status_code?: number; status_message?: string }> };
   const task = data?.tasks?.[0];
   const taskResult = task?.result?.[0];
   const cost = task?.cost || 0;
+
+  // Debug logging to see what DataForSEO returns
+  console.log(`[Google AI Overview] Response received - status: ${task?.status_code}, message: ${task?.status_message || 'none'}, cost: ${cost}`);
+  console.log(`[Google AI Overview] Task result exists: ${!!taskResult}, items count: ${(taskResult as any)?.items?.length || 0}`);
+
   const items = (taskResult?.items || []) as Array<{
     type: string;
     items?: Array<{ text?: string; references?: Array<{ url?: string; title?: string; domain?: string; snippet?: string }> }>;
@@ -945,57 +953,112 @@ async function getGoogleAIOverview(
   const citations: Citation[] = [];
   let hasAiOverview = false; // Track if we found actual AI Overview
 
-  // Look for AI overview or featured snippet
+  // Log all item types for debugging
+  const itemTypes = items.map(i => i.type);
+  console.log(`[Google AI Overview] Found ${items.length} items, types: ${itemTypes.join(", ") || "none"}`);
+
+  // Look for any AI Overview item (type contains "ai_overview")
   for (const item of items) {
-    if (item.type === "ai_overview" && item.items) {
-      hasAiOverview = true; // Found actual AI Overview!
-      for (const subItem of item.items) {
-        // Handle standard text
-        if (subItem.type === "text" && subItem.text) response += subItem.text + "\n\n";
+    const itemAny = item as any;
 
-        // Handle lists (bullets/numbered)
-        if (subItem.type === "list" && subItem.items) {
-          subItem.items.forEach((li: any) => {
-            const bullet = li.text || "";
-            if (bullet) response += `• ${bullet}\n`;
-          });
-          response += "\n";
+    // Check if type contains "ai_overview" (catches ai_overview, google_ads_ai_overview, knowledge_graph_ai_overview_item, etc.)
+    const isAiOverviewType = item.type && item.type.indexOf("ai_overview") !== -1;
+
+    if (isAiOverviewType) {
+      hasAiOverview = true; // Found AI Overview!
+      console.log(`[Google AI Overview] Found item type: ${item.type}`);
+
+      // Primary: Use markdown field if available (contains full AI Overview)
+      if (itemAny.markdown) {
+        response = itemAny.markdown;
+        console.log(`[Google AI Overview] Extracted markdown (${response.length} chars)`);
+      }
+
+      // Secondary: Handle ai_overview_element array if markdown not available
+      if (!response && itemAny.ai_overview_element && Array.isArray(itemAny.ai_overview_element)) {
+        for (const element of itemAny.ai_overview_element) {
+          if (element.markdown) {
+            response += element.markdown + "\n\n";
+          } else if (element.text) {
+            if (element.title) response += `**${element.title}**\n`;
+            response += element.text + "\n\n";
+          }
         }
+        console.log(`[Google AI Overview] Extracted from ai_overview_element (${response.length} chars)`);
+      }
 
-        // Fallback for simple structure
-        if (!subItem.type && subItem.text) response += subItem.text + "\n\n";
-
-        if (subItem.references) {
-          subItem.references.forEach((ref, idx) => {
-            citations.push({
-              url: ref.url || "",
-              title: ref.title || "",
-              domain: ref.domain || extractDomain(ref.url || ""),
-              position: idx + 1,
-              snippet: ref.snippet || "",
-            });
-          });
+      // Tertiary: Handle nested items structure (older format)
+      if (!response && itemAny.items && Array.isArray(itemAny.items)) {
+        for (const subItem of itemAny.items) {
+          if (subItem.text) response += subItem.text + "\n\n";
+          if (subItem.markdown) response += subItem.markdown + "\n\n";
         }
       }
-    } else if (item.type === "featured_snippet") {
-      response += item.description || item.title || "";
-      if (item.url) {
-        citations.push({
-          url: item.url,
-          title: item.title || "",
-          domain: item.domain || extractDomain(item.url),
-          position: 0,
-          snippet: item.description,
+
+      // Extract references at item level (per DataForSEO docs)
+      if (itemAny.references && Array.isArray(itemAny.references)) {
+        itemAny.references.forEach((ref: any, idx: number) => {
+          citations.push({
+            url: ref.url || "",
+            title: ref.title || "",
+            domain: ref.domain || extractDomain(ref.url || ""),
+            position: idx + 1,
+            snippet: ref.text || "",
+          });
         });
+        console.log(`[Google AI Overview] Extracted ${citations.length} references`);
+      }
+
+      // Also check for references in ai_overview_element
+      if (itemAny.ai_overview_element && Array.isArray(itemAny.ai_overview_element)) {
+        for (const element of itemAny.ai_overview_element) {
+          if (element.references && Array.isArray(element.references)) {
+            element.references.forEach((ref: any, idx: number) => {
+              if (!citations.find(c => c.url === ref.url)) {
+                citations.push({
+                  url: ref.url || "",
+                  title: ref.title || "",
+                  domain: ref.domain || extractDomain(ref.url || ""),
+                  position: citations.length + 1,
+                  snippet: ref.text || "",
+                });
+              }
+            });
+          }
+        }
+      }
+
+      // Don't continue looking for more ai_overview items
+      break;
+    }
+  }
+
+  // Also check for featured_snippet as fallback (not really AI but useful)
+  if (!response) {
+    for (const item of items) {
+      if (item.type === "featured_snippet") {
+        const itemAny = item as any;
+        if (itemAny.description) response = itemAny.description;
+        if (itemAny.url) {
+          citations.push({
+            url: itemAny.url,
+            title: itemAny.title || "",
+            domain: itemAny.domain || extractDomain(itemAny.url),
+            position: 0,
+            snippet: itemAny.description || "",
+          });
+        }
+        // Featured snippet is not "AI Overview" per se
+        hasAiOverview = false;
+        console.log(`[Google AI Overview] Using featured_snippet as fallback`);
+        break;
       }
     }
   }
 
-  // NO FALLBACK - If no AI Overview found, return empty response with is_ai_overview: false
-  // The frontend will display "No AI Overview available for this prompt"
-  if (!response) {
-    console.log("[Google AI Overview] No AI Overview found - NOT falling back to SERP results");
-  }
+
+  // NO FALLBACK to organic results - user only wants actual AI Overview data
+  // Frontend will display "No AI Overview available for this prompt" if no AI content found
 
   response = response.trim();
   console.log(`[Google AI Overview] Got ${response.length} chars, ${citations.length} citations, cost: ${cost}, hasAiOverview: ${hasAiOverview}`);

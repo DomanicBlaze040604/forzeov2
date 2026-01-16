@@ -131,6 +131,8 @@ CREATE TABLE IF NOT EXISTS prompts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
   prompt_text TEXT NOT NULL,
+  location_code INT,
+  location_name TEXT,
   category prompt_category DEFAULT 'custom',
   is_custom BOOLEAN DEFAULT true,
   is_active BOOLEAN DEFAULT true,
@@ -421,6 +423,7 @@ CREATE INDEX IF NOT EXISTS idx_profiles_role ON profiles(role);
 CREATE INDEX IF NOT EXISTS idx_clients_org ON clients(organization_id);
 CREATE INDEX IF NOT EXISTS idx_user_clients_lookup ON user_clients(user_id, client_id);
 CREATE INDEX IF NOT EXISTS idx_prompts_client ON prompts(client_id);
+CREATE INDEX IF NOT EXISTS idx_prompts_location ON prompts(location_code);
 CREATE INDEX IF NOT EXISTS idx_audit_results_client ON audit_results(client_id);
 CREATE INDEX IF NOT EXISTS idx_audit_results_campaign ON audit_results(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_citations_audit ON citations(audit_result_id);
