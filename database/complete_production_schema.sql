@@ -74,12 +74,13 @@ CREATE TABLE IF NOT EXISTS organizations (
 );
 
 -- Profiles (Replaces Users table for RBAC)
+-- Roles: 'admin' (full access), 'agency' (5 brands, 15 prompts/brand), 'user' (standard)
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT,
   full_name TEXT,
   avatar_url TEXT,
-  role TEXT DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+  role TEXT DEFAULT 'user' CHECK (role IN ('admin', 'agency', 'user')),
   created_by UUID REFERENCES auth.users(id),
   is_active BOOLEAN DEFAULT true,
   last_login_at TIMESTAMPTZ,
