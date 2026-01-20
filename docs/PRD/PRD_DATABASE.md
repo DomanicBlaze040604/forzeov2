@@ -3,8 +3,8 @@
 **Total Tables:** 27  
 **Total Indexes:** 40+  
 **Total RLS Policies:** 28+  
-**Total Functions:** 12  
-**Total Triggers:** 8
+**Total Functions:** 15  
+**Total Triggers:** 12
 
 ---
 
@@ -22,7 +22,13 @@ CREATE TABLE organizations (
   max_clients INTEGER DEFAULT 3,
   max_prompts_per_client INTEGER DEFAULT 50,
   max_audits_per_month INTEGER DEFAULT 100,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  stripe_customer_id TEXT,
+  stripe_subscription_id TEXT,
+  billing_email TEXT,
+  settings JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ
 );
 ```
 
@@ -33,12 +39,21 @@ CREATE TABLE organizations (
 CREATE TABLE profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
-  role TEXT DEFAULT 'user', -- 'admin' | 'agency' | 'user'
+  full_name TEXT,
+  avatar_url TEXT,
+  role TEXT DEFAULT 'user' CHECK (role IN ('admin', 'agency', 'user')),
+  created_by UUID REFERENCES auth.users(id),
   is_active BOOLEAN DEFAULT true,
+  last_login_at TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  last_login_at TIMESTAMPTZ
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
+
+**Roles:**
+- `admin` - Full platform access, unlimited resources
+- `agency` - Max 5 brands, 15 prompts/brand, cannot delete brands
+- `user` - Unlimited brands, 30 prompts/brand
 
 **Auto-Create Trigger:**
 ```sql
@@ -47,8 +62,33 @@ AFTER INSERT ON auth.users
 FOR EACH ROW EXECUTE FUNCTION create_user_profile();
 ```
 
-### 3. clients (Brands)
-**Purpose:** Represents each tracked brand
+### 3. organization_members
+**Purpose:** Links users to organizations with roles
+**NEW TABLE** (was missing from master_schema.sql)
+
+```sql
+CREATE TABLE organization_members (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  role TEXT DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member', 'viewer')),
+  invited_by UUID REFERENCES auth.users(id),
+  invited_at TIMESTAMPTZ DEFAULT NOW(),
+  accepted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(organization_id, user_id)
+);
+
+CREATE INDEX idx_org_members_org ON organization_members(organization_id);
+CREATE INDEX idx_org_members_user ON organization_members(user_id);
+```
+
+**Org Roles:**
+- `owner` - Full control over organization
+- `admin` - Manage members & clients
+- `member` - Edit assigned clients
+- `viewer` - Read-only access
+
 
 ```sql
 CREATE TABLE clients (
@@ -438,7 +478,267 @@ CREATE TABLE execution_events (
 );
 ```
 
+### 17. recommendation_sources
+**Purpose:** Multi-source recommendation tracking
+**NEW TABLE** (was missing from master_schema.sql)
+
+```sql
+CREATE TABLE recommendation_sources (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  recommendation_id UUID REFERENCES recommendations(id) ON DELETE CASCADE,
+  source_type TEXT CHECK (source_type IN ('audit','citation','signal')),
+  source_id UUID,
+  confidence_score FLOAT DEFAULT 0.5
+);
+```
+
+### 18. domain_authority_history
+**Purpose:** Track authority score changes over time
+**NEW TABLE** (was missing from master_schema.sql)
+
+```sql
+CREATE TABLE domain_authority_history (
+  domain TEXT,
+  authority_score FLOAT,
+  measured_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_domain_history ON domain_authority_history(domain, measured_at DESC);
+```
+
+### 19. tavily_results
+
+```sql
+CREATE TABLE tavily_results (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+  prompt_id UUID REFERENCES prompts(id) ON DELETE SET NULL,
+  prompt_text TEXT NOT NULL,
+  query TEXT NOT NULL,
+  answer TEXT,
+  sources JSONB DEFAULT '[]',
+  raw_content JSONB,
+  search_depth TEXT DEFAULT 'advanced',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_tavily_client ON tavily_results(client_id);
+```
+
+### 20. recommendations (General)
+
+```sql
+CREATE TABLE recommendations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+  recommendation_type TEXT,
+  priority TEXT DEFAULT 'medium',
+  title TEXT NOT NULL,
+  description TEXT,
+  action_items TEXT[],
+  is_read BOOLEAN DEFAULT false,
+  is_actioned BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+### 21. prompt_schedules
+**Purpose:** Recurring audit scheduling
+
+```sql
+CREATE TABLE prompt_schedules (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+  prompt_id UUID REFERENCES prompts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  interval_value INTEGER NOT NULL CHECK (interval_value > 0),
+  interval_unit TEXT NOT NULL CHECK (interval_unit IN ('seconds', 'minutes', 'hours', 'days')),
+  is_active BOOLEAN DEFAULT true,
+  include_tavily BOOLEAN DEFAULT true,
+  models TEXT[] DEFAULT ARRAY['chatgpt', 'google_ai_overview'],
+  last_run_at TIMESTAMPTZ,
+  next_run_at TIMESTAMPTZ,
+  total_runs INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### 22. schedule_runs
+
+```sql
+CREATE TABLE schedule_runs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  schedule_id UUID REFERENCES prompt_schedules(id) ON DELETE CASCADE,
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+  prompt_id UUID REFERENCES prompts(id) ON DELETE SET NULL,
+  prompt_text TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  share_of_voice INTEGER DEFAULT 0,
+  visibility_score INTEGER DEFAULT 0,
+  average_rank DECIMAL(4,2),
+  total_citations INTEGER DEFAULT 0,
+  total_cost DECIMAL(10,6) DEFAULT 0,
+  model_results JSONB DEFAULT '[]',
+  tavily_results JSONB,
+  sources JSONB DEFAULT '[]',
+  started_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+```
+
+### 23. api_usage
+**Purpose:** API cost tracking for billing
+
+```sql
+CREATE TABLE api_usage (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
+  api_name TEXT NOT NULL,
+  endpoint TEXT,
+  request_count INTEGER DEFAULT 1,
+  cost DECIMAL(10,6) DEFAULT 0,
+  prompt_text TEXT,
+  models_used TEXT[],
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_usage_org ON api_usage(organization_id);
+CREATE INDEX idx_usage_date ON api_usage(created_at DESC);
+CREATE INDEX idx_usage_api ON api_usage(api_name);
+```
+
+### 24. audit_log
+**Purpose:** Security and compliance logging
+**NEW TABLE** (was missing from master_schema.sql)
+
+```sql
+CREATE TABLE audit_log (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id UUID,
+  old_data JSONB,
+  new_data JSONB,
+  ip_address INET,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_audit_log_org ON audit_log(organization_id, created_at DESC);
+CREATE INDEX idx_audit_log_user ON audit_log(user_id, created_at DESC);
+CREATE INDEX idx_audit_log_entity ON audit_log(entity_type, entity_id);
+```
+
+### 25. scheduled_audits
+**Purpose:** Recurring audit automation (daily/weekly/monthly)
+**NEW TABLE** (was missing from master_schema.sql)
+
+```sql
+CREATE TABLE scheduled_audits (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+  frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly')),
+  day_of_week INTEGER CHECK (day_of_week >= 0 AND day_of_week <= 6),
+  day_of_month INTEGER CHECK (day_of_month >= 1 AND day_of_month <= 28),
+  hour_utc INTEGER DEFAULT 9 CHECK (hour_utc >= 0 AND hour_utc <= 23),
+  prompt_filter JSONB DEFAULT '{"categories": ["broad", "niche"], "active_only": true}',
+  models TEXT[] DEFAULT ARRAY['chatgpt', 'google_ai_overview'],
+  is_active BOOLEAN DEFAULT true,
+  last_run_at TIMESTAMPTZ,
+  next_run_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_scheduled_client ON scheduled_audits(client_id) WHERE is_active = true;
+CREATE INDEX idx_scheduled_next ON scheduled_audits(next_run_at) WHERE is_active = true;
+```
+
+### 26. user_clients
+**Purpose:** User-client permissions (not counted in main tables, part of core)
+
+```sql
+CREATE TABLE user_clients (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+  granted_by UUID REFERENCES auth.users(id),
+  granted_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, client_id)
+);
+
+CREATE INDEX idx_user_clients_lookup ON user_clients(user_id, client_id);
+```
+
 ---
+
+## Additional Helper Functions
+
+### calculate_influence_score
+
+```sql
+CREATE FUNCTION calculate_influence_score(
+  p_freshness_score FLOAT,
+  p_authority_score FLOAT,
+  p_relevance_score FLOAT
+) RETURNS FLOAT AS $$
+BEGIN
+  RETURN (p_authority_score * 0.4) + (p_freshness_score * 0.3) + (p_relevance_score * 0.3);
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### get_client_visibility_summary
+
+```sql
+CREATE FUNCTION get_client_visibility_summary(p_client_id UUID, days INTEGER DEFAULT 30)
+RETURNS TABLE (
+  avg_sov DECIMAL,
+  avg_visibility_score DECIMAL,
+  avg_trust_index DECIMAL,
+  total_audits BIGINT,
+  total_cost DECIMAL
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    AVG(share_of_voice)::DECIMAL,
+    AVG(visibility_score)::DECIMAL,
+    AVG(trust_index)::DECIMAL,
+    COUNT(*)::BIGINT,
+    SUM(ar.total_cost)
+  FROM audit_results ar
+  WHERE ar.client_id = p_client_id
+    AND ar.created_at > NOW() - (days || ' days')::INTERVAL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+### get_due_rss_feeds
+
+```sql
+CREATE FUNCTION get_due_rss_feeds()
+RETURNS SETOF rss_feeds AS $$
+BEGIN
+  RETURN QUERY
+  SELECT *
+  FROM rss_feeds
+  WHERE is_active = true
+  AND (
+    last_polled_at IS NULL
+    OR last_polled_at + (poll_interval_hours || ' hours')::interval <= now()
+  )
+  ORDER BY last_polled_at ASC NULLS FIRST
+  LIMIT 50;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+
 
 ## RLS Policies (Row Level Security)
 
