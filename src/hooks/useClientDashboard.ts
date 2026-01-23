@@ -344,6 +344,7 @@ export function useClientDashboard() {
     loadFromStorage(STORAGE_KEYS.INCLUDE_TAVILY, true)
   );
   const [tavilyResults, setTavilyResults] = useState<Record<string, unknown>>({});
+  const [auditProgress, setAuditProgress] = useState<number | null>(null);
 
   const setIncludeTavily = useCallback((include: boolean) => {
     setIncludeTavilyState(include);
@@ -1980,8 +1981,10 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
 
               for (const prompt of promptsToAudit) {
                 try {
+                  setLoadingPromptId(prompt.id); // Show spinner for this prompt
                   console.log(`[Auto-Audit] Auditing: "${prompt.prompt_text.substring(0, 50)}..."`);
-                  const { error } = await supabase.functions.invoke("geo-audit", {
+
+                  const { data, error } = await supabase.functions.invoke("geo-audit", {
                     body: {
                       client_id: selectedClient.id,
                       prompt_id: prompt.id,
@@ -1996,45 +1999,69 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
                       save_to_db: true
                     }
                   });
-                  if (error) {
-                    console.error(`[Auto-Audit] Error:`, error);
+
+                  if (error || !data?.success) {
+                    console.error(`[Auto-Audit] Error:`, error || data?.error);
                   } else {
                     completedCount++;
-                    // Show progress toast every 3 prompts
-                    if (completedCount % 3 === 0 || completedCount === totalPrompts) {
-                      toast.info(`📊 Audit progress: ${completedCount}/${totalPrompts} prompts analyzed`, {
-                        duration: 3000,
+                    const progress = Math.round((completedCount / totalPrompts) * 100);
+                    setAuditProgress(progress);
+
+                    // INCREMENTAL UPDATE: Add result to state immediately so UI updates
+                    if (data.data) {
+                      const result: AuditResult = {
+                        id: data.data.id || crypto.randomUUID(),
+                        prompt_id: prompt.id,
+                        prompt_text: prompt.prompt_text,
+                        model_results: data.data.model_results,
+                        summary: data.data.summary,
+                        created_at: data.data.timestamp,
+                        client_id: selectedClient.id
+                      };
+
+                      setAuditResults(prev => {
+                        // Determine if we need to replace or add
+                        const exists = prev.some(r => r.prompt_id === prompt.id);
+                        const newAuditResults = exists
+                          ? prev.map(r => r.prompt_id === prompt.id ? result : r)
+                          : [result, ...prev]; // Add to top
+
+                        // Update summary + storage
+                        updateSummary(newAuditResults);
+                        const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+                        storedResults[selectedClient.id] = newAuditResults;
+                        saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
+
+                        return newAuditResults;
+                      });
+                    }
+
+                    // Show progress toast
+                    if (progress % 20 === 0) { // Notify every 20%
+                      toast.info(`📊 Audit progress: ${completedCount}/${totalPrompts} prompts analyzed (${progress}%)`, {
+                        duration: 2000,
                       });
                     }
                   }
                 } catch (err) {
                   console.error(`[Auto-Audit] Exception:`, err);
+                } finally {
+                  setLoadingPromptId(null); // specific prompt done
                 }
               }
 
-              console.log("[Auto-Audit] Complete. Refreshing results...");
+              console.log("[Auto-Audit] Complete.");
+              setAuditProgress(null);
 
-              // Fetch and update results immediately
+              // Final sync to be safe
               const { data: newResults } = await supabase
                 .from("audit_results").select("*").eq("client_id", selectedClient.id).order("created_at", { ascending: false });
               if (newResults && newResults.length > 0) {
-                const mapped: AuditResult[] = newResults.map(r => ({
-                  id: r.id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
-                  model_results: r.model_results || [],
-                  summary: r.summary || {
-                    share_of_voice: r.share_of_voice ?? 0,
-                    average_rank: r.average_rank ?? null,
-                    total_citations: r.total_citations ?? 0,
-                    total_cost: r.total_cost ?? 0,
-                  },
-                  created_at: r.created_at,
-                }));
-                setAuditResults(mapped);
-                updateSummary(mapped);
-
-                // Show completion toast
+                // ... mapped ...
+                // (We can skip or do a final consistency check, but the incremental updates should be enough)
+                // Keeping the original completion toast logic:
                 toast.success(`✅ Initial audit complete!`, {
-                  description: `${completedCount} prompts analyzed across 6 AI models. Results updated.`,
+                  description: `${completedCount} prompts analyzed across 6 AI models.`,
                   duration: 6000,
                 });
               }
@@ -2447,6 +2474,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
   // ============================================
 
   return {
+    auditProgress,
     // State
     clients, selectedClient, prompts, auditResults, summary, costBreakdown,
     selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults,

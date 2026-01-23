@@ -11,6 +11,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [checkingOnboarding, setCheckingOnboarding] = useState(false)
+  const [dashboardKey, setDashboardKey] = useState(0)
 
   useEffect(() => {
     // Check current session
@@ -106,13 +107,11 @@ function App() {
   }
 
   const handleOnboardingComplete = async () => {
-    console.log("[Onboarding] Completed, refreshing to load new client...")
+    console.log("[Onboarding] Completed, refreshing dashboard...")
     setShowOnboarding(false)
 
-    // Refresh to load the new client and trigger auto-audit
-    setTimeout(() => {
-      window.location.reload()
-    }, 1000)
+    // Trigger soft refresh of dashboard component
+    setDashboardKey(prev => prev + 1)
   }
 
   if (loading || checkingOnboarding) {
@@ -232,7 +231,7 @@ function App() {
   return (
     <>
       <Toaster position="top-right" />
-      <ClientDashboard />
+      <ClientDashboard key={dashboardKey} />
 
       {/* Onboarding Wizard Popup */}
       {showOnboarding && session?.user && (

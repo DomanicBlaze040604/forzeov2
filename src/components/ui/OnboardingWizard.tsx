@@ -15,7 +15,7 @@ interface OnboardingWizardProps {
     onComplete: () => void;
 }
 
-type Step = 'brand_details' | 'competitors' | 'seed_keywords' | 'processing';
+type Step = 'brand_details' | 'competitors' | 'seed_keywords' | 'review_prompts' | 'processing';
 type UserRole = 'user' | 'agency' | 'admin';
 
 interface FormData {
@@ -251,6 +251,11 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
     const [newKeyword, setNewKeyword] = useState('');
     const [newCompetitor, setNewCompetitor] = useState('');
     const [autoFindingCompetitors, setAutoFindingCompetitors] = useState(false);
+    const [promptsPerKeyword, setPromptsPerKeyword] = useState(5); // User selectable: 3-10
+    const [processingProgress, setProcessingProgress] = useState(0);
+    const [processingStatus, setProcessingStatus] = useState('');
+    const [generatedPrompts, setGeneratedPrompts] = useState<string[]>([]);
+    const [newManualPrompt, setNewManualPrompt] = useState("");
 
     // Reset form
     const resetForm = useCallback(() => {
@@ -454,19 +459,86 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 showNotification('error', "Please add at least one seed keyword.");
                 return;
             }
-            handleFinalize();
+            handleGeneratePreview();
+        } else if (currentStep === 'review_prompts') {
+            if (generatedPrompts.length === 0) {
+                showNotification('error', "You need at least one prompt to proceed.");
+                return;
+            }
+            handleCommit();
         }
-    }, [currentStep, formData, showNotification, handleAutoFindCompetitors]);
+    }, [currentStep, formData, showNotification, handleAutoFindCompetitors, generatedPrompts]);
 
     const handleBack = useCallback(() => {
         if (currentStep === 'competitors') setCurrentStep('brand_details');
         else if (currentStep === 'seed_keywords') setCurrentStep('competitors');
+        else if (currentStep === 'review_prompts') setCurrentStep('seed_keywords');
     }, [currentStep]);
 
-    // Finalize setup
-    const handleFinalize = useCallback(async () => {
+    // Generate Preview (In-Memory)
+    const handleGeneratePreview = useCallback(() => {
+        const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
+        const locationName = LOCATIONS.find(l => l.code === formData.location)?.name?.replace(/^[^\s]+\s/, '') || 'United States';
+        const maxPromptsAllowed = userLimits.maxPrompts;
+        const allPrompts: string[] = [];
+
+        // Generate prompts for each keyword
+        for (const keyword of formData.seedKeywords) {
+            if (allPrompts.length >= maxPromptsAllowed) break;
+
+            const keywordPrompts = [
+                `What are the best ${keyword} options available?`,
+                `Top rated ${keyword} reviews and comparison`,
+                `How to choose the right ${keyword}?`,
+                `Best ${keyword} for ${finalIndustry} in ${locationName}`,
+                `${keyword} recommendations and alternatives`,
+                `Affordable ${keyword} solutions`,
+                `Premium ${keyword} services`,
+                `${keyword} features guide`,
+                `${keyword} pricing comparison`,
+                `Why choose ${keyword}?`
+            ].slice(0, promptsPerKeyword);
+
+            for (const p of keywordPrompts) {
+                if (allPrompts.length < maxPromptsAllowed) {
+                    allPrompts.push(p);
+                }
+            }
+        }
+
+        setGeneratedPrompts(allPrompts);
+        setCurrentStep('review_prompts');
+    }, [formData, userLimits.maxPrompts, promptsPerKeyword]);
+
+    const handlePromptEdit = (idx: number, newVal: string) => {
+        const updated = [...generatedPrompts];
+        updated[idx] = newVal;
+        setGeneratedPrompts(updated);
+    };
+
+    const handlePromptDelete = (idx: number) => {
+        const updated = [...generatedPrompts];
+        updated.splice(idx, 1);
+        setGeneratedPrompts(updated);
+    };
+
+    const handleAddManualPrompt = () => {
+        if (generatedPrompts.length >= userLimits.maxPrompts) {
+            showNotification('error', `Limit reached: You can only have ${userLimits.maxPrompts} prompts.`);
+            return;
+        }
+        if (newManualPrompt.trim()) {
+            setGeneratedPrompts([...generatedPrompts, newManualPrompt.trim()]);
+            setNewManualPrompt("");
+        }
+    };
+
+    // Commit Final Setup to DB
+    const handleCommit = useCallback(async () => {
         setCurrentStep('processing');
         setLoading(true);
+        setProcessingProgress(10);
+        setProcessingStatus("Creating your brand profile...");
 
         try {
             const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
@@ -490,10 +562,12 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 brand_tags: [formData.brandName]
             };
 
+            await new Promise(r => setTimeout(r, 500));
+            setProcessingProgress(30);
+
             const { error: clientError } = await supabase.from('clients').insert(clientData);
             if (clientError) throw new Error(`Failed to create client: ${clientError.message}`);
 
-            // Create user-client association
             const { error: assocError } = await supabase.from('user_clients').insert({
                 user_id: user.id,
                 client_id: clientData.id,
@@ -501,33 +575,13 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
             });
             if (assocError) console.error("User-client association error:", assocError);
 
-            // Generate prompts from keywords (respecting quota)
-            let promptsGenerated = 0;
-            const allPrompts: string[] = [];
-            const maxPromptsAllowed = userLimits.maxPrompts;
+            setProcessingProgress(60);
+            setProcessingStatus(`Saving ${generatedPrompts.length} prompts to database...`);
+            await new Promise(r => setTimeout(r, 500));
 
-            // Generate 5 prompts per keyword (fallback method - no API needed)
-            for (const keyword of formData.seedKeywords) {
-                if (allPrompts.length >= maxPromptsAllowed) break;
-
-                const keywordPrompts = [
-                    `What are the best ${keyword} options available?`,
-                    `Top rated ${keyword} reviews and comparison`,
-                    `How to choose the right ${keyword}?`,
-                    `Best ${keyword} for ${finalIndustry} in ${locationName}`,
-                    `${keyword} recommendations and alternatives`
-                ];
-
-                for (const p of keywordPrompts) {
-                    if (allPrompts.length < maxPromptsAllowed) {
-                        allPrompts.push(p);
-                    }
-                }
-            }
-
-            // Insert prompts to database
-            if (allPrompts.length > 0) {
-                const promptsData = allPrompts.map(promptText => ({
+            // Insert prompts
+            if (generatedPrompts.length > 0) {
+                const promptsData = generatedPrompts.map(promptText => ({
                     id: crypto.randomUUID(),
                     client_id: clientData.id,
                     prompt_text: promptText,
@@ -537,34 +591,35 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 }));
 
                 const { error: promptsError } = await supabase.from('prompts').insert(promptsData);
-                if (promptsError) {
-                    console.error("Prompts insert error:", promptsError);
-                } else {
-                    promptsGenerated = promptsData.length;
-                }
+                if (promptsError) console.error("Prompts insert error:", promptsError);
             }
 
-            showNotification('success', promptsGenerated > 0
-                ? `Setup complete! Generated ${promptsGenerated} prompts.`
-                : "Setup complete! Add prompts in the Prompts tab.");
+            setProcessingProgress(100);
+            setProcessingStatus("Finalizing setup...");
+            await new Promise(r => setTimeout(r, 500));
+
+            showNotification('success', generatedPrompts.length > 0
+                ? `Setup complete! Created ${generatedPrompts.length} prompts.`
+                : "Setup complete!");
 
             setTimeout(() => {
                 resetForm();
                 onComplete();
                 onOpenChange(false);
-            }, 1500);
+            }, 1000);
 
         } catch (error: unknown) {
             console.error("Onboarding failed:", error);
             showNotification('error', error instanceof Error ? error.message : "Setup failed. Please try again.");
-            setCurrentStep('seed_keywords');
+            setCurrentStep('review_prompts'); // Go back to review on failure
+            setProcessingProgress(0);
         } finally {
             setLoading(false);
         }
-    }, [formData, userLimits.maxPrompts, onComplete, onOpenChange, showNotification, resetForm]);
+    }, [formData, generatedPrompts, onComplete, onOpenChange, showNotification, resetForm]);
 
     // Calculate prompts to be generated
-    const promptsToGenerate = Math.min(formData.seedKeywords.length * 5, userLimits.maxPrompts);
+    const promptsToGenerate = Math.min(formData.seedKeywords.length * promptsPerKeyword, userLimits.maxPrompts);
     const keywordsRemaining = userLimits.maxKeywords - formData.seedKeywords.length;
 
     // Step content renderer
@@ -682,16 +737,11 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                             <div className="flex items-start gap-3">
                                 <Info className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
                                 <div className="space-y-1">
-                                    <p className="text-sm font-semibold text-blue-900">How Keywords Work</p>
+                                    <p className="text-sm font-semibold text-blue-900">Configure Auto-Prompts</p>
                                     <p className="text-xs text-blue-700">
-                                        Each keyword generates <strong>5 AI search prompts</strong> automatically.
-                                        For example, adding "CRM software" creates prompts like:
+                                        Each keyword generates automatically generated search prompts.
+                                        Move the slider to decide how many AI questions to ask per topic.
                                     </p>
-                                    <ul className="text-xs text-blue-600 list-disc list-inside ml-2">
-                                        <li>"What are the best CRM software options?"</li>
-                                        <li>"Top rated CRM software reviews"</li>
-                                        <li>"How to choose the right CRM software?"</li>
-                                    </ul>
                                 </div>
                             </div>
                         </div>
@@ -701,16 +751,39 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                             <div className="flex items-center gap-2">
                                 <span className="text-sm text-gray-600">Your quota ({userRole}):</span>
                                 <span className="text-sm font-semibold text-gray-900">
-                                    {userLimits.maxKeywords} keywords × 5 = {userLimits.maxPrompts} prompts max
+                                    {userLimits.maxKeywords} keywords × {promptsPerKeyword} = {promptsToGenerate} / {userLimits.maxPrompts} prompts
                                 </span>
                             </div>
                             <span className={cn("text-sm font-medium px-2 py-0.5 rounded",
                                 keywordsRemaining > 0 ? "text-emerald-700 bg-emerald-100" : "text-red-700 bg-red-100")}>
-                                {keywordsRemaining} remaining
+                                {keywordsRemaining} keywords remaining
                             </span>
                         </div>
 
-                        <div className="space-y-1">
+                        {/* Prompts Per Keyword Slider */}
+                        <div className="space-y-3 px-1">
+                            <div className="flex items-center justify-between">
+                                <Label className="text-sm font-semibold text-gray-700">Prompts to generate per keyword</Label>
+                                <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                                    {promptsPerKeyword} prompts
+                                </span>
+                            </div>
+                            <input
+                                type="range"
+                                min="3"
+                                max="10"
+                                step="1"
+                                value={promptsPerKeyword}
+                                onChange={(e) => setPromptsPerKeyword(parseInt(e.target.value))}
+                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                            />
+                            <div className="flex justify-between text-xs text-gray-400">
+                                <span>3 (Min)</span>
+                                <span>10 (Max)</span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1 pt-2">
                             <Label className="text-sm font-semibold text-gray-700">Add Keyword Topics</Label>
                             <p className="text-sm text-gray-500">Enter topics/keywords you want to track in AI responses.</p>
                         </div>
@@ -730,7 +803,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                                     {formData.seedKeywords.map((kw, idx) => (
                                         <div key={idx} className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-full text-sm flex items-center gap-2">
                                             <span>{kw}</span>
-                                            <span className="text-indigo-400 text-xs">×5</span>
+                                            <span className="text-indigo-400 text-xs">×{promptsPerKeyword}</span>
                                             <button onClick={() => handleRemoveKeyword(idx)} className="text-indigo-400 hover:text-red-500 transition-colors" type="button">
                                                 <X className="h-3 w-3" />
                                             </button>
@@ -749,7 +822,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
                                     <p className="text-sm text-emerald-700">
                                         <strong>{promptsToGenerate} prompts</strong> will be generated
-                                        ({formData.seedKeywords.length} keywords × 5 prompts each)
+                                        ({formData.seedKeywords.length} keywords × {promptsPerKeyword} prompts each)
                                     </p>
                                 </div>
                             )}
@@ -757,18 +830,72 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                     </div>
                 );
 
+            case 'review_prompts':
+                return (
+                    <div className="space-y-4 py-4 h-[400px] flex flex-col">
+                        <div className="flex items-center justify-between">
+                            <Label className="text-sm font-semibold text-gray-700">
+                                Review Prompts <span className={cn(generatedPrompts.length > userLimits.maxPrompts ? "text-red-600" : "text-gray-500")}>({generatedPrompts.length} / {userLimits.maxPrompts})</span>
+                            </Label>
+                            <span className="text-xs text-gray-500">Edit or delete prompts before continuing</span>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-2 bg-gray-50">
+                            {generatedPrompts.map((prompt, idx) => (
+                                <div key={idx} className="flex gap-2 items-start group">
+                                    <Input
+                                        value={prompt}
+                                        onChange={(e) => handlePromptEdit(idx, e.target.value)}
+                                        className="bg-white border-gray-200 text-sm h-9"
+                                    />
+                                    <button
+                                        onClick={() => handlePromptDelete(idx)}
+                                        className="text-gray-400 hover:text-red-500 p-2 transition-colors"
+                                        title="Remove prompt"
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                            <Input
+                                placeholder="Add a custom prompt..."
+                                value={newManualPrompt}
+                                onChange={(e) => setNewManualPrompt(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddManualPrompt()}
+                                className="flex-1 bg-white"
+                            />
+                            <Button onClick={handleAddManualPrompt} variant="outline" disabled={generatedPrompts.length >= userLimits.maxPrompts}>Add</Button>
+                        </div>
+                    </div>
+                );
+
             case 'processing':
                 return (
                     <div className="py-12 text-center space-y-6">
-                        <div className="relative mx-auto w-24 h-24">
+                        <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
                             <div className="absolute inset-0 border-4 border-gray-200 rounded-full"></div>
                             <div className="absolute inset-0 border-t-4 border-blue-500 border-solid rounded-full animate-spin"></div>
+                            <span className="text-xs font-bold text-gray-700">{Math.round(processingProgress)}%</span>
                         </div>
-                        <div className="space-y-2">
-                            <h3 className="text-xl font-bold text-gray-900">Setting up your Dashboard</h3>
-                            <p className="text-gray-500 max-w-md mx-auto">
-                                Creating your brand profile and generating {promptsToGenerate} AI prompts from your keywords.
-                            </p>
+                        <div className="space-y-4 max-w-md mx-auto px-4">
+                            <div>
+                                <h3 className="text-xl font-bold text-gray-900">{processingStatus || "Setting up your Dashboard"}</h3>
+                                <p className="text-gray-500 text-sm mt-1">
+                                    Creating your brand profile and generating {promptsToGenerate} AI prompts from your keywords.
+                                </p>
+                            </div>
+
+                            {/* Progress bar */}
+                            <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200">
+                                <div
+                                    className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500 ease-out"
+                                    style={{ width: `${processingProgress}%` }}
+                                >
+                                </div>
+                            </div>
                         </div>
                     </div>
                 );
@@ -791,17 +918,18 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                                 {currentStep === 'brand_details' && "Let's set up your brand"}
                                 {currentStep === 'competitors' && "Who are you up against?"}
                                 {currentStep === 'seed_keywords' && "What topics matter to you?"}
+                                {currentStep === 'review_prompts' && "Review your AI prompts"}
                                 {currentStep === 'processing' && "Working our magic..."}
                             </DialogTitle>
                             <DialogDescription className="text-gray-600">
-                                Step {currentStep === 'brand_details' ? 1 : currentStep === 'competitors' ? 2 : currentStep === 'seed_keywords' ? 3 : 3} of 3 • Setting up your AI visibility analytics
+                                Step {currentStep === 'brand_details' ? 1 : currentStep === 'competitors' ? 2 : currentStep === 'seed_keywords' ? 3 : currentStep === 'review_prompts' ? 4 : 4} of 4 • Setting up your AI visibility analytics
                             </DialogDescription>
                         </div>
                     </div>
 
                     <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
                         <div className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-500 ease-out"
-                            style={{ width: `${currentStep === 'brand_details' ? 33 : currentStep === 'competitors' ? 66 : 100}%` }} />
+                            style={{ width: `${currentStep === 'brand_details' ? 25 : currentStep === 'competitors' ? 50 : currentStep === 'seed_keywords' ? 75 : 100}%` }} />
                     </div>
                 </DialogHeader>
 
@@ -825,6 +953,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                                     <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
                                 )}
                                 <div className="text-sm text-gray-500">
+                                    {currentStep === 'review_prompts' && `Reviewing ${generatedPrompts.length} prompts`}
                                     {currentStep === 'seed_keywords' && `${promptsToGenerate} prompts will be created`}
                                     {currentStep === 'competitors' && "You can skip this step if needed"}
                                     {currentStep === 'brand_details' && "All fields marked with * are required"}
@@ -832,7 +961,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                             </div>
                             <Button onClick={handleNext} disabled={loading}
                                 className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg shadow-blue-600/25 px-8">
-                                {currentStep === 'seed_keywords' ? (
+                                {currentStep === 'review_prompts' ? (
                                     loading ? (<><Loader2 className="h-4 w-4 animate-spin mr-2" />Setting up...</>) : (<><Zap className="h-4 w-4 mr-2" />Start Audit</>)
                                 ) : (<>Next Step<ChevronRight className="h-4 w-4 ml-2" /></>)}
                             </Button>

@@ -89,7 +89,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">("overview");
@@ -650,7 +650,7 @@ export default function ClientDashboard() {
             <div className="text-xl font-bold text-white truncate">{auditResults.length}</div>
             <div className="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
               <span className="inline-block w-2 h-2 rounded-full bg-green-400 flex-shrink-0 animate-pulse"></span>
-              <span className="truncate">Total audits run</span>
+              <span className="truncate">Total runs (all time)</span>
             </div>
           </div>
           {/* User Profile Section */}
@@ -718,6 +718,20 @@ export default function ClientDashboard() {
             </div>
           </div>
         </header>
+        {auditProgress !== null && (
+          <div className="bg-blue-600 text-white px-4 py-2 text-sm font-medium flex items-center justify-between sticky top-[65px] z-30 shadow-md animate-in slide-in-from-top-2">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Running Initial Audit... {auditProgress}%</span>
+            </div>
+            <div className="w-48 bg-blue-800 rounded-full h-2 overflow-hidden">
+              <div
+                className="h-full bg-white transition-all duration-500 ease-out"
+                style={{ width: `${auditProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
         {error && <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2 text-sm"><AlertTriangle className="h-4 w-4" /> {error}</div>}
         <div className="p-6">
           {activeTab === "overview" && OverviewTab()}
