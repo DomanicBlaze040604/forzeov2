@@ -82,6 +82,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 // ============================================
 // TYPES
@@ -1962,11 +1963,20 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
           console.log("[Auto-Audit] New client detected with prompts but no results. Triggering auto-audit...");
           console.log("[Auto-Audit] Client:", selectedClient.brand_name, "Prompts:", loadedPrompts.length);
 
+          // Show toast notification that auto-audit is starting
+          toast.info(`🚀 Starting initial AI audit for ${selectedClient.brand_name}...`, {
+            description: `Running ${Math.min(loadedPrompts.length, 10)} prompts across 6 AI models`,
+            duration: 8000,
+          });
+
           // Run auto-audit after short delay
           setTimeout(async () => {
             try {
               const promptsToAudit = loadedPrompts.slice(0, 10); // Limit to 10 prompts for initial audit
               console.log(`[Auto-Audit] Running audit on ${promptsToAudit.length} prompts...`);
+
+              let completedCount = 0;
+              const totalPrompts = promptsToAudit.length;
 
               for (const prompt of promptsToAudit) {
                 try {
@@ -1986,13 +1996,25 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
                       save_to_db: true
                     }
                   });
-                  if (error) console.error(`[Auto-Audit] Error:`, error);
+                  if (error) {
+                    console.error(`[Auto-Audit] Error:`, error);
+                  } else {
+                    completedCount++;
+                    // Show progress toast every 3 prompts
+                    if (completedCount % 3 === 0 || completedCount === totalPrompts) {
+                      toast.info(`📊 Audit progress: ${completedCount}/${totalPrompts} prompts analyzed`, {
+                        duration: 3000,
+                      });
+                    }
+                  }
                 } catch (err) {
                   console.error(`[Auto-Audit] Exception:`, err);
                 }
               }
 
               console.log("[Auto-Audit] Complete. Refreshing results...");
+
+              // Fetch and update results immediately
               const { data: newResults } = await supabase
                 .from("audit_results").select("*").eq("client_id", selectedClient.id).order("created_at", { ascending: false });
               if (newResults && newResults.length > 0) {
@@ -2009,9 +2031,18 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
                 }));
                 setAuditResults(mapped);
                 updateSummary(mapped);
+
+                // Show completion toast
+                toast.success(`✅ Initial audit complete!`, {
+                  description: `${completedCount} prompts analyzed across 6 AI models. Results updated.`,
+                  duration: 6000,
+                });
               }
             } catch (autoErr) {
               console.error("[Auto-Audit] Failed:", autoErr);
+              toast.error("Auto-audit encountered an error", {
+                description: "Some results may not have been collected. Try running manually.",
+              });
             }
           }, 2000);
         }
