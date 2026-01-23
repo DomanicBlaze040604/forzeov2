@@ -1894,6 +1894,9 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
     if (selectedClient) {
       // Load from Supabase on client change
       (async () => {
+        let loadedPrompts: Prompt[] = [];
+        let loadedResults: AuditResult[] = [];
+
         try {
           const { data: promptsData } = await supabase
             .from("prompts").select("*").eq("client_id", selectedClient.id).eq("is_active", true);
@@ -1903,13 +1906,16 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
               category: p.category || "custom", is_custom: p.is_custom, is_active: p.is_active,
             }));
             setPrompts(mappedPrompts);
+            loadedPrompts = mappedPrompts;
           } else {
             const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
             setPrompts(storedPrompts[selectedClient.id] || []);
+            loadedPrompts = storedPrompts[selectedClient.id] || [];
           }
         } catch {
           const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
           setPrompts(storedPrompts[selectedClient.id] || []);
+          loadedPrompts = storedPrompts[selectedClient.id] || [];
         }
 
         try {
@@ -1919,7 +1925,6 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
             const mappedResults: AuditResult[] = resultsData.map(r => ({
               id: r.id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
               model_results: r.model_results || [],
-              // Build summary from individual columns (database stores them separately, not as JSONB)
               summary: r.summary || {
                 share_of_voice: r.share_of_voice ?? 0,
                 average_rank: r.average_rank ?? null,
@@ -1930,17 +1935,85 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
             }));
             setAuditResults(mappedResults);
             updateSummary(mappedResults);
+            loadedResults = mappedResults;
           } else {
             const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
             const clientResults = storedResults[selectedClient.id] || [];
             setAuditResults(clientResults);
             updateSummary(clientResults);
+            loadedResults = clientResults;
           }
         } catch {
           const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
           const clientResults = storedResults[selectedClient.id] || [];
           setAuditResults(clientResults);
           updateSummary(clientResults);
+          loadedResults = clientResults;
+        }
+
+        // AUTO-AUDIT: Check if this is a new client that needs initial audits
+        const clientCreatedAt = new Date(selectedClient.created_at);
+        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+        const isNewClient = clientCreatedAt > fifteenMinutesAgo;
+        const hasNoResults = loadedResults.length === 0;
+        const hasPrompts = loadedPrompts.length > 0;
+
+        if (isNewClient && hasNoResults && hasPrompts) {
+          console.log("[Auto-Audit] New client detected with prompts but no results. Triggering auto-audit...");
+          console.log("[Auto-Audit] Client:", selectedClient.brand_name, "Prompts:", loadedPrompts.length);
+
+          // Run auto-audit after short delay
+          setTimeout(async () => {
+            try {
+              const promptsToAudit = loadedPrompts.slice(0, 10); // Limit to 10 prompts for initial audit
+              console.log(`[Auto-Audit] Running audit on ${promptsToAudit.length} prompts...`);
+
+              for (const prompt of promptsToAudit) {
+                try {
+                  console.log(`[Auto-Audit] Auditing: "${prompt.prompt_text.substring(0, 50)}..."`);
+                  const { error } = await supabase.functions.invoke("geo-audit", {
+                    body: {
+                      client_id: selectedClient.id,
+                      prompt_id: prompt.id,
+                      prompt_text: prompt.prompt_text,
+                      brand_name: selectedClient.brand_name,
+                      brand_domain: selectedClient.brand_domain,
+                      brand_tags: selectedClient.brand_tags,
+                      competitors: selectedClient.competitors,
+                      location_code: selectedClient.location_code,
+                      location_name: selectedClient.target_region,
+                      models: ["chatgpt", "claude", "gemini", "perplexity", "google_ai_overview", "google_serp"],
+                      save_to_db: true
+                    }
+                  });
+                  if (error) console.error(`[Auto-Audit] Error:`, error);
+                } catch (err) {
+                  console.error(`[Auto-Audit] Exception:`, err);
+                }
+              }
+
+              console.log("[Auto-Audit] Complete. Refreshing results...");
+              const { data: newResults } = await supabase
+                .from("audit_results").select("*").eq("client_id", selectedClient.id).order("created_at", { ascending: false });
+              if (newResults && newResults.length > 0) {
+                const mapped: AuditResult[] = newResults.map(r => ({
+                  id: r.id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
+                  model_results: r.model_results || [],
+                  summary: r.summary || {
+                    share_of_voice: r.share_of_voice ?? 0,
+                    average_rank: r.average_rank ?? null,
+                    total_citations: r.total_citations ?? 0,
+                    total_cost: r.total_cost ?? 0,
+                  },
+                  created_at: r.created_at,
+                }));
+                setAuditResults(mapped);
+                updateSummary(mapped);
+              }
+            } catch (autoErr) {
+              console.error("[Auto-Audit] Failed:", autoErr);
+            }
+          }, 2000);
         }
       })();
     }

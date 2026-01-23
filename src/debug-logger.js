@@ -1,5 +1,13 @@
 
 window.addEventListener('error', function (event) {
+    // Ignore ResizeObserver loop errors which are often benign
+    if (event.message && (
+        event.message.includes('ResizeObserver loop completed with undelivered notifications') ||
+        event.message.includes('ResizeObserver loop limit exceeded')
+    )) {
+        return;
+    }
+
     console.error('GLOBAL ERROR CAUGHT:', event.error);
     // Optional: create a visible alert on screen for the user to screenshot
     const div = document.createElement('div');
