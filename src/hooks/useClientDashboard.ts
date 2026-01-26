@@ -1103,6 +1103,7 @@ export function useClientDashboard() {
             brand_name: selectedClient.brand_name, brand_tags: selectedClient.brand_tags,
             competitors: selectedClient.competitors, location_code: selectedClient.location_code,
             models: selectedModels, niche_level: prompt.niche_level, save_to_db: true,
+            skip_cache: true, // Force fresh results for every run
           },
         });
 

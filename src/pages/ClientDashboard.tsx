@@ -2453,52 +2453,7 @@ export default function ClientDashboard() {
                 </div>
               </div>
 
-              {/* Suggestions Panel */}
-              {(() => {
-                const allSuggestions = new Set<string>();
-                result.model_results.forEach(mr => {
-                  if (mr.potential_competitors) {
-                    mr.potential_competitors.forEach((c: string) => allSuggestions.add(c));
-                  }
-                });
-                const suggestions = Array.from(allSuggestions);
 
-                if (suggestions.length > 0) {
-                  return (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start justify-between gap-4">
-                      <div>
-                        <h4 className="font-semibold text-amber-900 text-sm flex items-center gap-2">
-                          <Lightbulb className="h-4 w-4" /> AI Suggested Competitors
-                        </h4>
-                        <p className="text-xs text-amber-700 mt-1">Found in AI responses but not currently tracked.</p>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {suggestions.map(s => (
-                            <div key={s} className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-amber-200 text-xs font-medium text-amber-800 shadow-sm">
-                              {s}
-                              <button
-                                onClick={() => {
-                                  const current = selectedClient?.competitors || [];
-                                  if (!current.includes(s)) {
-                                    const updated = [...current, s];
-                                    updateCompetitors(updated);
-                                  }
-                                }}
-                                className="hover:bg-amber-100 rounded p-0.5 transition-colors"
-                                title="Add to tracking"
-                              >
-                                <Plus className="h-3 w-3 text-amber-600" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                    </div>
-
-                  );
-                }
-                return null;
-              })()}
 
               {/* Tabs */}
               <div className="flex items-center justify-between">
@@ -2746,13 +2701,7 @@ export default function ClientDashboard() {
 
                 return (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-sm text-gray-500 mr-2">Filter by Citations:</span>
-                      <button onClick={() => setPastResponsesCitationFilter("all")} className={cn("px-3 py-1.5 rounded-full text-xs font-medium transition-all", pastResponsesCitationFilter === "all" ? "bg-gray-900 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>All</button>
-                      <button onClick={() => setPastResponsesCitationFilter("new")} className={cn("px-3 py-1.5 rounded-full text-xs font-medium transition-all", pastResponsesCitationFilter === "new" ? "bg-green-600 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>🆕 New</button>
-                      <button onClick={() => setPastResponsesCitationFilter("common")} className={cn("px-3 py-1.5 rounded-full text-xs font-medium transition-all", pastResponsesCitationFilter === "common" ? "bg-blue-600 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>⭐ Common</button>
-                      <button onClick={() => setPastResponsesCitationFilter("unused")} className={cn("px-3 py-1.5 rounded-full text-xs font-medium transition-all", pastResponsesCitationFilter === "unused" ? "bg-amber-600 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>⚠️ Unused</button>
-                    </div>
+
 
                     {filteredHistory.length === 0 ? (
                       <div className="text-center py-12 bg-gray-50 rounded-xl">
