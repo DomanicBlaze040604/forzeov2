@@ -2108,6 +2108,10 @@ serve(async (req: Request) => {
     const sanitizedCompetitors = competitors.map(c => sanitizeString(c, 100)).filter(Boolean);
     const targetDomain = sanitizeString(brand_domain, 200);
 
+    if (body.skip_cache) {
+      console.log(`[GEO Audit] skip_cache=true, received request for FRESH results (bypassing any potential cache)`);
+    }
+
     console.log(`[GEO Audit] "${prompt_text.substring(0, 50)}..." | Brand: ${brand_name} | Category: ${prompt_category}`);
     console.log(`[GEO Audit] Models: ${models.join(", ")} | Location: ${location_code}`);
 
