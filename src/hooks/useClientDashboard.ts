@@ -694,6 +694,44 @@ export function useClientDashboard() {
         const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
         storedResults[client.id] = mappedResults;
         saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
+
+        // Load Tavily results from database
+        try {
+          const { data: tavilyData } = await supabase
+            .from('tavily_results')
+            .select('*')
+            .eq('client_id', client.id)
+            .order('created_at', { ascending: false });
+
+          if (tavilyData && tavilyData.length > 0) {
+            const tavilyMap: Record<string, unknown> = {};
+            tavilyData.forEach(t => {
+              // Only keep the most recent result per prompt
+              if (t.prompt_id && !tavilyMap[t.prompt_id]) {
+                tavilyMap[t.prompt_id] = {
+                  success: true,
+                  query: t.query,
+                  answer: t.answer,
+                  sources: t.sources || [],
+                  analysis: {
+                    brand_mentioned: false,
+                    brand_mention_count: 0,
+                    competitor_mentions: {},
+                    top_domains: [],
+                    source_types: {},
+                    insights: [],
+                  },
+                  timestamp: t.created_at,
+                };
+              }
+            });
+            setTavilyResults(tavilyMap);
+            console.log("[Tavily] Loaded", Object.keys(tavilyMap).length, "results from database");
+          }
+        } catch (tavilyErr) {
+          console.log("[Tavily] Database fetch failed:", tavilyErr);
+        }
+
         return;
       }
     } catch { /* fallback to localStorage */ }
@@ -759,14 +797,31 @@ export function useClientDashboard() {
       location_code: locationCode, location_name: locationName,
     };
 
-    // Save to Supabase first - THROW on error
+    // Save to Supabase first
     try {
       const { error: insertError } = await supabase.from("prompts").insert({
         id: newPrompt.id, client_id: newPrompt.client_id, prompt_text: newPrompt.prompt_text,
         category: newPrompt.category, is_custom: newPrompt.is_custom, is_active: newPrompt.is_active,
         location_code: newPrompt.location_code, location_name: newPrompt.location_name,
       });
-      if (insertError) throw insertError;
+
+      if (insertError) {
+        // If unique constraint violation (duplicate prompt), fetch existing and return it
+        if (insertError.code === '23505') {
+          const { data: existing } = await supabase
+            .from("prompts")
+            .select("*")
+            .eq("client_id", selectedClient.id)
+            .eq("prompt_text", promptText)
+            .single();
+
+          if (existing) {
+            toast.info("Prompt already exists. Using existing prompt.");
+            return existing;
+          }
+        }
+        throw insertError;
+      }
 
       // Only update local state if DB insert succeeded
       const newPrompts = [...prompts, newPrompt];
@@ -2503,5 +2558,8 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
     // State setters
     setClients,
+
+    // Refresh data (for use after imports, etc.)
+    refreshData: fetchClients,
   };
 }

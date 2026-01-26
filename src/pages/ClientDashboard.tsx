@@ -3,7 +3,7 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield } from 'lucide-react';
+import { ChevronDown, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History } from 'lucide-react';
 import { AgencyOverview } from "@/components/AgencyOverview";
 import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
 import { useAuth } from "../hooks/useAuth";
@@ -27,6 +27,7 @@ import { CampaignsList } from "@/components/CampaignsList";
 import { CampaignDetail } from "@/components/CampaignDetail";
 import { SignalsDashboard } from "@/components/SignalsDashboard";
 import CitationIntelligence from "@/components/CitationIntelligence";
+import { toast } from "sonner";
 
 const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; dot: string }> = {
   ugc: { label: "UGC", color: "text-cyan-700", bg: "bg-cyan-100", dot: "#06b6d4" },
@@ -89,7 +90,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">("overview");
@@ -150,6 +151,7 @@ export default function ClientDashboard() {
   const [promptsFilterModel, setPromptsFilterModel] = useState<string>("all");
   const [promptsFilterVisibility, setPromptsFilterVisibility] = useState<"all" | "visible" | "not_visible">("all");
   const [promptsFilterCompetitor, setPromptsFilterCompetitor] = useState<string>("all");
+
 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
@@ -292,9 +294,15 @@ export default function ClientDashboard() {
       try {
         const locationCode = promptLocation ? locations[promptLocation] : undefined;
         const locationName = promptLocation || undefined;
-        await addCustomPrompt(newPrompt.trim(), undefined, locationCode, locationName);
+        const newPromptObj = await addCustomPrompt(newPrompt.trim(), undefined, locationCode, locationName);
         setNewPrompt("");
         setPromptLocation(""); // Reset location after adding
+
+        // Auto-run audit for non-admin users
+        if (!isAdmin && newPromptObj) {
+          toast.info("🚀 Prompt added! Running audit automatically...");
+          setTimeout(() => runSinglePrompt(newPromptObj.id), 500);
+        }
       } catch (err: any) {
         alert(err.message || "Failed to add prompt.");
         // Keep input value so user can retry
@@ -304,9 +312,16 @@ export default function ClientDashboard() {
   const handleBulkAdd = async () => {
     if (bulkPrompts.trim()) {
       try {
-        await addMultiplePrompts(bulkPrompts.split("\n").filter(l => l.trim().length > 3));
+        const promptTexts = bulkPrompts.split("\n").filter(l => l.trim().length > 3);
+        await addMultiplePrompts(promptTexts);
         setBulkPrompts("");
         setBulkPromptsOpen(false);
+
+        // Auto-run full audit for non-admin users after bulk add
+        if (!isAdmin && promptTexts.length > 0) {
+          toast.info(`🚀 ${promptTexts.length} prompts added! Running audits automatically...`);
+          setTimeout(() => runFullAudit(), 500);
+        }
       } catch (err: any) {
         alert(err.message || "Failed to add prompts.");
       }
@@ -714,7 +729,7 @@ export default function ClientDashboard() {
 
               <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Forzeo Discovery Engine"><span className={cn("w-2 h-2 rounded-full", includeTavily ? "bg-amber-500" : "bg-gray-300")} />{includeTavily ? "Discovery On" : "Discovery Off"}</button>
-              <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>
+              {isAdmin && <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>}
             </div>
           </div>
         </header>
@@ -920,7 +935,7 @@ export default function ClientDashboard() {
         </div>
         {/* Import Section */}
         <div className="mt-6">
-          {selectedClient && selectedClient.id && <UniversalImport clientId={selectedClient.id} onImportComplete={() => window.location.reload()} />}
+          {selectedClient && selectedClient.id && <UniversalImport clientId={selectedClient.id} onImportComplete={() => refreshData()} />}
         </div>
       </div>
     );
@@ -1115,9 +1130,11 @@ export default function ClientDashboard() {
                             }} className={cn("h-7 px-2", p.location_name ? "text-blue-500 hover:text-blue-700" : "text-gray-500 hover:text-blue-600")} title={p.location_name ? `Location: ${p.location_name}` : "Set location"}>
                               <Globe className="h-3.5 w-3.5" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Run audit">
-                              {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                            </Button>
+                            {isAdmin && (
+                              <Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Run audit">
+                                {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                              </Button>
+                            )}
                             <Button variant="ghost" size="sm" onClick={() => deletePrompt(p.id)} className="h-7 px-2 text-gray-500 hover:text-red-600" title="Archive prompt">
                               <Archive className="h-3.5 w-3.5" />
                             </Button>
@@ -2345,7 +2362,8 @@ export default function ClientDashboard() {
   function PromptDetailDialog() {
     const result = filteredAuditResults.find(r => r.prompt_id === selectedPromptDetail);
     const prompt = prompts.find(p => p.id === selectedPromptDetail);
-    const [detailTab, setDetailTab] = useState<"models" | "citations" | "tavily" | "content" | "insights">("models");
+    const [detailTab, setDetailTab] = useState<"models" | "past_responses" | "citations" | "tavily" | "content" | "insights">("models");
+    const [pastResponsesCitationFilter, setPastResponsesCitationFilter] = useState<"all" | "new" | "common" | "unused">("all");
     const [generatedVisibilityContent, setGeneratedVisibilityContent] = useState<string | null>(null);
     const [generatingVisibilityContent, setGeneratingVisibilityContent] = useState(false);
     const [recommendations, setRecommendations] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string } | null>(null);
@@ -2486,6 +2504,7 @@ export default function ClientDashboard() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
                   <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
+                  <button onClick={() => setDetailTab("past_responses")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "past_responses" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Past Responses</button>
                   <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Citations ({uniqueCitations.length})</button>
                   <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Discovery Engine</button>
                   <button onClick={() => { if (recommendations) setDetailTab("insights"); else handleGenerateRecommendations(); }} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "insights" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>
@@ -2661,6 +2680,166 @@ export default function ClientDashboard() {
                   )}
                 </div>
               )}
+
+              {/* Past Responses Tab */}
+              {detailTab === "past_responses" && (() => {
+                // Get all audit runs for this specific prompt
+                const promptHistory = auditResults.filter(r => r.prompt_id === selectedPromptDetail)
+                  .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()); // Sort ascending for history calculation
+
+                // Calculate historical citation data
+                const domainAppearanceDates = new Map<string, Date>(); // Domain -> First seen date
+                const domainCounts = new Map<string, number>(); // Domain -> Total count
+
+                promptHistory.forEach(run => {
+                  const runDate = new Date(run.created_at);
+                  const citations = run.model_results.flatMap(mr => mr.citations);
+                  const uniqueDomains = new Set(citations.map(c => c.domain));
+
+                  uniqueDomains.forEach(domain => {
+                    if (!domainAppearanceDates.has(domain)) {
+                      domainAppearanceDates.set(domain, runDate);
+                    }
+                    domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
+                  });
+                });
+
+                // Classify runs based on citations
+                const classifiedRuns = promptHistory.map(run => {
+                  const runDate = new Date(run.created_at);
+                  const citations = run.model_results.flatMap(mr => mr.citations);
+                  const uniqueDomains = new Set(citations.map(c => c.domain));
+
+                  let hasNew = false;
+                  let hasCommon = false;
+                  let hasUnused = false; // "Unused" interpreted as "Rare" (count <= 1)
+
+                  uniqueDomains.forEach(domain => {
+                    const firstSeen = domainAppearanceDates.get(domain);
+                    const count = domainCounts.get(domain) || 0;
+
+                    // New: First seen in this run (compare timestamps loosely)
+                    if (firstSeen && Math.abs(firstSeen.getTime() - runDate.getTime()) < 1000) {
+                      hasNew = true;
+                    }
+                    // Common: Appears in > 3 runs (or > 30% of history if many runs?) Let's say > 2.
+                    if (count > 2) {
+                      hasCommon = true;
+                    }
+                    // Unused/Rare: Appears only once or twice
+                    if (count <= 2) {
+                      hasUnused = true;
+                    }
+                  });
+
+                  return { ...run, hasNew, hasCommon, hasUnused };
+                }).reverse(); // Sort descending for display (newest first)
+
+                // Filter runs
+                const filteredHistory = classifiedRuns.filter(run => {
+                  if (pastResponsesCitationFilter === "all") return true;
+                  if (pastResponsesCitationFilter === "new") return run.hasNew;
+                  if (pastResponsesCitationFilter === "common") return run.hasCommon;
+                  if (pastResponsesCitationFilter === "unused") return run.hasUnused;
+                  return true;
+                });
+
+                return (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm text-gray-500 mr-2">Filter by Citations:</span>
+                      <button onClick={() => setPastResponsesCitationFilter("all")} className={cn("px-3 py-1.5 rounded-full text-xs font-medium transition-all", pastResponsesCitationFilter === "all" ? "bg-gray-900 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>All</button>
+                      <button onClick={() => setPastResponsesCitationFilter("new")} className={cn("px-3 py-1.5 rounded-full text-xs font-medium transition-all", pastResponsesCitationFilter === "new" ? "bg-green-600 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>🆕 New</button>
+                      <button onClick={() => setPastResponsesCitationFilter("common")} className={cn("px-3 py-1.5 rounded-full text-xs font-medium transition-all", pastResponsesCitationFilter === "common" ? "bg-blue-600 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>⭐ Common</button>
+                      <button onClick={() => setPastResponsesCitationFilter("unused")} className={cn("px-3 py-1.5 rounded-full text-xs font-medium transition-all", pastResponsesCitationFilter === "unused" ? "bg-amber-600 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>⚠️ Unused</button>
+                    </div>
+
+                    {filteredHistory.length === 0 ? (
+                      <div className="text-center py-12 bg-gray-50 rounded-xl">
+                        <History className="h-10 w-10 mx-auto mb-3 text-gray-300" />
+                        <p className="text-gray-600 font-medium">No runs match this filter</p>
+                        <p className="text-sm text-gray-500 mt-1">Try selecting a different filter.</p>
+                      </div>
+                    ) : (
+                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Visibility</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Position</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Models (Visible)</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Citations</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-16"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {filteredHistory.map((run, idx) => {
+                              const citationCount = run.model_results.reduce((sum, mr) => sum + mr.citations.length, 0);
+                              const avgRank = run.summary.average_rank;
+                              const sov = run.summary.share_of_voice || 0;
+
+                              // Filter models to only show those where brand was mentioned visible
+                              const visibleModels = run.model_results.filter(mr => mr.brand_mentioned);
+
+                              return (
+                                <tr key={run.id || idx} className="hover:bg-gray-50 transition-colors">
+                                  <td className="px-4 py-4 text-sm text-gray-700">
+                                    {new Date(run.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    {run.hasNew && <Badge className="ml-2 bg-green-100 text-green-700 hover:bg-green-100 border-0 text-[10px] px-1.5 py-0 h-4">New</Badge>}
+                                  </td>
+                                  <td className="px-4 py-4 text-center">
+                                    <span className={cn("text-sm font-semibold", sov > 50 ? "text-green-600" : sov > 0 ? "text-yellow-600" : "text-gray-400")}>
+                                      {sov}%
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-4 text-center text-sm text-gray-500">
+                                    {avgRank ? `#${avgRank}` : "—"}
+                                  </td>
+                                  <td className="px-4 py-4">
+                                    <div className="flex items-center justify-center gap-1">
+                                      {visibleModels.length > 0 ? (
+                                        <>
+                                          {visibleModels.slice(0, 4).map((mr, i) => {
+                                            const Logo = MODEL_LOGOS[mr.model]?.Logo;
+                                            const color = MODEL_LOGOS[mr.model]?.color || "#666";
+                                            return Logo ? (
+                                              <div key={i} className="p-1 bg-green-50 border border-green-100 rounded" title={`${mr.model_name}: Visible`}>
+                                                <Logo className="h-4 w-4" style={{ color }} />
+                                              </div>
+                                            ) : null;
+                                          })}
+                                          {visibleModels.length > 4 && (
+                                            <span className="text-xs text-gray-400 ml-1">+{visibleModels.length - 4}</span>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span className="text-xs text-gray-400 italic">None</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-4 text-center">
+                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">{citationCount}</Badge>
+                                  </td>
+                                  <td className="px-4 py-4 text-center">
+                                    <button
+                                      onClick={() => setDetailTab("models")}
+                                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                      title="View details"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Tavily Tab */}
               {detailTab === "tavily" && (
