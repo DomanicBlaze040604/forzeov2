@@ -316,20 +316,55 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         if (e.key === 'Enter') { e.preventDefault(); handleAddCompetitor(); }
     }, [handleAddCompetitor]);
 
-    // Keyword handlers with quota check
+    // Keyword handlers with quota check (supports comma-separated input)
     const handleAddKeyword = useCallback(() => {
-        const trimmed = newKeyword.trim();
-        if (!trimmed || trimmed.length < 3) return;
-        if (formData.seedKeywords.includes(trimmed)) {
-            showNotification('error', 'This keyword is already added.');
+        const input = newKeyword.trim();
+        if (!input) return;
+
+        // Split by commas and process each keyword
+        const keywords = input
+            .split(',')
+            .map(kw => kw.trim())
+            .filter(kw => kw.length >= 3); // Filter out empty or too short keywords
+
+        if (keywords.length === 0) {
+            showNotification('error', 'Keywords must be at least 3 characters long.');
             return;
         }
-        if (formData.seedKeywords.length >= userLimits.maxKeywords) {
-            showNotification('error', `You can add up to ${userLimits.maxKeywords} keywords (${userRole} limit).`);
-            return;
+
+        // Check for duplicates and quota
+        const newKeywords: string[] = [];
+        const duplicates: string[] = [];
+        let quotaExceeded = false;
+
+        for (const keyword of keywords) {
+            if (formData.seedKeywords.includes(keyword) || newKeywords.includes(keyword)) {
+                duplicates.push(keyword);
+            } else if (formData.seedKeywords.length + newKeywords.length >= userLimits.maxKeywords) {
+                quotaExceeded = true;
+                break;
+            } else {
+                newKeywords.push(keyword);
+            }
         }
-        setFormData(prev => ({ ...prev, seedKeywords: [...prev.seedKeywords, trimmed] }));
-        setNewKeyword('');
+
+        // Add valid keywords
+        if (newKeywords.length > 0) {
+            setFormData(prev => ({ ...prev, seedKeywords: [...prev.seedKeywords, ...newKeywords] }));
+            setNewKeyword('');
+
+            if (newKeywords.length > 1) {
+                showNotification('success', `Added ${newKeywords.length} keywords successfully!`);
+            }
+        }
+
+        // Show warnings if needed
+        if (duplicates.length > 0) {
+            showNotification('error', `Skipped duplicate keyword${duplicates.length > 1 ? 's' : ''}: ${duplicates.join(', ')}`);
+        }
+        if (quotaExceeded) {
+            showNotification('error', `Keyword limit reached (${userLimits.maxKeywords} max for ${userRole}). Added ${newKeywords.length} keyword${newKeywords.length !== 1 ? 's' : ''}.`);
+        }
     }, [newKeyword, formData.seedKeywords, userLimits.maxKeywords, userRole, showNotification]);
 
     const handleRemoveKeyword = useCallback((index: number) => {
@@ -785,7 +820,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
                         <div className="space-y-1 pt-2">
                             <Label className="text-sm font-semibold text-gray-700">Add Keyword Topics</Label>
-                            <p className="text-sm text-gray-500">Enter topics/keywords you want to track in AI responses.</p>
+                            <p className="text-sm text-gray-500">Enter topics/keywords you want to track in AI responses. Separate multiple keywords with commas or press Enter.</p>
                         </div>
 
                         <div className="flex gap-2">

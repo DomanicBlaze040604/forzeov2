@@ -1,354 +1,212 @@
-# Forzeo GEO Visibility Dashboard - Complete UI/UX Generation Prompt
+# Forzeo GEO Visibility Dashboard - Complete SaaS UI Generation Prompt
 
-## Use this prompt with Google Stitch or any AI UI generation tool
+## Context
+Build a complete, production-ready SaaS application called "Forzeo GEO Dashboard". This platform allows brands to track their visibility across AI Search Engines (ChatGPT, Claude, Gemini, Perplexity).
 
----
-
-# MASTER PROMPT
-
-Build a complete **AI Visibility Analytics Dashboard** called "Forzeo GEO Dashboard" - a SaaS platform that tracks how brands appear in AI-generated responses (ChatGPT, Claude, Gemini, Perplexity).
-
-## Tech Stack
-- React 18 + TypeScript + Vite
-- TailwindCSS with dark theme
-- Radix UI primitives (Dialog, Select, Dropdown, Tabs, Toast)
-- Lucide React icons
-- Supabase for auth/database
+**Key Requirement:** The design must be **LIGHT, PROFESSIONAL, and HIGHLY INTERACTIVE**. It should feel like a top-tier enterprise SaaS (e.g., Linear, Vercel, Stripe) but with a light, clean aesthetic.
 
 ---
 
-# DESIGN SYSTEM
+# 1. TECH STACK & FOUNDATION
 
-## Colors
-```
-Primary: #3b82f6 (Blue)
-Background: #0f172a (Slate 900)
-Surface: #1e293b (Slate 800)
-Border: #334155 (Slate 700)
-Text Primary: #f8fafc (Slate 50)
-Text Secondary: #94a3b8 (Slate 400)
-Success: #22c55e (Green)
-Warning: #eab308 (Yellow)
-Error: #ef4444 (Red)
+- **Framework:** React 18 + TypeScript + Vite
+- **Styling:** TailwindCSS (v3.4+)
+- **Icons:** Lucide React
+- **Animation:** Framer Motion (for smooth layout transitions and micro-interactions)
+- **Components:** Radix UI Primitives (Headless UI for full custom styling)
+- **Routing:** React Router v6
+- **Data:** Supabase (Auth, Database)
 
-Model Colors:
-- ChatGPT: #10a37f
-- Claude: #d97757
-- Gemini: #4285f4
-- Perplexity: #6366f1
-```
+---
+
+# 2. DESIGN SYSTEM (Theme: Light & Professional)
+
+## Color Palette
+- **Backgrounds:**
+    - Page: `#F8FAFC` (Slate 50)
+    - Surface (Cards/Panels): `#FFFFFF` (White)
+    - Sidebar/Header: `#FFFFFF` (White) with subtle border
+- **Borders:** `#E2E8F0` (Slate 200) - Fine, crisp borders
+- **Primary Action:** `#2563EB` (Blue 600) -> Hover `#1D4ED8` (Blue 700)
+- **Text:**
+    - Primary: `#0F172A` (Slate 900) - High contrast
+    - Secondary: `#64748B` (Slate 500) - Soft but readable
+    - Muted: `#94A3B8` (Slate 400)
+- **Status Colors:**
+    - Success: `#10B981` (Emerald 500)
+    - Warning: `#F59E0B` (Amber 500)
+    - Error: `#EF4444` (Red 500)
+    - AI Models:
+        - ChatGPT: `#10A37F` (Teal)
+        - Claude: `#D97757` (Terracotta)
+        - Gemini: `#1A73E8` (Google Blue)
+        - Perplexity: `#3B82F6` (Indigo)
 
 ## Typography
-- Font: Inter
-- Headings: font-semibold
-- Body: font-normal
+- **Font:** Inter (Google Fonts) or system-ui
+- **Weights:** 400 (Regular), 500 (Medium), 600 (SemiBold)
+- **Style:** Clean, tight tracking (-0.01em), taller line-heights for readability
 
-## Aesthetic
-- Dark glassmorphism theme
-- Subtle gradients
-- Rounded corners (rounded-xl)
-- Card shadows with glow effects
-- Smooth hover transitions
-
----
-
-# SCREENS TO GENERATE
-
-## 1. LOGIN PAGE
-- Centered card with logo
-- Email + Password fields
-- "Sign In" button (blue gradient)
-- "Don't have an account? Sign up" link
-- Dark background with subtle pattern
-
-## 2. MAIN DASHBOARD LAYOUT
-```
-┌─────────────────────────────────────────────────────────┐
-│ SIDEBAR (240px)          MAIN CONTENT (flex-1)          │
-│ ┌────────────────┐     ┌──────────────────────────────┐│
-│ │ Logo: "Forzeo" │     │ Header: Brand name + filters ││
-│ │                │     │ [Date] [Model] [Export]      ││
-│ │ Brand Selector │     ├──────────────────────────────┤│
-│ │ ▼ Select Brand │     │                              ││
-│ │                │     │     TAB CONTENT AREA         ││
-│ │ Navigation:    │     │                              ││
-│ │ • Overview     │     │                              ││
-│ │ • Prompts      │     │                              ││
-│ │ • Intelligence │     │                              ││
-│ │ • Signals      │     │                              ││
-│ │ • Citations    │     │                              ││
-│ │ • Campaigns    │     │                              ││
-│ │ • Sources      │     │                              ││
-│ │ • Content      │     │                              ││
-│ │                │     └──────────────────────────────┘│
-│ │ [+ Add Brand]  │                                      │
-│ │                │                                      │
-│ │ ─────────────  │                                      │
-│ │ User Profile   │                                      │
-│ │ email@...      │                                      │
-│ │ [Admin] badge  │                                      │
-│ │ [Sign Out]     │                                      │
-│ └────────────────┘                                      │
-└─────────────────────────────────────────────────────────┘
-```
-
-## 3. OVERVIEW TAB
-**4 Metric Cards (Top Row):**
-- Share of Voice: Large % with trend arrow
-- Average Rank: Number with position indicator
-- Total Citations: Count with growth %
-- Total Cost: $ amount
-
-**Visibility by Model Chart (Bar Chart):**
-- Horizontal bars for each AI model
-- Color-coded by model brand colors
-- Show % visibility per model
-
-**Competitor Gap Panel:**
-- Horizontal bar chart comparing brand vs competitors
-- Shows mention % for each entity
-
-**AI Insights Panel (Right Side):**
-- Card with "AI Insights" header
-- Priority badge (High/Medium/Low)
-- 5 bullet point recommendations
-- "Refresh Insights" button
-
-## 4. PROMPTS TAB
-**Header:**
-- "Prompts" title with count badge
-- [+ Add Prompt] button
-- [Bulk Import] button
-- [Generate with AI] button
-- Search input
-
-**Prompts Table:**
-| Prompt Text | Category | SOV | Rank | Citations | Status | Actions |
-|-------------|----------|-----|------|-----------|--------|---------|
-
-- Category: Badge (broad/niche/comparison/etc)
-- SOV: % with color (green >60%, yellow 30-60%, red <30%)
-- Status: "Run" button or "Running..." spinner
-- Actions: [Run] [Edit] [Delete] icons
-
-**Click Row → Prompt Detail Modal:**
-- Full prompt text
-- Model results (ChatGPT, Claude, Gemini, Perplexity tabs)
-- Raw AI response text
-- Citations extracted
-- Competitors mentioned
-- "Generate Content" button
-- "Export Report" button
-
-## 5. INTELLIGENCE TAB (Citation Intelligence)
-**Header:**
-- "Citation Intelligence" title
-- [Analyze New] button
-- Filter dropdowns: Category, Status, Opportunity
-
-**Citation Table:**
-| Status | URL/Domain | Category | Opportunity | Model | Actions |
-|--------|------------|----------|-------------|-------|---------|
-
-- Status: ✓ Verified / ⚠ Hallucinated badge
-- Category: UGC, Press, Wikipedia, Competitor, Brand Owned
-- Opportunity: Easy (green), Medium (yellow), Difficult (red)
-
-**Click Row → Citation Detail Panel:**
-- Full URL with external link
-- Verification status
-- AI Analysis summary
-- Brand/Competitor mentions
-- Recommended Actions (3-5 items)
-- Generated Content (expandable)
-- "Regenerate" button
-
-## 6. CAMPAIGNS TAB
-**Header:**
-- "Campaigns" title
-- [+ Create Campaign] button
-
-**Campaign Cards Grid:**
-```
-┌────────────────────────┐
-│ Campaign Name          │
-│ Status: Running/Done   │
-│ ──────────────────     │
-│ Prompts: 45/50         │
-│ Avg SOV: 65%           │
-│ Citations: 234         │
-│ ──────────────────     │
-│ [View] [Edit] [Delete] │
-└────────────────────────┘
-```
-
-**Campaign Detail View:**
-- Summary metrics (SOV, Rank, Citations, Cost)
-- All prompts table with individual results
-- Aggregated competitor leaderboard
-- All citations combined
-- Export button
-
-## 7. SIGNALS TAB (Fresh Content Detection)
-**Header:**
-- "Fresh Signals" title
-- [+ Add RSS Feed] button
-- Filter: Classification (Emerging/Reinforcing/Low Impact)
-
-**Signals Table:**
-| Title | Source | Influence Score | Published | Classification |
-|-------|--------|-----------------|-----------|----------------|
-
-- Influence Score: Progress bar 0-100%
-- Classification badge with color
-
-**Add Feed Modal:**
-- Feed name
-- RSS URL
-- Brand keywords (tags input)
-- Competitor keywords (tags input)
-- Poll interval dropdown
-
-## 8. SOURCES TAB
-**Aggregated Citation Sources:**
-- Top cited domains list
-- Source category breakdown (pie chart)
-- Click domain → See all prompts citing it
-
-## 9. CONTENT TAB
-**AI Content Generator:**
-- Prompt selector dropdown
-- "Generate Visibility Content" button
-- Generated content preview (Markdown rendered)
-- Copy to clipboard button
-- Regenerate button
+## Visual Language (Interactive & Polish)
+- **Shadows:** Soft, diffused shadows for depth (`shadow-sm` for cards, `shadow-lg` for dropdowns/modals).
+- **Rounding:** `rounded-lg` (8px) or `rounded-xl` (12px) for a modern feel.
+- **Interactivity:**
+    - Buttons transform slightly on hover (scale 1.02).
+    - Table rows highlight on hover (`bg-slate-50`).
+    - Modals crossfade and slide in.
+    - Page transitions: Subtle fade-in/slide-up.
+- **Micro-animations:**
+    - Loading spinners are sleek.
+    - Success checks animate in.
+    - Toggle switches slide smoothly.
 
 ---
 
-# DIALOGS/MODALS
+# 3. ONBOARDING WIZARD (Critical Flow)
 
-## Add Brand Dialog
-```
-┌─────────────────────────────────────┐
-│ Add New Brand                    [X]│
-├─────────────────────────────────────┤
-│ Brand Name: [________________]      │
-│ Website:    [________________]      │
-│ Industry:   [▼ Select Industry]     │
-│ Region:     [▼ United States]       │
-│                                     │
-│ Competitors:                        │
-│ [Tag1] [Tag2] [+ Add]  [Auto-Find] │
-│                                     │
-│ Brand Tags (optional):              │
-│ [Tag] [Tag] [+ Add]                │
-│                                     │
-│        [Cancel]  [Add Brand]        │
-└─────────────────────────────────────┘
-```
+**Concept:** When a new user signs up, they enter a multi-step wizard to set up their first brand. They cannot access the dashboard until this is complete.
 
-## Bulk Prompts Dialog
-```
-┌─────────────────────────────────────┐
-│ Add Multiple Prompts             [X]│
-├─────────────────────────────────────┤
-│ Enter prompts (one per line):       │
-│ ┌─────────────────────────────────┐ │
-│ │                                 │ │
-│ │                                 │ │
-│ └─────────────────────────────────┘ │
-│                                     │
-│ ─── OR Generate with AI ───         │
-│                                     │
-│ Keywords: [________________]        │
-│ Sentiment: [▼ Neutral]              │
-│ Focus: [▼ General]                  │
-│ [Generate 10 Prompts]               │
-│                                     │
-│        [Cancel]  [Add Prompts]      │
-└─────────────────────────────────────┘
-```
+## Step 1: Account Creation (Public Page)
+- **Layout:** Split screen. Left side: value props/testimonials. Right side: Login form.
+- **Visuals:** Clean white form on right.
+- **Fields:** Email, Password, Name.
+- **Action:** "Create Account" -> Redirects to Wizard if no brands exist.
 
-## Create Campaign Dialog
-- Campaign name input
-- Prompt multi-select with checkboxes
-- Create button
+## Step 2: Onboarding Wizard (Dedicated Route `/onboarding`)
+*Use a stepper progress bar at the top.*
 
-## User Management Dialog (Admin only)
-- Users table with email, role, status
-- Toggle access button per user
-- Role dropdown (Admin/Agency/User)
+### Screen 2.1: Brand Basics
+- **Title:** "Let's set up your brand"
+- **Input:** Brand Name (e.g., "Slack")
+- **Input:** Website URL (e.g., "slack.com")
+- **Input:** Industry (Dropdown with icons)
+- **Input:** Region (Dropdown: US, UK, Global, etc.)
+- **Action:** [Next Step →]
+
+### Screen 2.2: Define Competitors
+- **Title:** "Who are you competing with?"
+- **Description:** "We'll track your visibility against these rivals."
+- **Interaction:**
+    - Input field to type competitor name.
+    - "Auto-Find" button (simulated or API call) to suggest competitors.
+    - Tags appear below as chips with 'X' to remove.
+- **Action:** [Next Step →]
+
+### Screen 2.3: Seed Keywords
+- **Title:** "What do customers search for?"
+- **Interaction:**
+    - **Smart Input:** Input field must detect commas (`,`) and `Enter` key presses to tokenize inputs.
+        - *Logic:* If user types "keyword1, keyword2", it should immediately split into two separate chips: [keyword1] [keyword2].
+        - *Paste Handling:* Pasting a comma-separated list should automatically generate multiple chips.
+    - **Helper Text:** "Type keywords separated by commas or press Enter."
+    - Feature: "Generate Suggestions" button using AI to fill chips.
+- **Action:** [Complete Setup & Start Audit]
+
+### Screen 2.4: Success & Transition
+- **Visual:** Celebration animation (confetti or checkmark).
+- **Text:** "Setting up your dashboard..."
+- **Transition:** Automatically redirects to the Main Dashboard after 2 seconds.
 
 ---
 
-# AGENCY VIEW (Role: Agency)
+# 4. MAIN DASHBOARD LAYOUT
 
-**AgencyOverview Component (replaces Overview for agency users):**
-- Total Brands managed (count)
-- Total Prompts across brands
-- Average Visibility (global SOV)
-- "Brands Needing Attention" alert cards (SOV < 30%)
-- Quick brand switcher grid
+## Sidebar (Left, Fixed)
+- **Background:** White, Border-Right (Slate 200).
+- **Header:** Forzeo Logo + Brand Switcher Dropdown.
+- **Navigation:**
+    - **Overview** (Home icon)
+    - **Prompts** (MessageSquare icon)
+    - **Intelligence** (Sparkles icon - *Yellow/Gold accent*)
+    - **Signals** (RSS/Radio icon)
+    - **Campaigns** (Layers icon)
+    - **Sources** (Globe icon)
+    - **Content** (PenTool icon)
+- **Footer:** User Profile (Avatar + Name), Settings, Log Out.
+- **Active State:** Light blue background (`bg-blue-50`) + Blue text (`text-blue-600`) + Blue vertical bar indicator.
 
-**Quotas Display in Sidebar:**
-- "3/5 Brands" badge
-- "12/15 Prompts" badge per brand
-- Visual warning at 80% capacity
-
----
-
-# RESPONSIVE DESIGN
-
-**Mobile (< 768px):**
-- Sidebar becomes hamburger menu
-- Tables become card stacks
-- Filters become drawer
-
-**Tablet (768-1024px):**
-- Collapsed sidebar (icons only)
-- 2-column grid for cards
-
-**Desktop (> 1024px):**
-- Full sidebar
-- 3-4 column grids
+## Header (Top, Sticky)
+- **Breadcrumbs:** e.g., "Dashboard / Overview"
+- **Actions:**
+    - [Global Date Range Picker]
+    - [Notification Bell]
+    - [Help/Support]
+- **Style:** White, Border-Bottom, `h-16`, flex layout.
 
 ---
 
-# LOADING STATES
+# 5. CORE PAGES (Interactive & Detailed)
 
-- Skeleton loaders for all cards
-- "Querying ChatGPT..." progress text
-- Spinning icon on Run buttons
-- Progress bar for campaigns
+## A. Overview Page (The "Command Center")
+- **Top Row (KPI Cards):**
+    - **Share of Voice:** Circular progress chart + Trend indicator.
+    - **Avg Rank:** Large number + "vs Competitors" sparkline.
+    - **Total Citations:** Counter with +% change.
+- **Middle Section:**
+    - **Visibility Chart (Main):** Large Area Chart or Bar Chart showing SOV over time.
+    - **Recommendation Feed:** "To-Do" list styling. Each item has an "Action" button.
+        - *Example:* "Fix citation on Forbes" -> [View Details]
 
-# EMPTY STATES
+## B. Prompts Page (Data Grid)
+- **Toolbar:** Search, [Add Prompt], [Bulk Import], [Generate AI Prompts].
+- **Table:**
+    - **Columns:** Prompt Text, Category (Badge), SOV (Color Bar), Rank, Last Run.
+    - **Interactions:**
+        - Row Click -> Opens **Side Sheet (Slide Over)** with full details.
+        - Hover Actions: Run Now, Edit, Archive.
+- **Detail Panel (Side Sheet):**
+    - Show full conversation for each Model (Tabs: ChatGPT | Claude | Gemini).
+    - Syntax highlighting for AI responses.
+    - "Generate Content" button to fix issues.
 
-- No prompts: "Add your first prompt to get started"
-- No campaigns: "Create a campaign to batch-audit prompts"
-- No citations: "Run an audit to discover citations"
+## C. Citation Intelligence (Deep Dive)
+- **Layout:** Filter sidebar (left) + Data Table (right).
+- **Features:**
+    - **Filters:** Categories (UGC, Press, etc.), Status (Verified/Hallucinated).
+    - **Table:** Lists URLs.
+        - *Column: Opportunity* -> Badges (High/Med/Low).
+        - *Column: Status* -> Checkmark (Verified) or Alert (Hallucinated).
+- **Interactive Element (Deep Analysis):**
+    - Toggle button: "Deep Analysis Mode (Tavily/Groq)" -> Triggers loading state/toast notification.
 
-# TOAST NOTIFICATIONS
+## D. Campaigns (Batch Operations)
+- **View:** Grid of Cards.
+- **Card Design:**
+    - Title: Campaign Name
+    - Progress Bar: "45/50 Prompts Processed"
+    - Status Badge: "Running" (Pulse animation) or "Completed".
+    - Footer Actions: [View Report] [Export]
 
-- Success: "Prompt added successfully" (green)
-- Error: "Failed to run audit" (red)
-- Info: "Generating content..." (blue)
+## E. Signals (Future Trends)
+- **Design:** Feed style (like a news reader).
+- **Items:** Cards with "Influence Score" (Gauge or Bar).
+- **Labels:** "Pre-Trend", "Rising", "Stable".
 
 ---
 
-# ICONS USED (Lucide)
+# 6. MOCK DATA & STATES
 
-- Home, MessageSquare, Lightbulb, Zap, Link2
-- Layers, Globe, Sparkles, Settings, LogOut
-- Plus, Trash2, Edit, RefreshCw, Download
-- ChevronDown, ExternalLink, Check, X, AlertTriangle
+- **Loading:** Use Skeleton loaders (shimmer effect) that match the shape of the content.
+- **Empty:** Beautiful SVG illustrations for empty states with clear Call-to-Action buttons.
+- **Error:** Toast notifications (red) and inline error messages on forms.
 
 ---
 
-Generate ALL screens as a complete, production-ready React application with:
-1. Full routing (React Router)
-2. State management (React hooks + context)
-3. Supabase integration ready
-4. All components styled with TailwindCSS
-5. Dark theme throughout
-6. Responsive design
-7. Accessibility (ARIA labels)
+# 7. SPECIFIC INSTRUCTIONS FOR GENERATION
+
+1.  **Code Structure:**
+    - `/src/components/ui`: Put all generic UI components (Buttons, Inputs, Cards) here.
+    - `/src/pages`: One file per major page.
+    - `/src/layouts`: DashboardLayout, AuthLayout.
+    - `/src/hooks`: `useAuth`, `useDashboardData`.
+2.  **Responsiveness:**
+    - Mobile: Sidebar collapses to Bottom Navigation or Hamburger Menu.
+    - Tables: Horizontal scroll with sticky first column on small screens.
+3.  **Polish:**
+    - Add `className="transition-all duration-200"` to interactive elements.
+    - Use `backdrop-blur` for sticky headers/modals.
+    - Ensure text consistency (H1 vs H2 vs Body).
+
+---
+
+**Generate the full codebase based on this prompt.**
