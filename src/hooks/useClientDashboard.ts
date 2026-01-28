@@ -2196,7 +2196,7 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
     promptText: string,
     auditResult: AuditResult | null,
     tavilyData: any
-  ): Promise<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string } | null> => {
+  ): Promise<{ recommendations: { title: string; description: string }[]; priority: 'high' | 'medium' | 'low'; summary: string } | null> => {
     if (!selectedClient) return null;
 
     const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
@@ -2251,25 +2251,25 @@ REQUIRED SPECIFICITY - EVERY recommendation MUST include:
 4. SUCCESS METRIC (how to measure if it worked)
 
 EXAMPLE GOOD RECOMMENDATIONS:
-✓ "Create 2000-word comparison page at yourbrand.com/vs/CompetitorX covering: pricing table, feature matrix, 5 user testimonials. Publish within 2 weeks. Track: organic traffic to page + AI model citations."
-✓ "Post answer on Quora to 'Best [industry] tools 2024' (URL: quora.com/xxx). 250-400 words. Include personal experience with BrandName. Post this week. Track: answer impressions + upvotes."
-✓ "Pitch TechCrunch contributor Sarah Smith (sarah@tc.com) with exclusive data: 'X% of users prefer Y'. Angle: industry trend piece. Send pitch Monday. Track: coverage + backlink."
+Title: Create Comparison Page
+Description: Create 2000-word comparison page at yourbrand.com/vs/CompetitorX covering: pricing table, feature matrix, 5 user testimonials. Publish within 2 weeks. Track: organic traffic to page + AI model citations.
 
-EXAMPLE BAD (FORBIDDEN) RECOMMENDATIONS:
-✗ "Improve content quality across the website"
-✗ "Build relationships with industry publications"
-✗ "Study how competitors get mentioned"
+Title: Quora Answer Strategy
+Description: Post answer on Quora to 'Best [industry] tools 2024' (URL: quora.com/xxx). 250-400 words. Include personal experience with BrandName. Post this week. Track: answer impressions + upvotes.
+
+Title: Press Pitch
+Description: Pitch TechCrunch contributor Sarah Smith (sarah@tc.com) with exclusive data: 'X% of users prefer Y'. Angle: industry trend piece. Send pitch Monday. Track: coverage + backlink.
 
 Output EXACTLY this JSON format:
 {
   "priority": "high|medium|low",
   "summary": "One sentence with SPECIFIC metrics (e.g., 'Visibility at 23%, CompetitorX leads with 67%')",
   "recommendations": [
-    "Specific action 1 with exact target, format, timeline, metric",
-    "Specific action 2...",
-    "Specific action 3...",
-    "Specific action 4...",
-    "Specific action 5..."
+    { "title": "Actionable Title", "description": "Specific action with exact target, format, timeline, metric" },
+    { "title": "Actionable Title 2", "description": "Specific action..." },
+    { "title": "Actionable Title 3", "description": "Specific action..." },
+    { "title": "Actionable Title 4", "description": "Specific action..." },
+    { "title": "Actionable Title 5", "description": "Specific action..." }
   ]
 }`;
 
@@ -2305,13 +2305,14 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
+          model: "llama-3.3-70b-versatile",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
           ],
           temperature: 0.5,
           max_tokens: 1024,
+          response_format: { type: "json_object" }
         }),
       });
 
@@ -2328,20 +2329,16 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
             return {
               priority: parsed.priority || 'medium',
               summary: parsed.summary || 'Analysis complete',
-              recommendations: parsed.recommendations || []
+              recommendations: Array.isArray(parsed.recommendations)
+                ? parsed.recommendations.map((r: any) => ({
+                  title: r.title || "Recommendation",
+                  description: r.description || (typeof r === 'string' ? r : JSON.stringify(r))
+                }))
+                : []
             };
           }
         } catch (parseErr) {
           console.error('[Groq] Failed to parse recommendations JSON:', parseErr);
-          // Fallback: try to extract recommendations from text
-          const lines = content.split('\n').filter((l: string) => l.trim().startsWith('-') || l.trim().match(/^\d+\./));
-          if (lines.length > 0) {
-            return {
-              priority: sov < 30 ? 'high' : sov < 60 ? 'medium' : 'low',
-              summary: `Current visibility is ${sov}% - ${sov < 30 ? 'urgent improvement needed' : sov < 60 ? 'room for growth' : 'maintain and optimize'}`,
-              recommendations: lines.slice(0, 5).map((l: string) => l.replace(/^[-\d.]+\s*/, '').trim())
-            };
-          }
         }
       } else {
         console.error('[Groq] Recommendations API error:', response.status);
@@ -2351,18 +2348,42 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
     }
 
     // Return fallback recommendations based on data
-    const fallbackRecs = [];
-    if (sov < 50) fallbackRecs.push(`Improve visibility - currently only appearing in ${sov}% of AI responses`);
-    if (competitorsInResponse.length > 0) fallbackRecs.push(`Target competitor gap: ${competitorsInResponse[0]} is appearing where you're not`);
-    if (tavilyData?.analysis?.insights?.length > 0) {
-      fallbackRecs.push(`Insight from web analysis: ${tavilyData.analysis.insights[0]}`);
+    const fallbackRecs: { title: string; description: string }[] = [];
+    if (sov < 50) {
+      fallbackRecs.push({
+        title: "Improve Visibility",
+        description: `Currently only appearing in ${sov}% of AI responses. Focus on creating authoritative content.`
+      });
     }
-    if (topCitations) fallbackRecs.push(`Build relationships with cited sources: ${topCitations}`);
+    if (competitorsInResponse.length > 0) {
+      fallbackRecs.push({
+        title: "Target Competitor Gap",
+        description: `${competitorsInResponse[0]} is appearing where you're not. Analyze their citations.`
+      });
+    }
+    if (tavilyData?.analysis?.insights?.length > 0) {
+      fallbackRecs.push({
+        title: "Web Analysis Insight",
+        description: tavilyData.analysis.insights[0]
+      });
+    }
+    if (topCitations) {
+      fallbackRecs.push({
+        title: "Build Relationships",
+        description: `Your competitors are cited on: ${topCitations}. Target these domains.`
+      });
+    }
+    if (fallbackRecs.length === 0) {
+      fallbackRecs.push({
+        title: "Run More Audits",
+        description: "Insufficient data to generate specific recommendations. Run more audits to gather insights."
+      });
+    }
 
     return {
       priority: sov < 30 ? 'high' : sov < 60 ? 'medium' : 'low',
       summary: `Share of Voice: ${sov}%`,
-      recommendations: fallbackRecs.length > 0 ? fallbackRecs : ['Run more audits to gather data for recommendations']
+      recommendations: fallbackRecs
     };
   }, [selectedClient]);
 

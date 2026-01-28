@@ -63,6 +63,12 @@ interface CitationIntelligenceData {
     ai_analysis: object;
     analysis_status: string;
     created_at: string;
+    // New tiered fields
+    relationship_type?: 'owned' | 'competitor' | 'neutral' | 'affiliate';
+    source_type?: string;
+    authority_tier?: 1 | 2 | 3;
+    is_affiliate?: boolean;
+    affiliate_type?: string | null;
 }
 
 interface CitationRecommendation {
@@ -124,7 +130,35 @@ const CATEGORY_CONFIG: Record<string, {
     app_store: { label: "App Stores", color: "text-green-600", bgColor: "bg-green-50" },
     wikipedia: { label: "Wikipedia", color: "text-gray-600", bgColor: "bg-gray-50" },
     brand_owned: { label: "Brand Owned", color: "text-emerald-600", bgColor: "bg-emerald-50" },
+    review_directory: { label: "Reviews", color: "text-yellow-600", bgColor: "bg-yellow-50" },
+    social_media: { label: "Social Media", color: "text-pink-600", bgColor: "bg-pink-50" },
+    comparison: { label: "Comparison", color: "text-indigo-600", bgColor: "bg-indigo-50" },
+    local: { label: "Local", color: "text-teal-600", bgColor: "bg-teal-50" },
     other: { label: "Other", color: "text-slate-600", bgColor: "bg-slate-50" }
+};
+
+const RELATIONSHIP_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
+    owned: { label: "Owned", color: "text-emerald-700", bgColor: "bg-emerald-100" },
+    competitor: { label: "Competitor", color: "text-orange-700", bgColor: "bg-orange-100" },
+    neutral: { label: "Third-Party", color: "text-gray-700", bgColor: "bg-gray-100" },
+    affiliate: { label: "Affiliate", color: "text-purple-700", bgColor: "bg-purple-100" }
+};
+
+const SOURCE_TYPE_CONFIG: Record<string, { label: string; color: string }> = {
+    ugc: { label: "UGC", color: "text-blue-600" },
+    editorial: { label: "Editorial", color: "text-purple-600" },
+    review: { label: "Review", color: "text-yellow-600" },
+    wiki: { label: "Wiki", color: "text-gray-600" },
+    social: { label: "Social", color: "text-pink-600" },
+    comparison: { label: "Comparison", color: "text-indigo-600" },
+    local: { label: "Local", color: "text-teal-600" },
+    other: { label: "Other", color: "text-slate-600" }
+};
+
+const AUTHORITY_TIER_CONFIG: Record<number, { label: string; color: string; icon: string }> = {
+    1: { label: "High Authority", color: "text-amber-500", icon: "★" },
+    2: { label: "Medium", color: "text-gray-500", icon: "" },
+    3: { label: "Low", color: "text-gray-400", icon: "" }
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -203,7 +237,9 @@ export default function CitationIntelligence({
         category: 'all' as string,
         status: 'all' as 'all' | 'verified' | 'hallucinated' | 'unknown',
         model: 'all' as string,
-        search: ''
+        search: '',
+        relationship: 'all' as string,
+        sourceType: 'all' as string
     });
 
     // Personalization state
@@ -543,7 +579,9 @@ export default function CitationIntelligence({
             category: 'all',
             status: 'all',
             model: 'all',
-            search: ''
+            search: '',
+            relationship: 'all',
+            sourceType: 'all'
         });
         setOpportunityFilter(null);
     };

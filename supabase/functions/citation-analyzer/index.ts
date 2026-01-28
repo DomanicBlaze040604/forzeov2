@@ -65,6 +65,42 @@ const UGC_DOMAINS = [
     'hackernews.com', 'news.ycombinator.com'
 ];
 
+// Affiliate detection patterns
+const AFFILIATE_PATTERNS = [
+    'ref=', 'aff_id=', 'affiliate=', 'partner=', 'utm_source=affiliate',
+    'shareasale.com', 'awin1.com', 'cj.com', 'rakuten', 'impact.com',
+    'partnerize.com', 'refersion', 'affiliate_id=', 'aff='
+];
+
+// Authority Tier 1 domains (high trust)
+const TIER_1_DOMAINS = [
+    'wikipedia.org', '.gov', '.edu', 'who.int', 'cdc.gov', 'nih.gov',
+    'europa.eu', 'un.org', 'worldbank.org', 'imf.org'
+];
+
+// Authority Tier 2 domains (established publishers)
+const TIER_2_DOMAINS = [
+    ...PRESS_DOMAINS,
+    'arstechnica.com', 'ieee.org', 'nature.com', 'sciencedirect.com',
+    'harvard.edu', 'mit.edu', 'stanford.edu'
+];
+
+// Review/Directory sites
+const REVIEW_DOMAINS = [
+    'g2.com', 'trustpilot.com', 'capterra.com', 'yelp.com', 'tripadvisor.com',
+    'glassdoor.com', 'bbb.org', 'consumerreports.org', 'pcmag.com',
+    'trustradius.com', 'softwareadvice.com', 'getapp.com'
+];
+
+// Comparison/listicle patterns in URLs
+const COMPARISON_PATTERNS = ['best-', 'top-10', 'top-5', 'top-7', 'vs-', '-vs-', 'alternatives', 'compare', 'comparison'];
+
+// Local/hyper-local patterns
+const LOCAL_PATTERNS = [
+    'local', 'near-me', 'near-you', 'city', 'region', 'county',
+    'yelp.com', 'yellowpages', 'foursquare', 'nextdoor', 'patch.com'
+];
+
 
 // ============================================
 // TYPE DEFINITIONS
@@ -105,6 +141,12 @@ interface CitationIntelligence {
     brand_mentioned_in_source: boolean;
     competitor_mentions: string[];
     ai_analysis: object;
+    // New tiered fields
+    relationship_type: 'owned' | 'competitor' | 'neutral' | 'affiliate';
+    source_type: string;
+    authority_tier: 1 | 2 | 3;
+    is_affiliate: boolean;
+    affiliate_type: string | null;
 }
 
 interface Recommendation {
@@ -205,63 +247,185 @@ async function verifyUrl(url: string): Promise<{
 // CITATION CLASSIFICATION
 // ============================================
 
+// Helper: Detect affiliate links
+function detectAffiliate(url: string): { isAffiliate: boolean; affiliateType: string | null } {
+    const lowerUrl = url.toLowerCase();
+    for (const pattern of AFFILIATE_PATTERNS) {
+        if (lowerUrl.includes(pattern)) {
+            return { isAffiliate: true, affiliateType: 'detected' };
+        }
+    }
+    // Check for redirect patterns
+    if (lowerUrl.includes('redirect') && (lowerUrl.includes('?url=') || lowerUrl.includes('?to='))) {
+        return { isAffiliate: true, affiliateType: 'possible' };
+    }
+    return { isAffiliate: false, affiliateType: null };
+}
+
+// Helper: Get authority tier
+function getAuthorityTier(domain: string): 1 | 2 | 3 {
+    const lowerDomain = domain.toLowerCase();
+    if (TIER_1_DOMAINS.some(d => lowerDomain.includes(d))) return 1;
+    if (TIER_2_DOMAINS.some(d => lowerDomain.includes(d))) return 2;
+    return 3;
+}
+
+// Helper: Get source type
+function getSourceType(url: string, domain: string): string {
+    const lowerDomain = domain.toLowerCase();
+    const lowerUrl = url.toLowerCase();
+
+    // Wikipedia
+    if (lowerDomain.includes('wikipedia.org')) return 'wiki';
+
+    // Review/Directory
+    if (REVIEW_DOMAINS.some(d => lowerDomain.includes(d))) return 'review';
+
+    // Social Media
+    if (['linkedin.com', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'youtube.com', 'tiktok.com'].some(d => lowerDomain.includes(d))) {
+        return 'social';
+    }
+
+    // UGC Forums
+    if (['reddit.com', 'quora.com', 'stackoverflow.com', 'stackexchange.com', 'medium.com', 'dev.to'].some(d => lowerDomain.includes(d))) {
+        return 'ugc';
+    }
+
+    // Comparison/Listicle
+    if (COMPARISON_PATTERNS.some(p => lowerUrl.includes(p))) return 'comparison';
+
+    // Local
+    if (LOCAL_PATTERNS.some(p => lowerUrl.includes(p) || lowerDomain.includes(p))) return 'local';
+
+    // Editorial/News (check domain patterns)
+    if (PRESS_DOMAINS.some(d => lowerDomain.includes(d)) || lowerDomain.match(/news|blog|magazine|journal|times|post|herald/)) {
+        return 'editorial';
+    }
+
+    return 'other';
+}
+
+// Main classification function with enhanced tiers
+interface ClassificationResult {
+    category: string;
+    subcategory: string | null;
+    opportunityLevel: string;
+    relationshipType: 'owned' | 'competitor' | 'neutral' | 'affiliate';
+    sourceType: string;
+    authorityTier: 1 | 2 | 3;
+    isAffiliate: boolean;
+    affiliateType: string | null;
+}
+
 function classifyCitation(
     url: string,
     domain: string,
     brandDomain: string | null,
     competitors: string[]
-): { category: string; subcategory: string | null; opportunityLevel: string } {
+): ClassificationResult {
     const lowerDomain = domain.toLowerCase();
     const lowerUrl = url.toLowerCase();
 
+    // Get affiliate status
+    const affiliateInfo = detectAffiliate(url);
+
+    // Get authority tier
+    const authorityTier = getAuthorityTier(domain);
+
+    // Get source type
+    const sourceType = getSourceType(url, domain);
+
+    // Determine relationship type
+    let relationshipType: 'owned' | 'competitor' | 'neutral' | 'affiliate' = 'neutral';
+    let category = 'other';
+    let subcategory: string | null = null;
+    let opportunityLevel = 'medium';
+
     // Brand owned
     if (brandDomain && lowerDomain.includes(brandDomain.toLowerCase().replace(/^www\./, ''))) {
-        return { category: 'brand_owned', subcategory: 'official', opportunityLevel: 'easy' };
+        relationshipType = 'owned';
+        category = 'brand_owned';
+        subcategory = 'official';
+        opportunityLevel = 'easy';
     }
-
-    // Wikipedia
-    if (lowerDomain.includes('wikipedia.org')) {
-        return { category: 'wikipedia', subcategory: null, opportunityLevel: 'difficult' };
-    }
-
-    // App stores
-    for (const pattern of APP_STORE_PATTERNS) {
-        if (lowerUrl.includes(pattern)) {
-            const subcategory = lowerUrl.includes('play.google.com') ? 'google_play' :
-                lowerUrl.includes('apps.apple.com') ? 'app_store' : 'other_store';
-            return { category: 'app_store', subcategory, opportunityLevel: 'medium' };
-        }
-    }
-
     // Competitor content
-    for (const competitor of competitors) {
-        const compLower = competitor.toLowerCase().replace(/\s+/g, '');
-        if (lowerDomain.includes(compLower) || lowerUrl.includes(compLower)) {
-            return { category: 'competitor_blog', subcategory: competitor, opportunityLevel: 'easy' };
+    else {
+        for (const competitor of competitors) {
+            const compLower = competitor.toLowerCase().replace(/\s+/g, '');
+            if (lowerDomain.includes(compLower) || lowerUrl.includes(compLower)) {
+                relationshipType = 'competitor';
+                category = 'competitor_blog';
+                subcategory = competitor;
+                opportunityLevel = 'easy';
+                break;
+            }
         }
     }
 
-    // Press/Media
-    for (const pressDomain of PRESS_DOMAINS) {
-        if (lowerDomain.includes(pressDomain)) {
-            return { category: 'press_media', subcategory: pressDomain, opportunityLevel: 'medium' };
-        }
+    // If affiliate detected, override relationship type
+    if (affiliateInfo.isAffiliate && relationshipType === 'neutral') {
+        relationshipType = 'affiliate';
     }
 
-    // UGC
-    for (const ugcDomain of UGC_DOMAINS) {
-        if (lowerDomain.includes(ugcDomain)) {
-            const subcategory = lowerDomain.includes('reddit') ? 'reddit' :
+    // Category assignment based on source type if not already set
+    if (category === 'other') {
+        if (sourceType === 'wiki') {
+            category = 'wikipedia';
+            opportunityLevel = 'difficult';
+        } else if (sourceType === 'review') {
+            category = 'review_directory';
+            subcategory = lowerDomain.split('.')[0];
+            opportunityLevel = 'medium';
+        } else if (sourceType === 'social') {
+            category = 'social_media';
+            subcategory = lowerDomain.includes('linkedin') ? 'linkedin' :
+                lowerDomain.includes('twitter') || lowerDomain.includes('x.com') ? 'twitter' :
+                    lowerDomain.includes('youtube') ? 'youtube' :
+                        lowerDomain.includes('facebook') ? 'facebook' : 'other';
+            opportunityLevel = 'medium';
+        } else if (sourceType === 'ugc') {
+            category = 'ugc';
+            subcategory = lowerDomain.includes('reddit') ? 'reddit' :
                 lowerDomain.includes('quora') ? 'quora' :
-                    lowerDomain.includes('twitter') || lowerDomain.includes('x.com') ? 'twitter' :
-                        lowerDomain.includes('linkedin') ? 'linkedin' :
-                            lowerDomain.includes('stackoverflow') ? 'stackoverflow' :
-                                ugcDomain;
-            return { category: 'ugc', subcategory, opportunityLevel: 'easy' };
+                    lowerDomain.includes('stackoverflow') ? 'stackoverflow' :
+                        lowerDomain.includes('medium') ? 'medium' : 'other';
+            opportunityLevel = 'easy';
+        } else if (sourceType === 'comparison') {
+            category = 'comparison';
+            subcategory = 'listicle';
+            opportunityLevel = 'medium';
+        } else if (sourceType === 'local') {
+            category = 'local';
+            subcategory = 'hyper-local';
+            opportunityLevel = 'easy';
+        } else if (sourceType === 'editorial') {
+            category = 'press_media';
+            subcategory = lowerDomain.split('.')[0];
+            opportunityLevel = 'medium';
+        }
+
+        // App stores
+        for (const pattern of APP_STORE_PATTERNS) {
+            if (lowerUrl.includes(pattern)) {
+                category = 'app_store';
+                subcategory = lowerUrl.includes('play.google.com') ? 'google_play' :
+                    lowerUrl.includes('apps.apple.com') ? 'app_store' : 'other_store';
+                opportunityLevel = 'medium';
+                break;
+            }
         }
     }
 
-    return { category: 'other', subcategory: null, opportunityLevel: 'medium' };
+    return {
+        category,
+        subcategory,
+        opportunityLevel,
+        relationshipType,
+        sourceType,
+        authorityTier,
+        isAffiliate: affiliateInfo.isAffiliate,
+        affiliateType: affiliateInfo.affiliateType
+    };
 }
 
 // ============================================
@@ -1022,7 +1186,13 @@ serve(async (req: Request) => {
                         opportunity_level: classification.opportunityLevel,
                         brand_mentioned_in_source: false, // Would need content scraping
                         competitor_mentions: [],
-                        ai_analysis: aiAnalysis
+                        ai_analysis: aiAnalysis,
+                        // New tiered fields
+                        relationship_type: classification.relationshipType,
+                        source_type: classification.sourceType,
+                        authority_tier: classification.authorityTier,
+                        is_affiliate: classification.isAffiliate,
+                        affiliate_type: classification.affiliateType
                     };
 
                     results.push(intelligence);
@@ -1047,7 +1217,13 @@ serve(async (req: Request) => {
                         opportunity_level: intelligence.opportunity_level,
                         ai_analysis: intelligence.ai_analysis,
                         analysis_status: 'completed',
-                        processed_at: new Date().toISOString()
+                        processed_at: new Date().toISOString(),
+                        // New tiered fields
+                        relationship_type: intelligence.relationship_type,
+                        source_type: intelligence.source_type,
+                        authority_tier: intelligence.authority_tier,
+                        is_affiliate: intelligence.is_affiliate,
+                        affiliate_type: intelligence.affiliate_type
                     };
 
                     // Check for existing record to Upsert

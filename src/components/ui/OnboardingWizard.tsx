@@ -26,6 +26,8 @@ interface FormData {
     location: string;
     competitors: string[];
     seedKeywords: string[];
+    businessType: string;
+    competitorUrls: Record<string, string>;
 }
 
 // Role-based limits
@@ -216,8 +218,8 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
             if (saved) return JSON.parse(saved);
         } catch (e) { console.warn("[Onboarding] localStorage error:", e); }
         return {
-            brandName: '', website: '', industry: '', customIndustry: '',
-            location: 'US', competitors: [], seedKeywords: []
+            brandName: '', website: '', industry: '', customIndustry: '', businessType: 'Online Business',
+            location: 'US', competitors: [], seedKeywords: [], competitorUrls: {}
         };
     });
 
@@ -250,6 +252,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
     const [newKeyword, setNewKeyword] = useState('');
     const [newCompetitor, setNewCompetitor] = useState('');
+    const [newCompetitorUrl, setNewCompetitorUrl] = useState('');
     const [autoFindingCompetitors, setAutoFindingCompetitors] = useState(false);
     const [promptsPerKeyword, setPromptsPerKeyword] = useState(5); // User selectable: 3-10
     const [processingProgress, setProcessingProgress] = useState(0);
@@ -261,11 +264,12 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
     const resetForm = useCallback(() => {
         setCurrentStep('brand_details');
         setFormData({
-            brandName: '', website: '', industry: '', customIndustry: '',
-            location: 'US', competitors: [], seedKeywords: []
+            brandName: '', website: '', industry: '', customIndustry: '', businessType: 'Online Business',
+            location: 'US', competitors: [], seedKeywords: [], competitorUrls: {}
         });
         setNewKeyword('');
         setNewCompetitor('');
+        setNewCompetitorUrl('');
         setNotification(null);
         setLoading(false);
         setAutoFindingCompetitors(false);
@@ -303,10 +307,15 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
     const handleAddCompetitor = useCallback(() => {
         const trimmed = newCompetitor.trim();
         if (trimmed && trimmed.length >= 2 && !formData.competitors.includes(trimmed)) {
-            setFormData(prev => ({ ...prev, competitors: [...prev.competitors, trimmed] }));
+            setFormData(prev => ({
+                ...prev,
+                competitors: [...prev.competitors, trimmed],
+                competitorUrls: { ...prev.competitorUrls, [trimmed]: newCompetitorUrl.trim() }
+            }));
             setNewCompetitor('');
+            setNewCompetitorUrl('');
         }
-    }, [newCompetitor, formData.competitors]);
+    }, [newCompetitor, newCompetitorUrl, formData.competitors]);
 
     const handleRemoveCompetitor = useCallback((index: number) => {
         setFormData(prev => ({ ...prev, competitors: prev.competitors.filter((_, i) => i !== index) }));
@@ -594,7 +603,12 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 location_code: LOCATION_CODE_MAP[formData.location] || 2840,
                 competitors: formData.competitors,
                 primary_color: '#3b82f6',
-                brand_tags: [formData.brandName]
+
+                brand_tags: [
+                    formData.brandName,
+                    `Type:${formData.businessType}`,
+                    ...Object.entries(formData.competitorUrls).map(([name, url]) => `CompURL:${name}|${url}`)
+                ]
             };
 
             await new Promise(r => setTimeout(r, 500));
@@ -713,8 +727,24 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                                 <Input placeholder="e.g. AI Technology, Pet Services..." value={formData.customIndustry}
                                     onChange={handleCustomIndustryChange} maxLength={100}
                                     className="h-12 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20" />
+
                             </div>
                         )}
+                        <div className="space-y-3">
+                            <Label className="text-sm font-semibold text-gray-700">Business Classification *</Label>
+                            <Select onValueChange={(v) => setFormData(prev => ({ ...prev, businessType: v }))} value={formData.businessType}>
+                                <SelectTrigger className="h-12 bg-white border-gray-200">
+                                    <SelectValue placeholder="Select classification" />
+                                </SelectTrigger>
+                                <SelectContent className="bg-white border-gray-200">
+                                    <SelectItem value="Online Business">Online Only (SaaS/E-com)</SelectItem>
+                                    <SelectItem value="Local Business">Local Business (Physical)</SelectItem>
+                                    <SelectItem value="Hybrid">Hybrid (Physical + Online)</SelectItem>
+                                    <SelectItem value="Enterprise">Enterprise / Corporate</SelectItem>
+                                    <SelectItem value="Agency">Agency / Service Provider</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
                 );
 
@@ -738,7 +768,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                                 <div className="flex flex-wrap gap-2">
                                     {formData.competitors.map((comp, idx) => (
                                         <div key={idx} className="bg-gray-100 px-3 py-1.5 rounded-full text-sm flex items-center gap-2 border border-gray-200">
-                                            <span className="text-gray-700">{comp}</span>
+                                            <span className="text-gray-700">{comp} {formData.competitorUrls[comp] && <span className="text-xs text-blue-500 ml-1">({formData.competitorUrls[comp].replace(/^https?:\/\//, '').replace(/\/$/, '')})</span>}</span>
                                             <button onClick={() => handleRemoveCompetitor(idx)} className="text-gray-400 hover:text-red-500 transition-colors" type="button">
                                                 <X className="h-3 w-3" />
                                             </button>
@@ -757,6 +787,9 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                                 <Input placeholder="Enter competitor name" value={newCompetitor}
                                     onChange={(e) => setNewCompetitor(e.target.value)} onKeyDown={handleCompetitorKeyDown}
                                     className="flex-1 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20" maxLength={50} />
+                                <Input placeholder="Website URL (optional)" value={newCompetitorUrl}
+                                    onChange={(e) => setNewCompetitorUrl(e.target.value)}
+                                    className="flex-1 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20" />
                                 <Button onClick={handleAddCompetitor} disabled={!newCompetitor.trim() || newCompetitor.trim().length < 2}
                                     className="bg-blue-600 hover:bg-blue-700 text-white">Add</Button>
                             </div>

@@ -94,6 +94,20 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates (January 2026)
 
+### v2.5 - Onboarding & UI Polish (Jan 29, 2026)
+- **Enhanced Onboarding**: 
+  - **Business Classification**: New step to classify business type (Local, Online, Hybrid, etc.) for better context.
+  - **Competitor Websites**: Now tracks competitor URLs alongside names to improve monitoring accuracy.
+- **Brand Intelligence**: 
+  - **Smart Domain Classification**: Automatically identifies "Owned" domains by matching both registered domain AND brand name (e.g., matching "Gucci" to `gucci.com`).
+- **UI Improvements**:
+  - **Simplified Header**: Removed redundant brand button for a cleaner, focused interface.
+  - **Streamlined Prompts Tab**: Hidden complex "Actions" columns for non-admin/view-only users.
+- **Reliability Fixes**: 
+  - Fixed SQL migration issues (`42P16`) for smooth updates.
+  - Resolved `brandName` runtime errors in dashboard logic.
+
+
 ### v2.4 - Agency UX & Location Intelligence (Jan 16, 2026)
 - **Edit Prompt Location**: Users can now set a specific target location (Country/City) for individual prompts via a new 🌍 globe icon.
 - **Agency Dashboard**: 

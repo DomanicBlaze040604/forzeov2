@@ -3,7 +3,7 @@
  */
 import React, { useState, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History } from 'lucide-react';
 import { AgencyOverview } from "@/components/AgencyOverview";
 import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
 import { useAuth } from "../hooks/useAuth";
@@ -30,22 +30,72 @@ import CitationIntelligence from "@/components/CitationIntelligence";
 import { toast } from "sonner";
 
 const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; dot: string }> = {
-  ugc: { label: "UGC", color: "text-cyan-700", bg: "bg-cyan-100", dot: "#06b6d4" },
-  corporate: { label: "Corporate", color: "text-orange-700", bg: "bg-orange-100", dot: "#f97316" },
-  editorial: { label: "Editorial", color: "text-purple-700", bg: "bg-purple-100", dot: "#a855f7" },
-  reference: { label: "Reference", color: "text-green-700", bg: "bg-green-100", dot: "#22c55e" },
+  owned: { label: "Owned", color: "text-emerald-700", bg: "bg-emerald-100", dot: "#10b981" },
   competitor: { label: "Competitor", color: "text-red-700", bg: "bg-red-100", dot: "#ef4444" },
-  institutional: { label: "Institutional", color: "text-emerald-700", bg: "bg-emerald-100", dot: "#10b981" },
+  ugc: { label: "UGC", color: "text-cyan-700", bg: "bg-cyan-100", dot: "#06b6d4" },
+  editorial: { label: "Editorial", color: "text-purple-700", bg: "bg-purple-100", dot: "#a855f7" },
+  review: { label: "Review", color: "text-yellow-700", bg: "bg-yellow-100", dot: "#eab308" },
+  reference: { label: "Reference", color: "text-green-700", bg: "bg-green-100", dot: "#22c55e" },
+  institutional: { label: "Institutional", color: "text-blue-700", bg: "bg-blue-100", dot: "#3b82f6" },
+  social: { label: "Social", color: "text-pink-700", bg: "bg-pink-100", dot: "#ec4899" },
+  ecommerce: { label: "E-commerce", color: "text-orange-700", bg: "bg-orange-100", dot: "#f97316" },
   other: { label: "Other", color: "text-gray-700", bg: "bg-gray-100", dot: "#6b7280" },
 };
 
-function classifyDomain(domain: string): string {
-  const d = domain.toLowerCase();
-  if (d.includes("reddit") || d.includes("quora") || d.includes("youtube")) return "ugc";
-  if (d.includes("forbes") || d.includes("techcrunch") || d.includes("wired")) return "editorial";
-  if (d.includes("wikipedia")) return "reference";
-  if (d.includes(".gov") || d.includes(".edu")) return "institutional";
-  if (d.includes("apple") || d.includes("google") || d.includes("microsoft")) return "corporate";
+function classifyDomain(domain: string, clientDomain?: string, competitors?: string[], brandName?: string): string {
+  const d = domain.toLowerCase().replace(/^www\./, '');
+
+  // Check if it's the client's own domain
+  if (clientDomain && d.includes(clientDomain.toLowerCase().replace(/^www\./, ''))) return "owned";
+  // Fallback: Check if brand name is in the domain (e.g. "nike" in "nike.com")
+  if (brandName) {
+    const normalizedBrand = brandName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalizedBrand.length > 2 && d.includes(normalizedBrand)) return "owned";
+  }
+
+  // Check configured competitors first
+  if (competitors) {
+    for (const comp of competitors) {
+      if (comp && d.includes(comp.toLowerCase().replace(/^www\./, ''))) return "competitor";
+    }
+  }
+
+  // Known competitor brands (auto-detect common brands across industries)
+  const knownBrands = [
+    'nike', 'adidas', 'hoka', 'asics', 'newbalance', 'puma', 'reebok', 'underarmour',
+    'brooks', 'brooksrunning', 'saucony', 'mizuno', 'salomon', 'onrunning',
+    'lululemon', 'fila', 'skechers', 'vans', 'converse', 'champion', 'columbia',
+    'northface', 'patagonia', 'arcteryx', 'apple', 'samsung', 'microsoft', 'google'
+  ];
+  for (const brand of knownBrands) {
+    if (d.includes(brand)) return "competitor";
+  }
+
+  // E-commerce/Retail
+  if (d.includes('zappos') || d.includes('footlocker') || d.includes('finishline') || d.includes('dickssporting') ||
+    d.includes('amazon') || d.includes('ebay') || d.includes('walmart')) return "ecommerce";
+
+  // UGC / Forums
+  if (d.includes('reddit') || d.includes('quora') || d.includes('discord') || d.includes('stackoverflow') || d.includes('medium')) return "ugc";
+
+  // Social Media
+  if (d.includes('youtube') || d.includes('twitter') || d.includes('x.com') || d.includes('facebook') ||
+    d.includes('instagram') || d.includes('tiktok') || d.includes('linkedin')) return "social";
+
+  // Review/Directory
+  if (d.includes('g2') || d.includes('capterra') || d.includes('trustpilot') || d.includes('yelp') ||
+    d.includes('tripadvisor') || d.includes('glassdoor') || d.includes('runrepeat') || d.includes('review')) return "review";
+
+  // Editorial/News
+  if (d.includes('forbes') || d.includes('techcrunch') || d.includes('wired') || d.includes('nytimes') ||
+    d.includes('bbc') || d.includes('cnn') || d.includes('reuters') || d.includes('bloomberg')) return "editorial";
+
+  // Reference/Wiki
+  if (d.includes('wikipedia') || d.includes('wiki')) return "reference";
+
+  // Institutional
+  if (d.includes('.gov') || d.includes('.edu') || d.includes('.org')) return "institutional";
+
   return "other";
 }
 
@@ -139,11 +189,18 @@ export default function ClientDashboard() {
   const [modelFilter, setModelFilter] = useState<string[]>([]);
   const [promptsTabView, setPromptsTabView] = useState<"active" | "suggested" | "inactive">("active");
   const [sourcesGapView, setSourcesGapView] = useState<"all" | "gap">("all");
+  const [sourcesTypeFilter, setSourcesTypeFilter] = useState<string>("all");
   const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" });
   const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", primary_color: "#3b82f6", logo_url: "", competitors: "", website: "" });
   const [isAutoFinding, setIsAutoFinding] = useState(false);
   const [aiInsights, setAiInsights] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string; keyActions: string[] } | null>(null);
   const [generatingAiInsights, setGeneratingAiInsights] = useState(false);
+
+  // Recommendations modal state
+  const [recsModalOpen, setRecsModalOpen] = useState(false);
+  const [recsModalPromptId, setRecsModalPromptId] = useState<string | null>(null);
+  const [recsModalLoading, setRecsModalLoading] = useState(false);
+  const [recsModalData, setRecsModalData] = useState<{ title: string; description: string }[] | null>(null);
 
   const [isCreatingClient, setIsCreatingClient] = useState(false);
 
@@ -151,6 +208,9 @@ export default function ClientDashboard() {
   const [promptsFilterModel, setPromptsFilterModel] = useState<string>("all");
   const [promptsFilterVisibility, setPromptsFilterVisibility] = useState<"all" | "visible" | "not_visible">("all");
   const [promptsFilterCompetitor, setPromptsFilterCompetitor] = useState<string>("all");
+
+  // Prompt multi-select for bulk actions
+  const [selectedPromptIds, setSelectedPromptIds] = useState<Set<string>>(new Set());
 
 
   const filteredAuditResults = useMemo(() => {
@@ -233,7 +293,7 @@ export default function ClientDashboard() {
         const mentionedComps = selectedClient?.competitors.filter(c => response.includes(c.toLowerCase())) || [];
 
         mr.citations.forEach(c => {
-          if (!stats[c.domain]) stats[c.domain] = { count: 0, type: classifyDomain(c.domain), avg: 0, prompts: new Map() };
+          if (!stats[c.domain]) stats[c.domain] = { count: 0, type: classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name), avg: 0, prompts: new Map() };
           stats[c.domain].count++;
 
           if (!stats[c.domain].prompts.has(pText)) {
@@ -280,14 +340,14 @@ export default function ClientDashboard() {
   const filteredUrlCitations = useMemo(() => !sourceSearch ? allCitations : allCitations.filter(c => c.url.toLowerCase().includes(sourceSearch.toLowerCase()) || c.domain.toLowerCase().includes(sourceSearch.toLowerCase()) || c.title?.toLowerCase().includes(sourceSearch.toLowerCase())), [allCitations, sourceSearch]);
   const gapDomains = useMemo(() => { if (!selectedClient) return []; const brandDomains = new Set<string>(); const competitorDomains = new Map<string, Set<string>>(); filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { const response = mr.raw_response?.toLowerCase() || ""; const hasBrand = mr.brand_mentioned; mr.citations.forEach(c => { if (hasBrand) brandDomains.add(c.domain); selectedClient.competitors.forEach(comp => { if (response.includes(comp.toLowerCase())) { if (!competitorDomains.has(c.domain)) competitorDomains.set(c.domain, new Set()); competitorDomains.get(c.domain)!.add(comp); } }); }); }); }); return Array.from(competitorDomains.entries()).filter(([domain]) => !brandDomains.has(domain)).map(([domain, competitors]) => ({ domain, competitors: Array.from(competitors) })).slice(0, 20); }, [selectedClient, filteredAuditResults]);
   const displayedStats = sourcesGapView === "gap" ? gapDomains.map(g => { const stat = domainStats.find(s => s.domain === g.domain); return stat ? { ...stat, gapCompetitors: g.competitors } : null; }).filter(Boolean) : filteredDomainStats;
-  const exportSources = () => { if (sourcesView === "domains") { if (domainStats.length === 0) return; const rows = [["Domain", "Type", "Citations", "Prompts", "Avg/Audit"]]; for (const s of domainStats) { rows.push([s.domain, s.type, s.count.toString(), s.promptCount.toString(), s.avg.toString()]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-domains-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } else { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-urls-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } };
+  const exportSources = () => { if (sourcesView === "domains") { if (domainStats.length === 0) return; const rows = [["Domain", "Type", "Citations", "Prompts", "Avg/Audit"]]; for (const s of domainStats) { rows.push([s.domain, s.type, s.count.toString(), s.promptCount.toString(), s.avg.toString()]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-domains-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } else { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-urls-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } };
 
   // Citations Tab State & Logic (Lifted to fix hooks)
   const [citationSearch, setCitationSearch] = useState("");
   const [selectedCitation, setSelectedCitation] = useState<string | null>(null);
   const filteredCitations = useMemo(() => !citationSearch ? allCitations : allCitations.filter(c => c.url.toLowerCase().includes(citationSearch.toLowerCase()) || c.domain.toLowerCase().includes(citationSearch.toLowerCase()) || c.title?.toLowerCase().includes(citationSearch.toLowerCase())), [allCitations, citationSearch]);
   const citationsByPrompt = useMemo(() => { const map: Record<string, typeof allCitations> = {}; filteredAuditResults.forEach(r => { const promptCitations: typeof allCitations = []; r.model_results.forEach(mr => { mr.citations.forEach(c => { promptCitations.push({ ...c, count: 1, prompts: [r.prompt_text] }); }); }); if (promptCitations.length > 0) map[r.prompt_id] = promptCitations; }); return map; }, [filteredAuditResults]);
-  const exportCitations = () => { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `citations-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); };
+  const exportCitations = () => { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `citations-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); };
 
   const handleAddPrompt = async () => {
     if (newPrompt.trim()) {
@@ -578,7 +638,7 @@ export default function ClientDashboard() {
       )}>
         <div className="p-4 border-b border-gray-100 flex-shrink-0 flex items-center justify-between">
           <DropdownMenu>
-            <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors"><div className="h-8 w-8 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span></div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" /></button></DropdownMenuTrigger>
+            <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors"><div className="h-8 w-8 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0 overflow-hidden" style={{ backgroundColor: selectedClient?.brand_domain ? 'transparent' : (selectedClient?.primary_color || "#3b82f6") }}>{selectedClient?.brand_domain ? (<img src={`https://www.google.com/s2/favicons?domain=${selectedClient.brand_domain}&sz=32`} alt="" className="h-8 w-8" onError={(e) => { const parent = (e.target as HTMLImageElement).parentElement; if (parent) { parent.style.backgroundColor = selectedClient?.primary_color || '#3b82f6'; } (e.target as HTMLImageElement).style.display = 'none'; const span = document.createElement('span'); span.className = 'text-white font-bold text-sm'; span.textContent = selectedClient?.brand_name?.charAt(0) || '?'; parent?.appendChild(span); }} />) : (<span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span>)}</div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" /></button></DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-52">
               {/* Agency Dashboard option for agency users */}
               {isAgency && (
@@ -591,7 +651,7 @@ export default function ClientDashboard() {
                   <DropdownMenuSeparator />
                 </>
               )}
-              {clients.map(c => (<DropdownMenuItem key={c.id} onClick={() => switchClient(c)} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-5 w-5 rounded flex items-center justify-center shadow-sm flex-shrink-0" style={{ backgroundColor: c.primary_color }}><span className="text-white text-xs font-bold">{c.brand_name.charAt(0)}</span></div><span className="truncate">{c.brand_name}</span></div>{c.id === selectedClient?.id && <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />}</DropdownMenuItem>))}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setAddClientOpen(true)}><Plus className="h-4 w-4 mr-2 flex-shrink-0" /> Add Brand</DropdownMenuItem></DropdownMenuContent>
+              {clients.map(c => (<DropdownMenuItem key={c.id} onClick={() => switchClient(c)} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="h-5 w-5 rounded flex items-center justify-center shadow-sm flex-shrink-0 overflow-hidden" style={{ backgroundColor: c.brand_domain ? 'transparent' : c.primary_color }}>{c.brand_domain ? (<img src={`https://www.google.com/s2/favicons?domain=${c.brand_domain}&sz=32`} alt="" className="h-5 w-5" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; const parent = (e.target as HTMLImageElement).parentElement; if (parent) { parent.style.backgroundColor = c.primary_color; const span = document.createElement('span'); span.className = 'text-white text-xs font-bold'; span.textContent = c.brand_name.charAt(0); parent.appendChild(span); } }} />) : (<span className="text-white text-xs font-bold">{c.brand_name.charAt(0)}</span>)}</div><span className="truncate">{c.brand_name}</span></div>{c.id === selectedClient?.id && <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />}</DropdownMenuItem>))}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setAddClientOpen(true)}><Plus className="h-4 w-4 mr-2 flex-shrink-0" /> Add Brand</DropdownMenuItem></DropdownMenuContent>
           </DropdownMenu>
         </div>
         <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
@@ -660,14 +720,16 @@ export default function ClientDashboard() {
             </div>
           )}
 
-          <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-4 mb-3 shadow-lg overflow-hidden">
-            <div className="text-xs font-medium text-gray-400 mb-1">Audits Completed</div>
-            <div className="text-xl font-bold text-white truncate">{auditResults.length}</div>
-            <div className="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
-              <span className="inline-block w-2 h-2 rounded-full bg-green-400 flex-shrink-0 animate-pulse"></span>
-              <span className="truncate">Total runs (all time)</span>
+          {isAdmin && (
+            <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-4 mb-3 shadow-lg overflow-hidden">
+              <div className="text-xs font-medium text-gray-400 mb-1">Audits Completed</div>
+              <div className="text-xl font-bold text-white truncate">{auditResults.length}</div>
+              <div className="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-green-400 flex-shrink-0 animate-pulse"></span>
+                <span className="truncate">Total runs (all time)</span>
+              </div>
             </div>
-          </div>
+          )}
           {/* User Profile Section */}
           {user && (
             <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
@@ -722,9 +784,9 @@ export default function ClientDashboard() {
             <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
               {/* Client Badge - Hidden on small mobile to save space if needed, or kept compact */}
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
-                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-white shadow-sm text-gray-900 whitespace-nowrap"><div className="h-4 w-4 rounded flex items-center justify-center" style={{ backgroundColor: selectedClient?.primary_color || "#3b82f6" }}><span className="text-white text-[10px] font-bold">{selectedClient?.brand_name?.charAt(0)}</span></div>{selectedClient?.brand_name}</button>
+
                 <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap", dateRangeFilter !== "all" ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Calendar className="h-3.5 w-3.5" /> {dateRangeLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setDateRangeFilter("7d")} className={cn(dateRangeFilter === "7d" && "bg-blue-50")}>Last 7 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("30d")} className={cn(dateRangeFilter === "30d" && "bg-blue-50")}>Last 30 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("90d")} className={cn(dateRangeFilter === "90d" && "bg-blue-50")}>Last 90 days</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setDateRangeFilter("all")} className={cn(dateRangeFilter === "all" && "bg-blue-50")}>All Time</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
-                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap", modelFilter.length > 0 ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Filter className="h-3.5 w-3.5" /> {modelFilterLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48">{AI_MODELS.map(model => { const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; const isSelected = modelFilter.length === 0 || modelFilter.includes(model.id); return (<DropdownMenuItem key={model.id} onClick={() => toggleModelFilter(model.id)} className={cn(isSelected && "bg-blue-50")}><div className="flex items-center gap-2 w-full">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="flex-1">{model.name}</span>{isSelected && <CheckCircle className="h-3 w-3 text-blue-600" />}</div></DropdownMenuItem>); })}<DropdownMenuSeparator /><DropdownMenuItem onClick={() => setModelFilter([])}>Clear Filters</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+                {/* All Models filter removed per UI overhaul */}
               </div>
 
               <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
@@ -871,7 +933,7 @@ export default function ClientDashboard() {
           </div>
           <div className="col-span-1 md:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Brand Visibility</h3></div>
-            <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><Building2 className="h-5 w-5 text-gray-400" /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
+            <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; const brandDomain = isBrand ? selectedClient?.brand_domain : `${c.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><img src={`https://www.google.com/s2/favicons?domain=${brandDomain}&sz=20`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }} /><Building2 className="h-5 w-5 text-gray-400 hidden" /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
           </div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -975,22 +1037,7 @@ export default function ClientDashboard() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Filters */}
-            <Select value={promptsFilterModel} onValueChange={setPromptsFilterModel}>
-              <SelectTrigger className="w-[130px] h-9 text-xs bg-white border-gray-200">
-                <SelectValue placeholder="Model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Models</SelectItem>
-                <SelectItem value="google_ai_overview">Google AI</SelectItem>
-                <SelectItem value="chatgpt">ChatGPT</SelectItem>
-                <SelectItem value="claude">Claude</SelectItem>
-                <SelectItem value="gemini">Gemini</SelectItem>
-                <SelectItem value="perplexity">Perplexity</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={promptsFilterCompetitor} onValueChange={setPromptsFilterCompetitor}>
+            {/* Filters - All Models filter removed per user request */}            <Select value={promptsFilterCompetitor} onValueChange={setPromptsFilterCompetitor}>
               <SelectTrigger className="w-[130px] h-9 text-xs bg-white border-gray-200">
                 <SelectValue placeholder="Competitor" />
               </SelectTrigger>
@@ -1013,11 +1060,7 @@ export default function ClientDashboard() {
               </SelectContent>
             </Select>
 
-            {isAdmin && (
-              <Button onClick={() => setRunCampaignOpen(true)} variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-800">
-                <Play className="h-4 w-4 mr-2" /> Run Topic
-              </Button>
-            )}
+            {/* Run Topic button removed */}
             {isAdmin ? (
               <span className="text-sm text-gray-500 hidden sm:inline"> {prompts.length} total prompts</span>
             ) : (
@@ -1054,94 +1097,185 @@ export default function ClientDashboard() {
           <table className="w-full">
             <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200">
               <tr>
-                <th className="w-10 px-3 py-3 text-left"><Checkbox /></th>
+                <th className="w-10 px-3 py-3 text-left"><Checkbox checked={selectedPromptIds.size === filteredPrompts.length && filteredPrompts.length > 0} onCheckedChange={(checked) => { if (checked) { setSelectedPromptIds(new Set(filteredPrompts.map(p => p.id))); } else { setSelectedPromptIds(new Set()); } }} /></th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Prompt <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
                 </th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Visibility</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Position</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Models</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Brands</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Citations</th>
-                <th className="px-4 py-3 text-end text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Actions</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-36">Recommendations</th>
+                {isAdmin && <th className="px-4 py-3 text-end text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredPrompts.map((p) => {
                 const r = getPromptResult(p.id);
                 const isLoading = loadingPromptId === p.id;
-                const vis = r?.summary.share_of_voice || 0;
+                const visibleCount = r?.model_results.filter(mr => mr.brand_mentioned).length || 0;
+                const totalCount = r?.model_results.length || 0;
                 const pos = r?.summary.average_rank;
                 const cit = r?.summary.total_citations || 0;
                 const isInactive = p.is_active === false;
 
                 return (
                   <tr key={p.id} className={cn("hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0", isInactive && "opacity-60")}>
-                    <td className="px-3 py-2.5"><Checkbox /></td>
+                    <td className="px-3 py-2.5"><Checkbox checked={selectedPromptIds.has(p.id)} onCheckedChange={(checked) => { const newSet = new Set(selectedPromptIds); if (checked) { newSet.add(p.id); } else { newSet.delete(p.id); } setSelectedPromptIds(newSet); }} /></td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2 flex-wrap">
                         {isInactive && <Archive className="h-4 w-4 text-gray-400 flex-shrink-0" />}
-                        <span className={cn("text-sm font-medium", isInactive ? "text-gray-500" : "text-gray-900")}>{p.prompt_text}</span>
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isAdmin || r) {
+                              setSelectedPromptDetail(p.id);
+                            }
+                          }}
+                          className={cn(
+                            "text-sm font-medium transition-colors",
+                            (isAdmin || r) ? "cursor-pointer hover:text-blue-600 hover:underline underline-offset-2 text-gray-900" : "cursor-default text-gray-400",
+                            isInactive && "text-gray-500"
+                          )}
+                        >
+                          {p.prompt_text}
+                        </span>
                         {p.niche_level && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 uppercase tracking-wide flex-shrink-0 bg-gray-50 text-gray-600 border-gray-200">{p.niche_level === "super_niche" ? "Super Niche" : p.niche_level === "niche" ? "Niche" : "Broad"}</Badge>}
                         {p.location_name && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 flex-shrink-0 bg-blue-50 text-blue-600 border-blue-200 flex items-center gap-1"><Globe className="h-2.5 w-2.5" />{p.location_name}</Badge>}
                       </div>
                     </td>
                     <td className="px-4 py-2.5 text-center">
-                      <span className={cn("text-sm font-bold", vis > 0 ? "text-green-600" : "text-gray-300")}>{r ? `${vis}%` : "—"}</span>
+                      <span className={cn("text-sm font-medium", visibleCount > 0 ? "text-gray-900" : "text-gray-400")}>
+                        {r ? `${visibleCount}/${totalCount}` : "—"}
+                      </span>
                     </td>
-                    <td className="px-4 py-2.5 text-center text-gray-500 font-medium text-sm">{pos ? `#${pos}` : "—"}</td>
+                    <td className="px-4 py-2.5 text-center text-gray-500 font-medium text-sm">{pos ? (typeof pos === 'number' ? pos.toFixed(1) : pos) : "—"}</td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center justify-center gap-1">
-                        {r?.model_results.slice(0, 4).map((mr, i) => {
-                          const Logo = MODEL_LOGOS[mr.model]?.Logo;
-                          const color = MODEL_LOGOS[mr.model]?.color || "#666";
-                          return Logo ? <div key={i} className="transition-transform group-hover:scale-110"><Logo className="h-3.5 w-3.5" style={{ color: mr.brand_mentioned ? color : "#e5e7eb" }} /></div> : null;
-                        })}
-                        {!r && <span className="text-xs text-gray-400 italic">Not run</span>}
+                        {(() => {
+                          // Extract all brands mentioned in responses
+                          if (!r) return <span className="text-xs text-gray-400 italic">Not run</span>;
+
+                          const allBrands = new Set<string>();
+                          const brandName = selectedClient?.brand_name?.toLowerCase() || '';
+                          const competitors = selectedClient?.competitors || [];
+
+                          // Check all model responses for brand mentions
+                          r.model_results.forEach(mr => {
+                            const response = (mr.raw_response || '').toLowerCase();
+                            // Check for user's brand
+                            if (brandName && response.includes(brandName)) {
+                              allBrands.add(selectedClient?.brand_name || '');
+                            }
+                            // Check for competitors
+                            competitors.forEach(comp => {
+                              if (response.includes(comp.toLowerCase())) {
+                                allBrands.add(comp);
+                              }
+                            });
+                          });
+
+                          const brandsArray = Array.from(allBrands);
+                          if (brandsArray.length === 0) {
+                            return <span className="text-xs text-gray-400 italic">None</span>;
+                          }
+
+                          const displayBrands = brandsArray.slice(0, 5);
+
+                          return (
+                            <>
+                              {displayBrands.map((brand, idx) => {
+                                const isUserBrand = brand.toLowerCase() === brandName;
+                                const domain = `${brand.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={cn("flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium", isUserBrand ? "bg-green-100 text-green-700 border border-green-200" : "bg-gray-100 text-gray-600 border border-gray-200")}
+                                    title={brand}
+                                  >
+                                    <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=12`} alt="" className="h-3 w-3 rounded-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                    <span className="truncate max-w-[60px]">{brand}</span>
+                                  </div>
+                                );
+                              })}
+                            </>
+                          );
+                        })()}
                       </div>
                     </td>
                     <td className="px-4 py-2.5 text-center">{cit > 0 ? <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs">{cit}</Badge> : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center justify-center gap-1">
-                        {isInactive ? (
-                          <>
-                            <Button variant="ghost" size="sm" onClick={() => reactivatePrompt(p.id)} className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Restore prompt">
-                              <RotateCcw className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={() => setSelectedPromptDetail(p.id)} className="h-7 px-2 text-gray-500 hover:text-gray-700" title="View details">
-                              <Eye className="h-3.5 w-3.5" />
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button variant="ghost" size="sm" onClick={() => setSelectedPromptDetail(p.id)} className="h-7 px-2 text-gray-500 hover:text-gray-700" title="View details">
-                              <Eye className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={() => {
-                              setEditingPromptId(p.id);
-                              setEditingPromptText(p.prompt_text);
-                              setEditPromptOpen(true);
-                            }} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Edit prompt">
-                              <Settings className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={() => {
-                              setEditingLocationPromptId(p.id);
-                              setEditingLocationValue(p.location_name || "");
-                              setEditLocationOpen(true);
-                            }} className={cn("h-7 px-2", p.location_name ? "text-blue-500 hover:text-blue-700" : "text-gray-500 hover:text-blue-600")} title={p.location_name ? `Location: ${p.location_name}` : "Set location"}>
-                              <Globe className="h-3.5 w-3.5" />
-                            </Button>
-                            {isAdmin && (
-                              <Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Run audit">
-                                {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                              </Button>
-                            )}
-                            <Button variant="ghost" size="sm" onClick={() => deletePrompt(p.id)} className="h-7 px-2 text-gray-500 hover:text-red-600" title="Archive prompt">
-                              <Archive className="h-3.5 w-3.5" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
+                    {/* Recommendations Button */}
+                    <td className="px-4 py-2.5 text-center">
+                      {r ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={recsModalLoading && recsModalPromptId === p.id}
+                          onClick={async () => {
+                            // Open recommendations modal
+                            setRecsModalPromptId(p.id);
+                            setRecsModalOpen(true);
+                            setRecsModalLoading(true);
+                            setRecsModalData(null);
+
+                            // Generate ACTUAL recommendations based on model results and Tavily data
+                            const result = getPromptResult(p.id);
+                            if (result) {
+                              try {
+                                const tData = tavilyResults[p.id];
+                                const recs = await generateRecommendations(
+                                  p.prompt_text,
+                                  result,
+                                  tData
+                                );
+                                if (recs && recs.recommendations) {
+                                  setRecsModalData(recs.recommendations);
+                                } else {
+                                  setRecsModalData([]);
+                                }
+                              } catch (err) {
+                                console.error("Error generating recommendations:", err);
+                                setRecsModalData([]);
+                              }
+                            } else {
+                              // If no result yet, show empty or handle
+                              setRecsModalData([]);
+                            }
+                            setRecsModalLoading(false);
+                          }}
+                          className="h-7 px-3 text-xs font-medium text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300 flex items-center gap-1.5"
+                        >
+                          {recsModalLoading && recsModalPromptId === p.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Lightbulb className="h-3.5 w-3.5" />
+                          )}
+                          Recommendations
+                        </Button>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
+                    {isAdmin && (
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center justify-center gap-1">
+                          {isInactive ? (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => reactivatePrompt(p.id)} className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Restore prompt">
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Run audit">
+                                <Loader2 className={cn("h-3.5 w-3.5", isLoading && "animate-spin")} />
+                                {!isLoading && <RefreshCw className="h-3.5 w-3.5" />}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -1173,6 +1307,117 @@ export default function ClientDashboard() {
             </div>
           )}
         </div>
+
+        {/* Floating Action Bar for Bulk Operations */}
+        {selectedPromptIds.size > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white rounded-xl shadow-2xl px-6 py-3 flex items-center gap-4 animate-in slide-in-from-bottom-4">
+            <span className="text-sm font-medium">{selectedPromptIds.size} selected</span>
+            <div className="h-4 w-px bg-gray-600" />
+            {selectedPromptIds.size === 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const promptId = Array.from(selectedPromptIds)[0];
+                  const prompt = prompts.find(pr => pr.id === promptId);
+                  if (prompt) {
+                    setEditingPromptId(promptId);
+                    setEditingPromptText(prompt.prompt_text);
+                    setEditPromptOpen(true);
+                    setSelectedPromptIds(new Set());
+                  }
+                }}
+                className="text-white hover:bg-gray-700"
+              >
+                <Settings className="h-4 w-4 mr-1.5" />
+                Edit
+              </Button>
+            )}
+            {selectedPromptIds.size === 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const promptId = Array.from(selectedPromptIds)[0];
+                  const prompt = prompts.find(pr => pr.id === promptId);
+                  if (prompt) {
+                    setEditingLocationPromptId(promptId);
+                    setEditingLocationValue(prompt.location_name || "");
+                    setEditLocationOpen(true);
+                  }
+                }}
+                className="text-white hover:bg-gray-700"
+              >
+                <Globe className="h-4 w-4 mr-1.5" />
+                Location
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                for (const id of selectedPromptIds) {
+                  await deletePrompt(id);
+                }
+                setSelectedPromptIds(new Set());
+              }}
+              className="text-white hover:bg-gray-700"
+            >
+              <Archive className="h-4 w-4 mr-1.5" />
+              Archive{selectedPromptIds.size > 1 ? ` (${selectedPromptIds.size})` : ''}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedPromptIds(new Set())}
+              className="text-gray-400 hover:text-white hover:bg-gray-700"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+
+        {/* Recommendations Modal */}
+        <Dialog open={recsModalOpen} onOpenChange={setRecsModalOpen}>
+          <DialogContent className="sm:max-w-lg bg-white max-h-[85vh] flex flex-col">
+            <DialogHeader className="pb-4 border-b flex-shrink-0">
+              <DialogTitle className="text-lg font-semibold flex items-center gap-2">
+                <Lightbulb className="h-5 w-5 text-blue-600" />
+                Recommendations
+              </DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-4 flex-1 overflow-y-auto min-h-0 pr-2">
+              {recsModalLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                </div>
+              ) : recsModalData && recsModalData.length > 0 ? (
+                recsModalData.map((rec, idx) => (
+                  <div
+                    key={idx}
+                    className="flex gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl"
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-gray-900 mb-1">{rec.title}</h4>
+                      <p className="text-sm text-gray-600">{rec.description}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <Lightbulb className="h-10 w-10 mx-auto mb-3 text-gray-300" />
+                  <p>No recommendations available</p>
+                </div>
+              )}
+            </div>
+            <div className="pt-4 border-t flex justify-end flex-shrink-0">
+              <Button variant="outline" onClick={() => setRecsModalOpen(false)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div >
     );
   }
@@ -1190,7 +1435,7 @@ export default function ClientDashboard() {
           <div className="flex items-center justify-end gap-4 mt-4 text-xs">{Object.entries(DOMAIN_TYPES).slice(0, 6).map(([k, t]) => (<div key={k} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.dot }} /><span className="text-gray-600">{t.label}</span></div>))}</div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3">{sourcesView === "domains" && <><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></>}{sourcesView === "urls" && <span className="text-sm font-medium text-gray-700">All URLs ({allCitations.length})</span>}</div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder={sourcesView === "urls" ? "Search URLs..." : "Search domains..."} value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportSources}><Download className="h-3.5 w-3.5 mr-1" /> Export {sourcesView === "domains" ? "Domains" : "URLs"}</Button></div></div>
+          <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3">{sourcesView === "domains" && <><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></>}{sourcesView === "urls" && <span className="text-sm font-medium text-gray-700">All URLs ({allCitations.length})</span>}</div><div className="flex items-center gap-2"><select value={sourcesTypeFilter} onChange={(e) => setSourcesTypeFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"><option value="all">All Types</option>{Object.entries(DOMAIN_TYPES).map(([key, val]) => (<option key={key} value={key}>{val.label}</option>))}</select><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder={sourcesView === "urls" ? "Search URLs..." : "Search domains..."} value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportSources}><Download className="h-3.5 w-3.5 mr-1" /> Export {sourcesView === "domains" ? "Domains" : "URLs"}</Button></div></div>
           {sourcesGapView === "gap" && sourcesView === "domains" && (<div className="px-4 py-3 bg-orange-50 border-b border-orange-100"><p className="text-sm text-orange-700"><AlertTriangle className="h-4 w-4 inline mr-1" />These domains cite your competitors but not your brand.</p></div>)}
           {sourcesView === "domains" ? (
             <div className="max-h-[600px] overflow-y-auto">
@@ -1202,6 +1447,7 @@ export default function ClientDashboard() {
                       <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Source <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
                     </th>
                     <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Type</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Verified</th>
                     <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Citations</th>
                     <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Prompts</th>
                     {sourcesGapView === "gap" && <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Competitors</th>}
@@ -1209,8 +1455,9 @@ export default function ClientDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {(displayedStats as typeof domainStats).map((s, i) => {
-                    const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other;
+                  {(displayedStats as typeof domainStats).filter(s => sourcesTypeFilter === "all" || classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name) === sourcesTypeFilter).map((s, i) => {
+                    const type = classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
+                    const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
                     const isExpanded = expandedDomain === s.domain;
                     const domainCitations = allCitations.filter(c => c.domain === s.domain);
                     return (
@@ -1228,7 +1475,26 @@ export default function ClientDashboard() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4"><span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span></td>
+                          <td className="px-6 py-4">
+                            {(() => {
+                              const type = classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
+                              const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
+                              return <span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span>;
+                            })()}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            {(() => {
+                              // Better verification - check for common hallucination patterns
+                              const d = s.domain.toLowerCase();
+                              const isSuspicious = !d.includes('.') || d.length < 4 || d.includes('example') || d.includes('test') ||
+                                d.includes('localhost') || d.match(/^\d+\.\d+\.\d+\.\d+$/) || d.includes('fake');
+                              return isSuspicious ? (
+                                <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200">Not Verified</Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Verified</Badge>
+                              );
+                            })()}
+                          </td>
                           <td className="px-6 py-4 text-right text-base font-medium text-gray-700">{s.count}</td>
                           <td className="px-6 py-4 text-right text-sm text-gray-500">{s.promptCount}</td>
                           {sourcesGapView === "gap" && (
@@ -1332,13 +1598,15 @@ export default function ClientDashboard() {
                     </th>
                     <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-48">Domain</th>
                     <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-32">Type</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Verified</th>
                     <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Count</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Action</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-20">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredUrlCitations.map((c, i) => {
-                    const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other;
+                  {filteredUrlCitations.filter(c => sourcesTypeFilter === "all" || classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors) === sourcesTypeFilter).map((c, i) => {
+                    const type = classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors);
+                    const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
                     return (
                       <tr key={i} className="hover:bg-gray-50 transition-colors group">
                         <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
@@ -1353,6 +1621,19 @@ export default function ClientDashboard() {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">{c.domain}</td>
                         <td className="px-6 py-4"><span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span></td>
+                        <td className="px-6 py-4 text-center">
+                          {(() => {
+                            // Better verification - check URL patterns for hallucinations
+                            const d = c.domain.toLowerCase();
+                            const isSuspicious = !d.includes('.') || d.length < 4 || d.includes('example') || d.includes('test') ||
+                              d.includes('localhost') || d.match(/^\d+\.\d+\.\d+\.\d+$/) || d.includes('fake') || !c.url.startsWith('http');
+                            return isSuspicious ? (
+                              <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200">Not Verified</Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Verified</Badge>
+                            );
+                          })()}
+                        </td>
                         <td className="px-6 py-4 text-center">
                           <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 bg-blue-50 text-blue-700 text-sm font-bold rounded-full">{c.count}</span>
                         </td>
@@ -1396,12 +1677,13 @@ export default function ClientDashboard() {
                     <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-48">Domain</th>
                     <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Count</th>
                     <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Type</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-28">Hallucinated?</th>
                     <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filteredCitations.map((c, i) => {
-                    const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other;
+                    const t = DOMAIN_TYPES[classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name)] || DOMAIN_TYPES.other;
                     return (
                       <tr key={i} className={cn("hover:bg-gray-50 transition-colors group cursor-pointer border-b border-gray-50 last:border-0", selectedCitation === c.url && "bg-blue-50/50")} onClick={() => setSelectedCitation(c.url)}>
                         <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
@@ -1422,6 +1704,47 @@ export default function ClientDashboard() {
                         </td>
                         <td className="px-6 py-4 text-center">
                           <span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span>
+                        </td>
+                        {/* Hallucination Detection - Basic heuristics */}
+                        <td className="px-6 py-4 text-center">
+                          {(() => {
+                            // Basic hallucination detection heuristics
+                            const url = c.url?.toLowerCase() || "";
+                            const domain = c.domain?.toLowerCase() || "";
+
+                            // Likely hallucinated patterns
+                            const suspiciousPatterns = [
+                              /example\.com/,
+                              /test\./,
+                              /fake\./,
+                              /sample\./,
+                              /placeholder/,
+                              /lorem/,
+                              /xxx\./,
+                            ];
+                            const hasRandomString = /[a-z]{20,}/.test(url);
+                            const hasSuspiciousPattern = suspiciousPatterns.some(p => p.test(url));
+                            const hasMissingScheme = !url.startsWith('http://') && !url.startsWith('https://');
+
+                            // Detection logic
+                            let status: 'yes' | 'no' | 'maybe' = 'no';
+                            if (hasSuspiciousPattern || hasRandomString) {
+                              status = 'yes';
+                            } else if (hasMissingScheme || domain.length < 4) {
+                              status = 'maybe';
+                            }
+
+                            return (
+                              <Badge className={cn(
+                                "text-xs",
+                                status === 'yes' && "bg-red-100 text-red-700 hover:bg-red-100 border-red-200",
+                                status === 'no' && "bg-green-100 text-green-700 hover:bg-green-100 border-green-200",
+                                status === 'maybe' && "bg-yellow-100 text-yellow-700 hover:bg-yellow-100 border-yellow-200"
+                              )}>
+                                {status === 'yes' ? 'Yes' : status === 'no' ? 'No' : 'Maybe'}
+                              </Badge>
+                            );
+                          })()}
                         </td>
                         <td className="px-6 py-4 text-center">
                           <a href={c.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" onClick={(e) => e.stopPropagation()} title="Open URL">
@@ -1546,6 +1869,28 @@ export default function ClientDashboard() {
       </Sheet>
     );
   }
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean = false) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 100 * 1024) {
+      toast.error("Logo file too large. Please use an image under 100KB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      if (isEdit) {
+        setEditClientForm(prev => ({ ...prev, logo_url: result }));
+      } else {
+        setNewClientForm(prev => ({ ...prev, logo_url: result }));
+      }
+      toast.success("Logo uploaded successfully");
+    };
+    reader.readAsDataURL(file);
+  };
 
   function AddClientDialog() {
     return (
@@ -1684,13 +2029,31 @@ export default function ClientDashboard() {
                 </div>
               </div>
               <div>
-                <Label className="text-sm font-medium text-gray-700">Logo URL (optional)</Label>
-                <Input
-                  placeholder="https://example.com/logo.png"
-                  value={newClientForm.logo_url}
-                  onChange={(e) => setNewClientForm(prev => ({ ...prev, logo_url: e.target.value }))}
-                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
-                />
+                <Label className="text-sm font-medium text-gray-700">Logo URL (or Upload)</Label>
+                <div className="flex gap-2 mt-1.5">
+                  <Input
+                    placeholder="https://example.com/logo.png"
+                    value={newClientForm.logo_url}
+                    onChange={(e) => setNewClientForm(prev => ({ ...prev, logo_url: e.target.value }))}
+                    className="bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
+                  />
+                  <div className="relative">
+                    <input
+                      type="file"
+                      id="new-logo-upload"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => handleLogoUpload(e, false)}
+                    />
+                    <label
+                      htmlFor="new-logo-upload"
+                      className="flex items-center justify-center p-2.5 border border-gray-300 rounded-md bg-white hover:bg-gray-50 cursor-pointer text-gray-600 transition-colors"
+                      title="Upload Logo"
+                    >
+                      <Upload className="h-4 w-4" />
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1839,13 +2202,31 @@ export default function ClientDashboard() {
                 </div>
               </div>
               <div>
-                <Label className="text-sm font-medium text-gray-700">Logo URL (optional)</Label>
-                <Input
-                  placeholder="https://example.com/logo.png"
-                  value={editClientForm.logo_url}
-                  onChange={(e) => setEditClientForm(prev => ({ ...prev, logo_url: e.target.value }))}
-                  className="mt-1.5 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
-                />
+                <Label className="text-sm font-medium text-gray-700">Logo URL (or Upload)</Label>
+                <div className="flex gap-2 mt-1.5">
+                  <Input
+                    placeholder="https://example.com/logo.png"
+                    value={editClientForm.logo_url}
+                    onChange={(e) => setEditClientForm(prev => ({ ...prev, logo_url: e.target.value }))}
+                    className="bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
+                  />
+                  <div className="relative">
+                    <input
+                      type="file"
+                      id="edit-logo-upload"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => handleLogoUpload(e, true)}
+                    />
+                    <label
+                      htmlFor="edit-logo-upload"
+                      className="flex items-center justify-center p-2.5 border border-gray-300 rounded-md bg-white hover:bg-gray-50 cursor-pointer text-gray-600 transition-colors"
+                      title="Upload Logo"
+                    >
+                      <Upload className="h-4 w-4" />
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2366,10 +2747,42 @@ export default function ClientDashboard() {
     const [pastResponsesCitationFilter, setPastResponsesCitationFilter] = useState<"all" | "new" | "common" | "unused">("all");
     const [generatedVisibilityContent, setGeneratedVisibilityContent] = useState<string | null>(null);
     const [generatingVisibilityContent, setGeneratingVisibilityContent] = useState(false);
-    const [recommendations, setRecommendations] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string } | null>(null);
+    const [recommendations, setRecommendations] = useState<{ recommendations: { title: string; description: string }[]; priority: 'high' | 'medium' | 'low'; summary: string } | null>(null);
     const [generatingRecommendations, setGeneratingRecommendations] = useState(false);
+
+    // Date toggle for viewing past responses inline
+    const [selectedResponseDate, setSelectedResponseDate] = useState<string | null>(null);
+
+    // Get all available dates for this prompt
+    const promptHistory = useMemo(() => {
+      return auditResults
+        .filter(r => r.prompt_id === selectedPromptDetail)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }, [auditResults, selectedPromptDetail]);
+
+    const availableDates = useMemo(() => {
+      return promptHistory.map(r => r.created_at.split('T')[0]);
+    }, [promptHistory]);
+
+    // Get the result for the selected date (or latest if none selected)
+    const displayResult = useMemo(() => {
+      if (!selectedResponseDate) return result;
+      const matchingResult = promptHistory.find(r => r.created_at.split('T')[0] === selectedResponseDate);
+      return matchingResult || result;
+    }, [selectedResponseDate, promptHistory, result]);
+
+    const currentDateIndex = useMemo(() => {
+      if (!selectedResponseDate) return 0;
+      return availableDates.indexOf(selectedResponseDate);
+    }, [selectedResponseDate, availableDates]);
+
+    const navigateDate = (direction: number) => {
+      const newIndex = Math.max(0, Math.min(availableDates.length - 1, currentDateIndex + direction));
+      setSelectedResponseDate(availableDates[newIndex] || null);
+    };
+
     if (!result && !prompt) return null;
-    const allPromptCitations = result?.model_results.flatMap(mr => mr.citations.map(c => ({ ...c, model: mr.model_name }))) || [];
+    const allPromptCitations = displayResult?.model_results.flatMap(mr => mr.citations.map(c => ({ ...c, model: mr.model_name }))) || [];
     const uniqueCitations = Array.from(new Map(allPromptCitations.map(c => [c.url, c])).values());
     const tavilyData = selectedPromptDetail ? tavilyResults[selectedPromptDetail] as any : null;
 
@@ -2419,34 +2832,38 @@ export default function ClientDashboard() {
           </DialogHeader>
           {result ? (
             <div className="space-y-6 pt-4">
-              {/* Stats Cards */}
-              <div className="grid grid-cols-4 gap-4">
-                <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 text-center">
-                  <div className="text-3xl font-bold text-green-700">{result.summary.share_of_voice}%</div>
-                  <div className="text-sm font-medium text-green-600 mt-1">Visibility</div>
+              {/* Stats Cards - Compact */}
+              <div className="grid grid-cols-4 gap-3">
+                <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-2 text-center">
+                  <div className="text-2xl font-bold text-green-700">{displayResult?.summary.share_of_voice || 0}%</div>
+                  <div className="text-xs font-medium text-green-600 mt-0.5">Visibility</div>
                 </div>
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 text-center">
-                  <div className="text-3xl font-bold text-blue-700">{result.summary.average_rank ? `#${result.summary.average_rank}` : "--"}</div>
-                  <div className="text-sm font-medium text-blue-600 mt-1">Avg Rank</div>
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-2 text-center">
+                  <div className="text-2xl font-bold text-blue-700">{displayResult?.summary.average_rank ? `#${displayResult.summary.average_rank}` : "--"}</div>
+                  <div className="text-xs font-medium text-blue-600 mt-0.5">Avg Rank</div>
                 </div>
-                <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-4 text-center">
-                  <div className="text-3xl font-bold text-purple-700">{result.summary.total_citations}</div>
-                  <div className="text-sm font-medium text-purple-600 mt-1">Citations</div>
+                <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-2 text-center">
+                  <div className="text-2xl font-bold text-purple-700">{displayResult?.summary.total_citations || 0}</div>
+                  <div className="text-xs font-medium text-purple-600 mt-0.5">Citations</div>
                 </div>
-                {/* Competitor Suggestions */}
-                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 text-center">
+                {/* Competitor Count */}
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-2 text-center">
                   {(() => {
-                    const allSuggestions = new Set<string>();
+                    // Count ALL competitors mentioned across all model results
+                    const allCompetitorMentions = new Set<string>();
                     result.model_results.forEach(mr => {
-                      if (mr.potential_competitors) {
-                        mr.potential_competitors.forEach((c: string) => allSuggestions.add(c));
-                      }
+                      const responseText = (mr.raw_response || "").toLowerCase();
+                      (selectedClient?.competitors || []).forEach(comp => {
+                        if (responseText.includes(comp.toLowerCase())) {
+                          allCompetitorMentions.add(comp);
+                        }
+                      });
                     });
-                    const count = allSuggestions.size;
+                    const count = allCompetitorMentions.size;
                     return (
                       <>
-                        <div className="text-3xl font-bold text-amber-700">{count}</div>
-                        <div className="text-sm font-medium text-amber-600 mt-1">{count === 1 ? 'New Competitor' : 'New Competitors'}</div>
+                        <div className="text-2xl font-bold text-amber-700">{count}</div>
+                        <div className="text-xs font-medium text-amber-600 mt-0.5">Competitors</div>
                       </>
                     );
                   })()}
@@ -2486,16 +2903,47 @@ export default function ClientDashboard() {
               {/* Model Results Tab */}
               {detailTab === "models" && (
                 <div className="space-y-4">
-                  {result.model_results.map((mr, i) => {
+                  {/* Date Toggle */}
+                  {availableDates.length > 1 && (
+                    <div className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-2 border border-gray-200">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => navigateDate(1)}
+                          disabled={currentDateIndex >= availableDates.length - 1}
+                          className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <ChevronLeft className="h-4 w-4 text-gray-600" />
+                        </button>
+                        <span className="text-sm font-medium text-gray-700 min-w-[120px] text-center">
+                          {selectedResponseDate
+                            ? new Date(selectedResponseDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                            : new Date(displayResult?.created_at || '').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                          }
+                        </span>
+                        <button
+                          onClick={() => navigateDate(-1)}
+                          disabled={currentDateIndex <= 0}
+                          className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <ChevronRight className="h-4 w-4 text-gray-600" />
+                        </button>
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        {currentDateIndex === 0 ? 'Viewing latest response' : `${availableDates.length - currentDateIndex} of ${availableDates.length} runs`}
+                      </span>
+                    </div>
+                  )}
+
+                  {displayResult?.model_results.map((mr, i) => {
                     const Logo = MODEL_LOGOS[mr.model]?.Logo;
                     const color = MODEL_LOGOS[mr.model]?.color || "#666";
 
-                    // Competitor Analysis
+                    // Competitor Analysis - Sort alphabetically for consistent order
                     const responseText = mr.raw_response?.toLowerCase() || "";
                     const competitorMentions = (selectedClient?.competitors || []).map(comp => {
                       const matches = responseText.match(new RegExp(comp.toLowerCase(), "gi"));
                       return { name: comp, count: matches ? matches.length : 0 };
-                    }).filter(c => c.count > 0).sort((a, b) => b.count - a.count);
+                    }).filter(c => c.count > 0).sort((a, b) => a.name.localeCompare(b.name));
 
                     const topCompetitor = competitorMentions[0];
 
@@ -2528,7 +2976,63 @@ export default function ClientDashboard() {
                         {mr.raw_response && (
                           <div className="p-4 border-b border-gray-100">
                             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">AI Response</div>
-                            <div className="p-3 bg-gray-50 rounded-lg text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{mr.raw_response}</div>
+                            <div className="p-4 bg-gray-50 rounded-lg text-sm text-gray-700 leading-relaxed max-w-none">
+                              {/* Enhanced markdown-style formatting */}
+                              {mr.raw_response.split('\n').map((line, idx) => {
+                                const trimmedLine = line.trim();
+                                if (!trimmedLine) return <br key={idx} />;
+
+                                // Helper to render inline bold text (**text**)
+                                const renderWithBold = (text: string) => {
+                                  const parts = text.split(/\*\*(.*?)\*\*/g);
+                                  return parts.map((part, i) =>
+                                    i % 2 === 1 ? <strong key={i} className="font-semibold text-gray-900">{part}</strong> : part
+                                  );
+                                };
+
+                                // Handle headings (## Heading)
+                                if (/^#{1,3}\s+/.test(trimmedLine)) {
+                                  const level = trimmedLine.match(/^(#+)/)?.[1].length || 2;
+                                  const headingText = trimmedLine.replace(/^#+\s+/, '');
+                                  return (
+                                    <p key={idx} className={cn(
+                                      "font-bold text-gray-900 mt-4 mb-2",
+                                      level === 1 && "text-base",
+                                      level === 2 && "text-sm uppercase tracking-wide",
+                                      level >= 3 && "text-sm"
+                                    )}>
+                                      {renderWithBold(headingText)}
+                                    </p>
+                                  );
+                                }
+
+                                // Handle numbered lists (1. 2. etc)
+                                if (/^\d+\./.test(trimmedLine)) {
+                                  const numMatch = trimmedLine.match(/^(\d+)\./);
+                                  const num = numMatch ? numMatch[1] : '';
+                                  const content = trimmedLine.substring(trimmedLine.indexOf('.') + 1).trim();
+                                  return (
+                                    <p key={idx} className="my-1.5 pl-1 flex gap-2">
+                                      <span className="font-semibold text-gray-800 min-w-[20px]">{num}.</span>
+                                      <span>{renderWithBold(content)}</span>
+                                    </p>
+                                  );
+                                }
+
+                                // Handle bullet points
+                                if (/^[-•*]\s/.test(trimmedLine)) {
+                                  return (
+                                    <p key={idx} className="my-1 pl-1 flex gap-2">
+                                      <span className="text-gray-400">•</span>
+                                      <span>{renderWithBold(trimmedLine.substring(1).trim())}</span>
+                                    </p>
+                                  );
+                                }
+
+                                // Regular paragraph with bold support
+                                return <p key={idx} className="my-2">{renderWithBold(trimmedLine)}</p>;
+                              })}
+                            </div>
 
                             {/* Competitor Mentions Block */}
                             {(topCompetitor || competitorMentions.length > 0) && (
@@ -2607,7 +3111,7 @@ export default function ClientDashboard() {
                     </div>
                   ) : (
                     uniqueCitations.map((c, i) => {
-                      const t = DOMAIN_TYPES[classifyDomain(c.domain)] || DOMAIN_TYPES.other;
+                      const t = DOMAIN_TYPES[classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name)] || DOMAIN_TYPES.other;
                       const modelsUsing = allPromptCitations.filter(x => x.url === c.url).map(x => x.model);
                       return (
                         <div key={i} className="flex items-start gap-4 p-4 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow">
@@ -3053,7 +3557,10 @@ export default function ClientDashboard() {
                               <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-sm font-bold shadow-sm">
                                 {idx + 1}
                               </div>
-                              <p className="text-sm text-gray-700 leading-relaxed">{rec}</p>
+                              <div className="flex-1">
+                                <h5 className="text-sm font-semibold text-gray-900 mb-1">{typeof rec === 'object' ? rec.title : 'Recommendation'}</h5>
+                                <p className="text-sm text-gray-700 leading-relaxed">{typeof rec === 'object' ? rec.description : rec}</p>
+                              </div>
                             </div>
                           ))}
                         </div>
