@@ -53,7 +53,7 @@ CREATE TABLE profiles (
 **Roles:**
 - `admin` - Full platform access, unlimited resources
 - `agency` - Max 5 brands, 15 prompts/brand, cannot delete brands
-- `user` - Unlimited brands, 30 prompts/brand
+- `user` - Unlimited brands, 100 prompts/brand
 
 **Auto-Create Trigger:**
 ```sql

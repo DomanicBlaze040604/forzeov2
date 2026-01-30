@@ -98,12 +98,103 @@ export interface AIModel {
 
 export const AI_MODELS: AIModel[] = [
   { id: "chatgpt", name: "ChatGPT", provider: "OpenAI", color: "#10b981", costPerQuery: 0.02 },
-  { id: "claude", name: "Claude", provider: "Anthropic", color: "#f59e0b", costPerQuery: 0.02 },
-  { id: "gemini", name: "Gemini", provider: "Google", color: "#3b82f6", costPerQuery: 0.02 },
-  { id: "perplexity", name: "Perplexity", provider: "Perplexity AI", color: "#8b5cf6", costPerQuery: 0.02 },
   { id: "google_ai_overview", name: "Google AI Overview", provider: "DataForSEO", color: "#ef4444", costPerQuery: 0.003 },
+  { id: "perplexity", name: "Perplexity", provider: "Perplexity AI", color: "#8b5cf6", costPerQuery: 0.02 },
+  { id: "gemini", name: "Gemini", provider: "Google", color: "#3b82f6", costPerQuery: 0.02 },
+  { id: "claude", name: "Claude", provider: "Anthropic", color: "#f59e0b", costPerQuery: 0.02 },
   { id: "google_serp", name: "Google SERP", provider: "DataForSEO", color: "#22c55e", costPerQuery: 0.002 },
 ];
+
+// Helper to clean and analyze response text
+export function cleanAndAnalyzeResponse(
+  rawText: string,
+  brandName: string,
+  competitors: string[]
+): {
+  cleanedResponse: string;
+  brandMentions: number;
+  brandRank: number | null;
+  competitorStats: { name: string; count: number; rank: number | null }[];
+} {
+  // 1. Clean Text
+  let cleaned = rawText
+    .replace(/DataForSEO API call/gi, "")
+    .replace(/https:\/\/api\.dataforseo\.com[^\s]*/g, "") // Remove API links if any
+    // Fix: Only normalize horizontal whitespace, preserve identifiers and newlines
+    .replace(/[ \t]+/g, " ")
+    .trim();
+
+  // 2. Analyze Mentions & Ranks
+  const lowerText = cleaned.toLowerCase();
+  const lowerBrand = brandName.toLowerCase();
+
+  // Brand Mentions
+  const brandMatches = lowerText.match(new RegExp(lowerBrand, "g"));
+  const brandMentions = brandMatches ? brandMatches.length : 0;
+
+  // Rank Detection using numbered lists (1. Brand, 2. Competitor...)
+  let brandRank: number | null = null;
+  const lines = cleaned.split(/(?:\r\n|\r|\n)/);
+
+  // Competitor Stats
+  const competitorStats = competitors.map(comp => {
+    const lowerComp = comp.toLowerCase();
+    const matches = lowerText.match(new RegExp(lowerComp, "g"));
+    return { name: comp, count: matches ? matches.length : 0, rank: null as number | null };
+  });
+
+  // Scan for ranks in numbered lists
+  let currentRank: number | null = null;
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    // Check for list item start (e.g. "1.", "1)", "10.")
+    const listMatch = trimmed.match(/^(\d+)[\.\)]\s*/);
+    if (listMatch) {
+      currentRank = parseInt(listMatch[1], 10);
+    }
+    // Reset rank on headers (e.g. "### Summary") to avoid bleeding ranks into conclusions
+    else if (trimmed.startsWith('#')) {
+      currentRank = null;
+    }
+
+    if (currentRank !== null) {
+      const lowerLine = line.toLowerCase();
+
+      // Check Brand Rank
+      if (brandRank === null && lowerLine.includes(lowerBrand)) {
+        brandRank = currentRank;
+      }
+
+      // Check Competitor Ranks
+      competitorStats.forEach(stat => {
+        if (stat.rank === null && lowerLine.includes(stat.name.toLowerCase())) {
+          stat.rank = currentRank;
+        }
+      });
+    }
+  });
+
+  return { cleanedResponse: cleaned, brandMentions, brandRank, competitorStats };
+}
+
+export interface CitationMeta {
+  category: string; // e.g. ugc, editorial, affiliate
+  source_type: string; // e.g. wiki, social, review
+  authority_tier: number; // 1, 2, 3
+  relationship_type: string; // owned, competitor, neutral
+  is_affiliate?: boolean;
+}
+
+export interface CitationMeta {
+  category: string;
+  source_type: string;
+  authority_tier: number;
+  relationship_type: string;
+  is_affiliate?: boolean;
+}
 
 export type PromptCategory =
   | "custom" | "imported" | "generated" | "niche" | "super_niche"
@@ -137,6 +228,26 @@ export interface Prompt {
   location_name?: string; // Display name for the location
 }
 
+/**
+ * Brand entity extracted from LLM response using DataForSEO's brand_entities API
+ * Used to automatically discover and track brands mentioned in AI responses
+ * 
+ * Scoring: entity_points = sum of 1/position for each mention (earlier = higher score)
+ */
+export interface ExtractedBrandEntity {
+  title: string;           // Brand name from API
+  markdown?: string;       // Markdown representation if available
+  category?: string;       // Brand category if available (e.g., "sports", "tech")
+  mention_count: number;   // Number of times mentioned in response
+  position: number;        // Primary position (1-indexed, first mention)
+  positions?: number[];    // All positions where mentioned
+  entity_points: number;   // Relevance score: sum of 1/position (earlier = higher)
+  is_own_brand: boolean;   // Matches client's brand or brand_tags
+  is_competitor: boolean;  // Matches known competitor
+  sentiment?: "positive" | "neutral" | "negative";
+  sources?: string[];      // URLs associated with this brand (if available)
+}
+
 export interface ModelResult {
   model: string;
   model_name: string;
@@ -160,6 +271,7 @@ export interface ModelResult {
   authority_type?: string;
   ai_search_volume?: number;
   is_ai_overview?: boolean; // True if actual AI Overview was found, false if fallback to SERP
+  extracted_brands?: ExtractedBrandEntity[]; // Brand entities from LLM Scraper API
 }
 
 export interface AuditResult {
@@ -344,6 +456,8 @@ export function useClientDashboard() {
     loadFromStorage(STORAGE_KEYS.INCLUDE_TAVILY, true)
   );
   const [tavilyResults, setTavilyResults] = useState<Record<string, unknown>>({});
+  const [citationMeta, setCitationMeta] = useState<Record<string, CitationMeta>>({});
+
   const [auditProgress, setAuditProgress] = useState<number | null>(null);
 
   const setIncludeTavily = useCallback((include: boolean) => {
@@ -1108,9 +1222,42 @@ export function useClientDashboard() {
         });
 
         if (!fnError && data?.success) {
+          // Clean and analyze results client-side for better accuracy
+          const processedModelResults = data.data.model_results.map((mr: any) => {
+            const analysis = cleanAndAnalyzeResponse(
+              mr.raw_response || "",
+              selectedClient.brand_name,
+              selectedClient.competitors
+            );
+            return {
+              ...mr,
+              raw_response: analysis.cleanedResponse,
+              brand_mentioned: analysis.brandMentions > 0,
+              brand_mention_count: analysis.brandMentions,
+              brand_rank: analysis.brandRank || mr.brand_rank, // Prefer client-side rank if found, else keep API rank
+              competitors_found: analysis.competitorStats.filter(c => c.count > 0 || c.rank !== null),
+            };
+          });
+
+          // Recalculate summary based on processed results
+          let summaries = { sov: 0, rankSum: 0, rankCount: 0, citations: 0, cost: 0 };
+          processedModelResults.forEach((mr: any) => {
+            if (mr.brand_mentioned) summaries.sov += (100 / processedModelResults.length);
+            if (mr.brand_rank) { summaries.rankSum += mr.brand_rank; summaries.rankCount++; }
+            summaries.citations += (mr.citations?.length || 0);
+            summaries.cost += (mr.api_cost || 0);
+          });
+
           const result: AuditResult = {
             id: data.data.id || crypto.randomUUID(), prompt_id: prompt.id, prompt_text: prompt.prompt_text,
-            model_results: data.data.model_results, summary: data.data.summary, created_at: data.data.timestamp,
+            model_results: processedModelResults,
+            summary: {
+              share_of_voice: Math.round(summaries.sov),
+              average_rank: summaries.rankCount > 0 ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
+              total_citations: summaries.citations,
+              total_cost: summaries.cost
+            },
+            created_at: data.data.timestamp,
           };
           results.push(result);
           setAuditResults([...results]);
@@ -1183,9 +1330,42 @@ export function useClientDashboard() {
       });
 
       if (!fnError && data?.success) {
+        // Clean and analyze results client-side for better accuracy
+        const processedModelResults = data.data.model_results.map((mr: any) => {
+          const analysis = cleanAndAnalyzeResponse(
+            mr.raw_response || "",
+            selectedClient.brand_name,
+            selectedClient.competitors
+          );
+          return {
+            ...mr,
+            raw_response: analysis.cleanedResponse,
+            brand_mentioned: analysis.brandMentions > 0,
+            brand_mention_count: analysis.brandMentions,
+            brand_rank: analysis.brandRank || mr.brand_rank,
+            competitors_found: analysis.competitorStats.filter(c => c.count > 0 || c.rank !== null),
+          };
+        });
+
+        // Recalculate summary based on processed results
+        let summaries = { sov: 0, rankSum: 0, rankCount: 0, citations: 0, cost: 0 };
+        processedModelResults.forEach((mr: any) => {
+          if (mr.brand_mentioned) summaries.sov += (100 / processedModelResults.length);
+          if (mr.brand_rank) { summaries.rankSum += mr.brand_rank; summaries.rankCount++; }
+          summaries.citations += (mr.citations?.length || 0);
+          summaries.cost += (mr.api_cost || 0);
+        });
+
         const result: AuditResult = {
           id: data.data.id || crypto.randomUUID(), prompt_id: prompt.id, prompt_text: prompt.prompt_text,
-          model_results: data.data.model_results, summary: data.data.summary, created_at: data.data.timestamp,
+          model_results: processedModelResults,
+          summary: {
+            share_of_voice: Math.round(summaries.sov),
+            average_rank: summaries.rankCount > 0 ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
+            total_citations: summaries.citations,
+            total_cost: summaries.cost
+          },
+          created_at: data.data.timestamp,
         };
 
         let newResults: AuditResult[];
@@ -2547,6 +2727,98 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
   }, [selectedClient]);
 
   // ============================================
+  // CITATION INTELLIGENCE
+  // ============================================
+
+  const fetchCitationMeta = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('citation_intelligence')
+        .select('domain, category, source_type, authority_tier, relationship_type, is_affiliate');
+
+      if (data) {
+        const meta: Record<string, CitationMeta> = {};
+        data.forEach((row: any) => {
+          meta[row.domain] = {
+            category: row.category, // Map DB column to interface
+            source_type: row.source_type,
+            authority_tier: row.authority_tier,
+            relationship_type: row.relationship_type,
+            is_affiliate: row.is_affiliate
+          };
+        });
+        setCitationMeta(meta);
+      }
+    } catch (err) {
+      console.error("Failed to fetch citation meta:", err);
+    }
+  }, []);
+
+  const categorizeCitations = useCallback(async (domains: string[]) => {
+    if (domains.length === 0) return;
+    try {
+      // Deduplicate
+      const uniqueDomains = Array.from(new Set(domains));
+
+      const { data, error } = await supabase.functions.invoke('categorize-citations', {
+        body: {
+          domains: uniqueDomains,
+          brand_name: selectedClient?.brand_name,
+          competitors: selectedClient?.competitors
+        }
+      });
+
+      if (data?.success && data.data) {
+        const upsertData: any[] = [];
+        const newMeta = { ...citationMeta };
+
+        Object.entries(data.data).forEach(([domain, info]: [string, any]) => {
+          upsertData.push({
+            client_id: selectedClient?.id,
+            domain: domain,
+            url: `https://${domain}`,
+            citation_category: info.category,
+            source_type: info.source_type,
+            authority_tier: info.authority_tier,
+            relationship_type: info.relationship_type,
+            updated_at: new Date().toISOString()
+          });
+
+          newMeta[domain] = {
+            category: info.category,
+            source_type: info.source_type,
+            authority_tier: info.authority_tier,
+            relationship_type: info.relationship_type,
+            is_affiliate: info.source_type === 'affiliate' // simplified inference
+          };
+        });
+
+        // Store in DB
+        const { error: dbError } = await supabase
+          .from('citation_intelligence')
+          .upsert(upsertData, { onConflict: 'domain', ignoreDuplicates: false });
+
+        if (dbError) console.error("DB Upsert Error:", dbError);
+
+        setCitationMeta(newMeta);
+        return newMeta;
+      } else {
+        throw new Error(data?.error || "Edge function failed");
+      }
+    } catch (err) {
+      console.error("Categorization failed:", err);
+      toast.error("AI Categorization failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }, [selectedClient, citationMeta]);
+
+  // Load citation meta on client change
+  useEffect(() => {
+    if (selectedClient) {
+      fetchCitationMeta();
+    }
+  }, [selectedClient, fetchCitationMeta]);
+
+  // ============================================
   // RETURN
   // ============================================
 
@@ -2574,6 +2846,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,
+    citationMeta, categorizeCitations,
 
     // Constants
     INDUSTRY_PRESETS, LOCATION_CODES,

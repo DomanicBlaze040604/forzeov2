@@ -94,6 +94,13 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates (January 2026)
 
+### v2.6 - UI Refinements & Admin Tools (Jan 30, 2026)
+- **Multi-Select Audit**: Admins can now select multiple prompts and run audits in bulk with a progress bar.
+- **Improved Data Display**:
+  - **Past Responses Tab**: Now displays brand icons instead of model logos for clearer visibility tracking.
+  - **Auto-Calculated Rank**: Automatically derives brand position when summary data is missing.
+- **Brand Entity Improvements**: Enhanced logic for extracting and displaying brands from AI responses.
+
 ### v2.5 - Onboarding & UI Polish (Jan 29, 2026)
 - **Enhanced Onboarding**: 
   - **Business Classification**: New step to classify business type (Local, Online, Hybrid, etc.) for better context.
@@ -141,7 +148,7 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ### v2.1 - RBAC & Usability Improvements (Jan 14, 2026)
 - **Role-Based Access Control (RBAC)**: Enhanced admin capabilities to view all user profiles while restricting standard users to their own data.
-- **Prompt Limits**: Increased free prompt limit from 5 to **30 prompts**. Added visual usage indicators (e.g., "12/30 Prompts") in header and tabs.
+- **Prompt Limits**: Increased free prompt limit from 5 to **100 prompts**. Added visual usage indicators (e.g., "12/100 Prompts") in header and tabs.
 - **UI Refinements**: 
   - Added **Sign Out** button to sidebar footer.
   - Updated **Generate AI Insights** button to a high-visibility Red/Rose gradient.

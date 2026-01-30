@@ -198,7 +198,7 @@ $$ LANGUAGE plpgsql;
 **Roles:**
 - `admin` → Unlimited brands, prompts, can delete all
 - `agency` → Max 5 brands, 15 prompts/brand, cannot delete brands
-- `user` → Unlimited brands, 30 prompts/brand, can delete own only
+- `user` → Unlimited brands, 100 prompts/brand, can delete own only
 
 **Enforcement:** Frontend + RLS policies
 
@@ -262,6 +262,13 @@ $$ LANGUAGE plpgsql;
 - **UI:** Move to "Inactive" tab
 - **Restore:** Click → Set `is_active = true`
 - **Data Retention:** Audit results preserved
+- **UI:** Visible in "Inactive" tab
+
+#### F6.5 Multi-Select Audit (Admin)
+- **Selection:** Checkbox select multiple prompts
+- **Action:** "Run Audit" button (Admin only)
+- **Execution:** Sequential processing with progress bar
+- **Stability:** Handles batch execution gracefully
 
 ---
 

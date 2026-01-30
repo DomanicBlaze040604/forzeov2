@@ -98,6 +98,228 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
 // OpenAI API (for direct ChatGPT queries)
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
 
+// ============================================
+// BRAND EXTRACTION - STOPWORDS
+// ============================================
+// Comprehensive list of generic words to filter out during brand extraction
+// These are NOT brands - they're product features, common adjectives, etc.
+const BRAND_STOPWORDS = new Set([
+  // Generic product terms
+  "running", "features", "key", "price", "website", "foam", "air", "gel", "lightweight",
+  "one", "racing", "speed", "stability", "zoom", "adrenaline", "daily", "new", "maximum",
+  "plush", "foot-shaped", "these", "you", "meta-rocker", "neutral", "dynamic", "guiderails",
+  "cushioned", "dna", "cloudtec", "feature", "comfort", "support", "responsive", "energy",
+  "return", "technology", "performance", "design", "style", "quality", "fit", "weight",
+  // Common words and adjectives
+  "the", "and", "for", "with", "that", "this", "have", "from", "they", "will", "would",
+  "could", "should", "there", "their", "what", "when", "where", "which", "who", "how",
+  "why", "also", "more", "most", "some", "than", "then", "here", "just", "only", "even",
+  "well", "about", "after", "before", "other", "first", "last", "great", "best", "good",
+  "important", "popular", "leading", "top", "recommended", "rated", "affordable", "premium",
+  // Document/content terms
+  "overview", "summary", "conclusion", "introduction", "note", "example", "pros", "cons",
+  "description", "pricing", "options", "selection", "variety", "range", "collection",
+  // Footwear-specific generic terms (from screenshot)
+  "shoes", "shoe", "sneakers", "sneaker", "footwear", "trainers", "trainer", "boots", "boot",
+  "sandals", "sandal", "runners", "runner", "athletics", "athletic", "sports", "sport",
+  "walking", "hiking", "trail", "road", "track", "court", "gym", "cross", "training",
+  "marathon", "ultra", "neutral", "stability", "motion", "control", "cushion", "cushioning",
+  "midsole", "outsole", "insole", "upper", "mesh", "knit", "leather", "synthetic",
+  "drop", "stack", "height", "wide", "narrow", "regular", "standard", "custom",
+  "arch", "heel", "toe", "box", "lacing", "closure", "reflective", "breathable", "waterproof",
+  // Generic list markers
+  "next", "ghost", "fresh", "wave", "balance", "endorphin", "gt", "gts", "loft", "ego",
+  "rider", "pegasus", "vaporfly", "duomax", "flytefoam", "pwrrunpb", "cloudfoam",
+  "boost", "bounce", "lightstrike", "ultra", "max", "air", "react", "zoom", "zoomx"
+]);
+
+// ============================================
+// PRODUCT MODIFIER STRIPPING
+// ============================================
+// Patterns to strip from product names before brand matching
+const PRODUCT_MODIFIERS = new Set([
+  "men's", "mens", "women's", "womens", "unisex", "men", "women",
+  "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10",
+  "x", "xl", "xs", "xxl", "x1", "x2", "x3",
+  "wide", "narrow", "regular", "standard", "custom",
+  "pro", "plus", "max", "ultra", "lite", "slim", "mini", "se", "gt", "gts",
+]);
+
+/**
+ * Strip product modifiers from a name
+ * e.g. "ASICS Men's Novablast 5" → "ASICS Novablast"
+ * e.g. "New Balance Women's FuelCell Rebel v5" → "New Balance FuelCell Rebel"
+ */
+function stripProductModifiers(name: string): string {
+  if (!name) return name;
+  let s = name;
+  s = s.replace(/\(.*?\)/g, ' ');                              // Remove parentheses content
+  s = s.replace(/\b(?:men's|mens|women's|womens|unisex)\b/gi, ' '); // Gender tokens
+  s = s.replace(/\bv\d+\b/gi, ' ');                            // Version numbers like v5
+  s = s.replace(/\b(?:x|xl|xs|xxl)\b/gi, ' ');                 // Size letters
+  s = s.replace(/\b\d{1,4}(?:v\d+)?\b/gi, ' ');                // Numbers and 880v15 style
+  s = s.replace(/[-_–:]+/g, ' ');                              // Dashes/underscores
+  s = s.replace(/\s+/g, ' ').trim();                           // Normalize whitespace
+  return s;
+}
+
+// ============================================
+// BRAND NORMALIZATION - KNOWN PARENT BRANDS
+// ============================================
+// Maps product names to their parent brand
+// e.g. "Nike Air Max" → "Nike", "adidas Ultraboost" → "Adidas"
+const KNOWN_BRANDS: Record<string, string> = {
+  // Footwear brands (with aliases)
+  "nike": "Nike",
+  "adidas": "Adidas",
+  "asics": "ASICS",
+  "hoka": "Hoka",
+  "hoka one one": "Hoka",
+  "brooks": "Brooks",
+  "saucony": "Saucony",
+  "new balance": "New Balance",
+  "puma": "Puma",
+  "reebok": "Reebok",
+  "under armour": "Under Armour",
+  "on": "On",
+  "on running": "On",
+  "on cloud": "On",
+  "on cloudsurfer": "On",
+  "mizuno": "Mizuno",
+  "salomon": "Salomon",
+  "altra": "Altra",
+  "newton": "Newton",
+  "topo": "Topo Athletic",
+  "topo athletic": "Topo Athletic",
+  "la sportiva": "La Sportiva",
+  "merrell": "Merrell",
+  "skechers": "Skechers",
+  "converse": "Converse",
+  "vans": "Vans",
+  "fila": "Fila",
+  "jordan": "Jordan",
+  "air jordan": "Jordan",
+  "karhu": "Karhu",
+  "diadora": "Diadora",
+  "lululemon": "Lululemon",
+  "allbirds": "Allbirds",
+  // Tech brands
+  "apple": "Apple",
+  "google": "Google",
+  "microsoft": "Microsoft",
+  "amazon": "Amazon",
+  "meta": "Meta",
+  "facebook": "Meta",
+  "samsung": "Samsung",
+  "huawei": "Huawei",
+  "sony": "Sony",
+  "lg": "LG",
+  "dell": "Dell",
+  "hp": "HP",
+  "lenovo": "Lenovo",
+  // Marketing/Software brands
+  "hubspot": "HubSpot",
+  "salesforce": "Salesforce",
+  "mailchimp": "Mailchimp",
+  "semrush": "SEMrush",
+  "ahrefs": "Ahrefs",
+  "moz": "Moz",
+  "hootsuite": "Hootsuite",
+  "buffer": "Buffer",
+  "sprout": "Sprout Social",
+  "sprout social": "Sprout Social",
+  "klaviyo": "Klaviyo",
+  "brevo": "Brevo",
+  "sendinblue": "Brevo",
+  "activecampaign": "ActiveCampaign",
+  "marketo": "Marketo",
+  "pardot": "Pardot",
+  "zoho": "Zoho",
+  "zendesk": "Zendesk",
+  // Dating apps
+  "bumble": "Bumble",
+  "tinder": "Tinder",
+  "hinge": "Hinge",
+  "match": "Match",
+  "eharmony": "eHarmony",
+  "okcupid": "OkCupid",
+  "happn": "Happn",
+  "badoo": "Badoo",
+  // Retailers
+  "rei": "REI",
+  "dick's": "Dick's Sporting Goods",
+  "dicks": "Dick's Sporting Goods",
+  "foot locker": "Foot Locker",
+  "finish line": "Finish Line",
+  "zappos": "Zappos",
+  "famous footwear": "Famous Footwear",
+};
+
+/**
+ * Normalize a product/entity name to its parent brand
+ * Uses multi-step approach:
+ * 1. Strip product modifiers (Men's, Women's, v5, 880v15, etc.)
+ * 2. Check if name starts with known brand
+ * 3. Check if ANY word matches a known brand
+ * 
+ * e.g. "ASICS Men's Novablast 5" → "ASICS"
+ * e.g. "New Balance Women's FuelCell Rebel v5" → "New Balance"
+ * e.g. "Nike Alphafly 3" → "Nike"
+ */
+function normalizeToParentBrand(
+  entityName: string,
+  knownBrandsList: string[] = []
+): { normalized: string; isNormalized: boolean } {
+  if (!entityName) return { normalized: entityName, isNormalized: false };
+
+  // Step 1: Strip product modifiers first
+  const stripped = stripProductModifiers(entityName);
+  const strippedLower = stripped.toLowerCase().trim();
+  const originalLower = entityName.toLowerCase().trim();
+
+  // Step 2: Check if starts with known brand (check both original and stripped)
+  for (const [brandKey, brandName] of Object.entries(KNOWN_BRANDS)) {
+    if (originalLower.startsWith(brandKey + " ") || originalLower === brandKey) {
+      return { normalized: brandName, isNormalized: true };
+    }
+    if (strippedLower.startsWith(brandKey + " ") || strippedLower === brandKey) {
+      return { normalized: brandName, isNormalized: true };
+    }
+  }
+
+  // Step 3: Check dynamic brands (client's brand/competitors)
+  for (const brand of knownBrandsList) {
+    if (!brand) continue;
+    const brandLower = brand.toLowerCase();
+    if (originalLower.startsWith(brandLower + " ") || originalLower === brandLower) {
+      return { normalized: brand, isNormalized: true };
+    }
+    if (strippedLower.startsWith(brandLower + " ") || strippedLower === brandLower) {
+      return { normalized: brand, isNormalized: true };
+    }
+  }
+
+  // Step 4: Check if ANY word matches a known brand (handles "Men's Nike Pegasus")
+  const words = originalLower.split(/\s+/);
+  for (const word of words) {
+    if (KNOWN_BRANDS[word]) {
+      return { normalized: KNOWN_BRANDS[word], isNormalized: true };
+    }
+    for (const brand of knownBrandsList) {
+      if (brand && word === brand.toLowerCase()) {
+        return { normalized: brand, isNormalized: true };
+      }
+    }
+  }
+
+  // Step 5: If stripped version is cleaner, return it; otherwise return original
+  if (stripped !== entityName && stripped.length > 0) {
+    return { normalized: stripped, isNormalized: false };
+  }
+
+  return { normalized: entityName, isNormalized: false };
+}
+
 // Anthropic API (for direct Claude queries)
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
 
@@ -162,6 +384,27 @@ interface CompetitorMention {
   sentiment: "positive" | "neutral" | "negative";
 }
 
+/**
+ * Brand entity extracted from LLM response using DataForSEO's brand_entities API
+ * Used to automatically discover and track brands mentioned in AI responses
+ * 
+ * Scoring: entity_points = sum of 1/position for each mention (earlier = higher score)
+ * See: https://dataforseo.com/update/brand-entity-extraction-in-chatgpt-llm-scraper-api
+ */
+interface ExtractedBrandEntity {
+  title: string;           // Brand name from API
+  markdown?: string;       // Markdown representation if available
+  category?: string;       // Brand category if available (e.g., "sports", "tech")
+  mention_count: number;   // Number of times mentioned in response
+  position: number;        // Primary position (1-indexed, first mention)
+  positions?: number[];    // All positions where mentioned
+  entity_points: number;   // Relevance score: sum of 1/position (earlier = higher)
+  is_own_brand: boolean;   // Matches client's brand or brand_tags
+  is_competitor: boolean;  // Matches known competitor
+  sentiment?: "positive" | "neutral" | "negative";
+  sources?: string[];      // URLs associated with this brand (if available)
+}
+
 interface ModelResult {
   model: string;
   model_name: string;
@@ -188,6 +431,7 @@ interface ModelResult {
   response_time_ms?: number;
   potential_competitors?: string[];
   is_ai_overview?: boolean; // Flag to indicate if actual AI Overview was returned vs fallback SERP
+  extracted_brands?: ExtractedBrandEntity[]; // Brands extracted via DataForSEO LLM Scraper API
 }
 
 interface AuditRequest {
@@ -1297,6 +1541,20 @@ Important: Please provide specific recommendations with actual business names, w
               text?: string;
             }>;
           }>;
+          // Brand entities extracted by DataForSEO (available in recent API updates)
+          brand_entities?: Array<{
+            title?: string;
+            name?: string;
+            markdown?: string;
+            category?: string;
+            urls?: string[];
+            url?: string;
+            position?: number;
+          }>;
+          // Fan-out queries suggested by the LLM
+          fan_out_queries?: Array<{
+            query?: string;
+          }>;
         }>;
         cost?: number;
         status_code?: number;
@@ -1338,7 +1596,12 @@ Important: Please provide specific recommendations with actual business names, w
 
     const totalTokens = (taskResult?.input_tokens || 0) + (taskResult?.output_tokens || 0);
 
+    // Extract brand_entities from API response (available in recent DataForSEO updates)
+    const apiBrandEntities = taskResult?.brand_entities || [];
+    const apiFanOutQueries = taskResult?.fan_out_queries || [];
+
     console.log(`[LIVE LLM/${model}] Got ${responseText.length} chars, ${totalTokens} tokens, ${latency}ms, cost: $${cost}`);
+    console.log(`[LIVE LLM/${model}] API brand_entities: ${apiBrandEntities.length}, fan_out_queries: ${apiFanOutQueries.length}`);
 
     return {
       success: true,
@@ -1346,6 +1609,8 @@ Important: Please provide specific recommendations with actual business names, w
       tokens: totalTokens,
       cost: totalCost,
       latency_ms: latency,
+      brand_entities: apiBrandEntities,      // Brand entities from DataForSEO API
+      fan_out_queries: apiFanOutQueries,     // Suggested fan-out queries from API
     };
   }
 
@@ -1360,6 +1625,494 @@ Important: Please provide specific recommendations with actual business names, w
     latency_ms: latency,
     error: `DataForSEO LIVE failed after ${maxRetries} attempts: ${lastError}`
   };
+}
+
+/**
+ * ChatGPT LLM Scraper API - Real-time inference with brand entity extraction
+ * Uses DataForSEO's advanced endpoint that returns brand_entities
+ * 
+ * Endpoint: /ai_optimization/chat_gpt/llm_scraper/live/advanced
+ * 
+ * This is ChatGPT-specific; other models continue to use llm_responses/live
+ * See: https://dataforseo.com/update/brand-entity-extraction-in-chatgpt-llm-scraper-api
+ */
+async function getChatGPTWithBrandEntities(
+  prompt: string,
+  brandName: string,
+  brandTags: string[] = [],
+  competitors: string[] = [],
+  locationCode: number = 2840
+): Promise<{
+  success: boolean;
+  response: string;
+  tokens: number;
+  cost: number;
+  latency_ms: number;
+  extracted_brands: ExtractedBrandEntity[];
+  error?: string;
+}> {
+  console.log(`[ChatGPT LLM Scraper] Querying with brand entity extraction...`);
+  const startTime = Date.now();
+
+  // Enhanced prompt to get specific recommendations with sources
+  const enhancedPrompt = `${prompt}
+
+Important: Please provide specific recommendations with actual business names, websites, or sources. Include URLs where possible. Do not ask clarifying questions - provide direct answers with specific options.`;
+
+  const payload = {
+    language_code: "en",
+    location_code: locationCode,
+    keyword: enhancedPrompt,
+  };
+
+  // Retry logic with exponential backoff
+  const maxRetries = 3;
+  let lastError = "";
+  let totalCost = 0;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delay = Math.pow(2, attempt) * 1000;
+      console.log(`[ChatGPT LLM Scraper] Retry ${attempt + 1}/${maxRetries}, waiting ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    const result = await callDataForSEO("/ai_optimization/chat_gpt/llm_scraper/live/advanced", [payload]);
+    const latency = Date.now() - startTime;
+
+    if (result.error) {
+      lastError = result.error;
+      console.error(`[ChatGPT LLM Scraper] Attempt ${attempt + 1} error: ${result.error}`);
+
+      // Don't retry on auth/credit errors
+      if (result.status_code === 401 || result.status_code === 402) {
+        return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: latency, extracted_brands: [], error: result.error };
+      }
+      continue;
+    }
+
+    const data = result.data as {
+      tasks?: Array<{
+        result?: Array<{
+          type?: string;
+          markdown?: string;
+          brand_entities?: Array<{
+            title?: string;
+            markdown?: string;
+          }>;
+          items?: Array<{
+            type?: string;
+            markdown?: string;
+            brand_entities?: Array<{
+              title?: string;
+              markdown?: string;
+            }>;
+          }>;
+        }>;
+        cost?: number;
+        status_code?: number;
+        status_message?: string;
+      }>
+    };
+
+    const task = data?.tasks?.[0];
+    const cost = task?.cost || 0;
+    totalCost += cost;
+
+    // Check task status
+    if (task?.status_code && task.status_code !== 20000) {
+      lastError = task.status_message || `Task failed with code ${task.status_code}`;
+      console.error(`[ChatGPT LLM Scraper] Task error: ${lastError}`);
+      continue;
+    }
+
+    const resultItems = task?.result || [];
+
+    // Extract markdown (response text) and brand_entities
+    let combinedMarkdown = "";
+    const allBrandEntities: Array<{ title: string; markdown?: string }> = [];
+
+    for (const item of resultItems) {
+      // Get markdown from various locations
+      if (item.markdown) {
+        combinedMarkdown += item.markdown + "\n";
+      }
+
+      // Get brand_entities from item level
+      if (item.brand_entities && Array.isArray(item.brand_entities)) {
+        for (const entity of item.brand_entities) {
+          if (entity.title) {
+            allBrandEntities.push({
+              title: entity.title.trim(),
+              markdown: entity.markdown
+            });
+          }
+        }
+      }
+
+      // Also check nested items
+      if (item.items && Array.isArray(item.items)) {
+        for (const subItem of item.items) {
+          if (subItem.markdown) {
+            combinedMarkdown += subItem.markdown + "\n";
+          }
+          if (subItem.brand_entities && Array.isArray(subItem.brand_entities)) {
+            for (const entity of subItem.brand_entities) {
+              if (entity.title) {
+                allBrandEntities.push({
+                  title: entity.title.trim(),
+                  markdown: entity.markdown
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    combinedMarkdown = combinedMarkdown.trim();
+
+    if (!combinedMarkdown) {
+      lastError = "No response text returned from LLM Scraper";
+      console.error(`[ChatGPT LLM Scraper] Attempt ${attempt + 1}: No response text found`);
+      continue;
+    }
+
+    console.log(`[ChatGPT LLM Scraper] Got ${combinedMarkdown.length} chars, ${allBrandEntities.length} brand entities from API`);
+
+    // Deduplicate and FILTER brand entities by title using BRAND_STOPWORDS
+    const uniqueBrands = new Map<string, { title: string; markdown?: string }>();
+    for (const entity of allBrandEntities) {
+      const key = entity.title.toLowerCase().trim();
+
+      // Skip stopwords (generic terms like "running", "features", "price")
+      if (BRAND_STOPWORDS.has(key)) {
+        console.log(`[ChatGPT LLM Scraper] Filtering out stopword: "${entity.title}"`);
+        continue;
+      }
+
+      // Skip very short titles or numeric-only
+      if (key.length < 3 || /^\d+$/.test(key)) continue;
+
+      // Accept if it's a known brand (own brand or competitor)
+      const allKnownBrands = [brandName, ...brandTags, ...competitors].filter(Boolean).map(t => t.toLowerCase());
+      const isKnown = allKnownBrands.some(term => key.includes(term) || term.includes(key));
+
+      // For unknown brands, accept only if it looks like a proper noun (Title Case)
+      if (!isKnown) {
+        const words = entity.title.split(/\s+/);
+        const isTitleCase = words.length >= 1 && words.every(w => w.length > 0 && /^[A-Z]/.test(w));
+        if (!isTitleCase) {
+          console.log(`[ChatGPT LLM Scraper] Filtering out non-Title-Case: "${entity.title}"`);
+          continue;
+        }
+      }
+
+      if (!uniqueBrands.has(key)) {
+        uniqueBrands.set(key, entity);
+      }
+    }
+
+    console.log(`[ChatGPT LLM Scraper] After filtering: ${uniqueBrands.size} valid brand entities`);
+
+    // If API didn't return any valid brand_entities after filtering, skip fallback (too risky for false positives)
+    if (uniqueBrands.size === 0 && allBrandEntities.length > 0) {
+      console.log(`[ChatGPT LLM Scraper] All ${allBrandEntities.length} brand_entities were filtered out as stopwords/generic`);
+      // Don't do fallback extraction - it's too noisy. Return empty brands.
+    }
+
+    // Build ExtractedBrandEntity array with mention counts and classification
+    const lowerMarkdown = combinedMarkdown.toLowerCase();
+    const allTerms = [brandName, ...brandTags].filter(Boolean).map(t => t.toLowerCase());
+    const competitorTerms = competitors.filter(Boolean).map(c => c.toLowerCase());
+
+    const extractedBrands: ExtractedBrandEntity[] = [];
+    let position = 1;
+
+    for (const [key, entity] of uniqueBrands) {
+      // Count mentions and find all positions using word boundary regex
+      const pattern = new RegExp('\\b' + entity.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+
+      // Find all match positions
+      const positions: number[] = [];
+      let matchResult;
+      while ((matchResult = pattern.exec(combinedMarkdown)) !== null) {
+        const wordsBeforeMatch = combinedMarkdown.slice(0, matchResult.index).split(/\s+/).length;
+        positions.push(wordsBeforeMatch);
+      }
+
+      const mentionCount = positions.length || 1;
+
+      // Compute entity_points: sum of 1/position for each mention
+      let entityPoints = 0;
+      for (const pos of positions) {
+        entityPoints += pos > 0 ? 1 / pos : 1;
+      }
+      if (positions.length === 0) {
+        entityPoints = 1; // Default if no positions found
+      }
+
+      // Classify the brand
+      const isOwnBrand = allTerms.some(term => key.includes(term) || term.includes(key));
+      const isCompetitor = competitorTerms.some(term => key.includes(term) || term.includes(key));
+
+      // Extract context for sentiment analysis
+      let sentiment: "positive" | "neutral" | "negative" = "neutral";
+      const firstMentionIdx = lowerMarkdown.indexOf(key);
+      if (firstMentionIdx !== -1) {
+        const contextStart = Math.max(0, firstMentionIdx - 50);
+        const contextEnd = Math.min(lowerMarkdown.length, firstMentionIdx + key.length + 50);
+        const context = lowerMarkdown.slice(contextStart, contextEnd);
+        sentiment = analyzeSentiment(context);
+      }
+
+      extractedBrands.push({
+        title: entity.title,
+        markdown: entity.markdown,
+        mention_count: mentionCount,
+        position: positions[0] || position++,  // Primary position
+        positions: positions,                   // All positions
+        entity_points: Math.round(entityPoints * 10000) / 10000,
+        is_own_brand: isOwnBrand,
+        is_competitor: isCompetitor,
+        sentiment
+      });
+    }
+
+    // Sort by mention count (descending) then alphabetically
+    extractedBrands.sort((a, b) => {
+      if (b.mention_count !== a.mention_count) return b.mention_count - a.mention_count;
+      return a.title.localeCompare(b.title);
+    });
+
+    // Re-assign positions after sorting
+    extractedBrands.forEach((brand, idx) => {
+      brand.position = idx + 1;
+    });
+
+    console.log(`[ChatGPT LLM Scraper] Final: ${extractedBrands.length} brands, own=${extractedBrands.filter(b => b.is_own_brand).length}, competitors=${extractedBrands.filter(b => b.is_competitor).length}, others=${extractedBrands.filter(b => !b.is_own_brand && !b.is_competitor).length}`);
+
+    return {
+      success: true,
+      response: combinedMarkdown,
+      tokens: 0, // LLM Scraper doesn't return token counts
+      cost: totalCost,
+      latency_ms: latency,
+      extracted_brands: extractedBrands
+    };
+  }
+
+  // All retries failed
+  const latency = Date.now() - startTime;
+  console.error(`[ChatGPT LLM Scraper] All ${maxRetries} attempts failed: ${lastError}`);
+  return {
+    success: false,
+    response: "",
+    tokens: 0,
+    cost: totalCost,
+    latency_ms: latency,
+    extracted_brands: [],
+    error: `ChatGPT LLM Scraper failed after ${maxRetries} attempts: ${lastError}`
+  };
+}
+
+
+/**
+ * Extract brand entities from any LLM response text
+ * DISCOVERY-BASED: Finds ALL potential brands in text, not just known ones
+ * Uses Title Case heuristics to identify brand names
+ */
+function extractBrandsFromResponse(
+  text: string,
+  brandName: string,
+  brandTags: string[] = [],
+  competitors: string[] = []
+): ExtractedBrandEntity[] {
+  if (!text || text.length < 10) return [];
+
+  console.log(`[extractBrandsFromResponse] DISCOVERY mode - scanning ${text.length} chars for all brands...`);
+
+  const lowerText = text.toLowerCase();
+  const uniqueBrands = new Map<string, { title: string; firstIndex: number; count: number; positions: number[] }>();
+
+  // Build list of known brands for classification (not filtering)
+  const knownBrandsList = [...new Set([brandName, ...brandTags, ...competitors].filter(Boolean))];
+  const allTerms = [brandName, ...brandTags].filter(Boolean).map(t => t.toLowerCase());
+  const competitorTerms = competitors.filter(Boolean).map(c => c.toLowerCase());
+
+  // DISCOVERY STEP 1: Find ALL Title Case phrases in text
+  // Pattern matches: "Nike", "New Balance", "Under Armour", "ASICS Men's Novablast 5", etc.
+  const titleCasePattern = /\b([A-Z][a-z0-9'&-]*(?:\s+[A-Z][a-z0-9'&-]*){0,4})\b/g;
+
+  let match;
+  while ((match = titleCasePattern.exec(text)) !== null) {
+    const candidate = match[1].trim();
+    if (!candidate || candidate.length < 2) continue;
+
+    // Strip product modifiers to get clean brand name
+    const stripped = stripProductModifiers(candidate);
+    if (!stripped || stripped.length < 2) continue;
+
+    // Normalize to parent brand if possible
+    const { normalized } = normalizeToParentBrand(stripped, knownBrandsList);
+
+    // Skip if it's a stopword after normalization
+    const normalizedLower = normalized.toLowerCase();
+    if (BRAND_STOPWORDS.has(normalizedLower)) continue;
+
+    // Skip single-letter or pure number results
+    if (normalized.length < 2 || /^\d+$/.test(normalized)) continue;
+
+    // Skip common non-brand words
+    if (/^(the|and|for|with|from|this|that|these|those|are|was|were|been|have|has|had|will|would|could|should|here|there|where|when|what|why|how|who|which|best|great|good|new|top|key|main|first|last|next|most|some|any|all|each|every|both|few|many|much|free|easy|hard|fast|slow|high|low|big|small)$/i.test(normalized)) continue;
+
+    // Calculate word position
+    const wordPosition = text.slice(0, match.index).split(/\s+/).length;
+
+    // Add or update in map
+    if (uniqueBrands.has(normalizedLower)) {
+      const existing = uniqueBrands.get(normalizedLower)!;
+      existing.count++;
+      existing.positions.push(wordPosition);
+    } else {
+      uniqueBrands.set(normalizedLower, {
+        title: normalized,
+        firstIndex: match.index,
+        count: 1,
+        positions: [wordPosition]
+      });
+    }
+  }
+
+  // DISCOVERY STEP 2: Also check for known brands explicitly
+  for (const brand of knownBrandsList) {
+    if (!brand || brand.length < 2) continue;
+    const brandLower = brand.toLowerCase();
+
+    if (!uniqueBrands.has(brandLower)) {
+      const escapedBrand = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp('\\b' + escapedBrand + '\\b', 'gi');
+      const brandMatch = pattern.exec(text);
+
+      if (brandMatch) {
+        let count = 0;
+        const positions: number[] = [];
+        pattern.lastIndex = 0;
+        let m;
+        while ((m = pattern.exec(text)) !== null) {
+          count++;
+          positions.push(text.slice(0, m.index).split(/\s+/).length);
+        }
+
+        uniqueBrands.set(brandLower, {
+          title: brand,
+          firstIndex: brandMatch.index,
+          count: count,
+          positions: positions
+        });
+      }
+    }
+  }
+
+  console.log(`[extractBrandsFromResponse] Discovered ${uniqueBrands.size} unique brands from text`);
+
+  // Build ExtractedBrandEntity array
+  const extractedBrands: ExtractedBrandEntity[] = [];
+
+  for (const [key, data] of uniqueBrands) {
+    data.positions.sort((a, b) => a - b);
+
+    let entityPoints = 0;
+    for (const pos of data.positions) {
+      entityPoints += pos > 0 ? 1 / pos : 1;
+    }
+    if (data.positions.length === 0) entityPoints = 1;
+
+    const isOwnBrand = allTerms.some(term => key.includes(term) || term.includes(key));
+    const isCompetitor = competitorTerms.some(term => key.includes(term) || term.includes(key));
+
+    let sentiment: "positive" | "neutral" | "negative" = "neutral";
+    if (data.firstIndex !== -1) {
+      const contextStart = Math.max(0, data.firstIndex - 50);
+      const contextEnd = Math.min(lowerText.length, data.firstIndex + key.length + 50);
+      const context = lowerText.slice(contextStart, contextEnd);
+      sentiment = analyzeSentiment(context);
+    }
+
+    extractedBrands.push({
+      title: data.title,
+      mention_count: data.count,
+      position: data.positions[0] || 0,
+      positions: data.positions,
+      entity_points: Math.round(entityPoints * 10000) / 10000,
+      is_own_brand: isOwnBrand,
+      is_competitor: isCompetitor,
+      sentiment
+    });
+  }
+
+  extractedBrands.sort((a, b) => {
+    if (b.entity_points !== a.entity_points) return b.entity_points - a.entity_points;
+    return b.mention_count - a.mention_count;
+  });
+
+  console.log(`[extractBrandsFromResponse] Final: ${extractedBrands.length} brands - own=${extractedBrands.filter(b => b.is_own_brand).length}, competitors=${extractedBrands.filter(b => b.is_competitor).length}, discovered=${extractedBrands.filter(b => !b.is_own_brand && !b.is_competitor).length}`);
+
+  return extractedBrands;
+}
+
+/**
+ * Extract brand name from a URL/domain
+ * e.g. "www.nike.com" -> "Nike"
+ * e.g. "www.on-running.com" -> "On Running"
+ */
+function extractBrandFromUrl(
+  url: string,
+  knownBrands: string[] = []
+): string | null {
+  try {
+    if (!url) return null;
+
+    // Extract hostname
+    let hostname = url;
+    if (url.startsWith('http')) {
+      const urlObj = new URL(url);
+      hostname = urlObj.hostname;
+    }
+
+    // Remove www.
+    hostname = hostname.replace(/^www\./, '');
+
+    // Get the main part (SLD)
+    const parts = hostname.split('.');
+    if (parts.length < 2) return null;
+
+    const domainName = parts[0].toLowerCase(); // "nike", "on-running", "mizunousa"
+
+    // 1. Check if it matches any known brand
+    for (const brand of knownBrands) {
+      if (!brand) continue;
+      const brandLower = brand.toLowerCase();
+      // Check exact match or inclusion
+      if (domainName.includes(brandLower) || brandLower.includes(domainName.replace(/-/g, ''))) {
+        return brand;
+      }
+    }
+
+    // 2. If no known match, heuristic extraction
+    const cleanName = domainName.replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    if (cleanName.length < 3) return null;
+    if (BRAND_STOPWORDS.has(cleanName)) return null;
+
+    // Capitalize Words
+    return cleanName.split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+
+  } catch (e) {
+    return null;
+  }
 }
 
 /**
@@ -1443,6 +2196,7 @@ async function getLiveLLMWithValidation(
     brand_mentioned: boolean;
     brand_mention_count: number;
     citations: Citation[];
+    extracted_brands?: ExtractedBrandEntity[]; // Brand entities from LLM Scraper API
   }>;
   totalCost: number;
   agreement: "high" | "medium" | "low";
@@ -1462,6 +2216,7 @@ async function getLiveLLMWithValidation(
     brand_mentioned: boolean;
     brand_mention_count: number;
     citations: Citation[];
+    extracted_brands?: ExtractedBrandEntity[];
   }>();
 
   let totalCost = 0;
@@ -1476,7 +2231,181 @@ async function getLiveLLMWithValidation(
       await new Promise(resolve => setTimeout(resolve, 2500));
     }
 
-    const result = await getLiveLLMResponse(prompt, model);
+    // For ChatGPT, use the new LLM Scraper API with brand entity extraction
+    // For other models, continue using the existing llm_responses/live endpoint
+    let result: { success: boolean; response: string; tokens: number; cost: number; latency_ms: number; error?: string; extracted_brands?: ExtractedBrandEntity[] };
+
+    if (model === "chatgpt") {
+      // Use ChatGPT LLM Scraper API for brand entity extraction
+      const scraperResult = await getChatGPTWithBrandEntities(prompt, brandName, brandTags, competitors);
+      result = {
+        success: scraperResult.success,
+        response: scraperResult.response,
+        tokens: scraperResult.tokens,
+        cost: scraperResult.cost,
+        latency_ms: scraperResult.latency_ms,
+        error: scraperResult.error,
+        extracted_brands: scraperResult.extracted_brands
+      };
+    } else {
+      // Use standard LLM Response API for other models (Gemini, Claude, Perplexity)
+      const llmResult = await getLiveLLMResponse(prompt, model);
+
+      // MERGE BRANDS FROM MULTIPLE SOURCES
+      // Source 1: API brand_entities (filtered)
+      // Source 2: Text parsing for known brands (ALWAYS RUN)
+      // Source 3: Domain extraction from URLs (ALWAYS RUN)
+
+      const uniqueBrandsMap = new Map<string, ExtractedBrandEntity>();
+
+      // --- SOURCE 1: API brand_entities ---
+      if (llmResult.success && llmResult.brand_entities && llmResult.brand_entities.length > 0) {
+        console.log(`[LIVE LLM/${model}] Processing ${llmResult.brand_entities.length} brand_entities from API`);
+
+        const filteredEntities = llmResult.brand_entities.filter(be => {
+          const title = be.title || be.name || be.markdown || "";
+          const key = title.toLowerCase().trim();
+
+          if (BRAND_STOPWORDS.has(key)) return false;
+          if (key.length < 3) return false;
+          if (/^\d+$/.test(key)) return false;
+
+          const allTerms = [brandName, ...brandTags, ...competitors].filter(Boolean).map(t => t.toLowerCase());
+          if (allTerms.some(term => key.includes(term) || term.includes(key))) return true;
+
+          const words = title.split(/\s+/);
+          return words.length >= 1 && words.every(w => w.length > 0 && /^[A-Z]/.test(w));
+        });
+
+        // Build list of known brands for normalization
+        const allKnownBrandsForNorm = [brandName, ...brandTags, ...competitors].filter(Boolean);
+
+        filteredEntities.forEach((be, idx) => {
+          const rawTitle = be.title || be.name || be.markdown || "";
+
+          // NORMALIZE: "Nike Run Defy" → "Nike", "adidas Adizero" → "Adidas"
+          const { normalized: title, isNormalized } = normalizeToParentBrand(rawTitle, allKnownBrandsForNorm);
+
+          const key = title.toLowerCase();
+          const allTerms = [brandName, ...brandTags].filter(Boolean).map(t => t.toLowerCase());
+          const competitorTerms = competitors.filter(Boolean).map(c => c.toLowerCase());
+          const pos = be.position || (idx + 1);
+
+          // Aggregate if already exists
+          if (uniqueBrandsMap.has(key)) {
+            const existing = uniqueBrandsMap.get(key)!;
+            existing.mention_count += 1;
+            existing.positions = [...(existing.positions || []), pos].sort((a, b) => a - b);
+            existing.position = existing.positions[0];
+            // Recalculate entity_points
+            let points = 0;
+            existing.positions.forEach(p => points += p > 0 ? 1 / p : 1);
+            existing.entity_points = Math.round(points * 10000) / 10000;
+          } else {
+            uniqueBrandsMap.set(key, {
+              title: title,
+              markdown: isNormalized ? undefined : be.markdown,
+              category: be.category,
+              mention_count: 1,
+              position: pos,
+              positions: [pos],
+              entity_points: 1 / pos,
+              is_own_brand: allTerms.some(term => key.includes(term) || term.includes(key)),
+              is_competitor: competitorTerms.some(term => key.includes(term) || term.includes(key)),
+              sources: be.urls || (be.url ? [be.url] : [])
+            });
+          }
+        });
+      }
+
+      // --- SOURCE 2: Text Parsing (Always run to find known brands API might miss) ---
+      if (llmResult.success && llmResult.response) {
+        const textBrands = extractBrandsFromResponse(
+          llmResult.response,
+          brandName,
+          brandTags,
+          competitors
+        );
+
+        const allKnownBrandsForNorm2 = [brandName, ...brandTags, ...competitors].filter(Boolean);
+
+        textBrands.forEach(tb => {
+          // Normalize product names to parent brand
+          const { normalized: normalizedTitle } = normalizeToParentBrand(tb.title, allKnownBrandsForNorm2);
+          const key = normalizedTitle.toLowerCase();
+
+          if (!uniqueBrandsMap.has(key)) {
+            uniqueBrandsMap.set(key, {
+              ...tb,
+              title: normalizedTitle
+            });
+          } else {
+            // Update existing entry with better count/positions if available
+            const existing = uniqueBrandsMap.get(key)!;
+            existing.mention_count = Math.max(existing.mention_count, tb.mention_count);
+            existing.positions = [...(existing.positions || []), ...(tb.positions || [])].sort((a, b) => a - b);
+            existing.position = existing.positions[0] || existing.position;
+            // Recalculate points
+            let points = 0;
+            existing.positions.forEach(p => points += p > 0 ? 1 / p : 1);
+            existing.entity_points = Math.round(points * 10000) / 10000;
+          }
+        });
+
+        // --- SOURCE 3: Domain Extraction ---
+        // Extract URLs from text and map to brands
+        const urls = extractUrlsFromText(llmResult.response);
+        const allKnownBrands = [brandName, ...brandTags, ...competitors].filter(Boolean);
+
+        urls.forEach(u => {
+          const extractedName = extractBrandFromUrl(u.domain, allKnownBrands);
+          if (extractedName) {
+            const key = extractedName.toLowerCase();
+            if (!uniqueBrandsMap.has(key)) {
+              // Determine category
+              const isOwn = [brandName, ...brandTags].some(t => t.toLowerCase() === key);
+              const isComp = competitors.some(c => c.toLowerCase() === key);
+
+              uniqueBrandsMap.set(key, {
+                title: extractedName,
+                mention_count: 1,
+                position: 1, // High priority if cited
+                positions: [1],
+                entity_points: 1.5, // Bonus for citation
+                is_own_brand: isOwn,
+                is_competitor: isComp,
+                sources: [u.url]
+              });
+            } else {
+              const existing = uniqueBrandsMap.get(key)!;
+              if (!existing.sources) existing.sources = [];
+              if (!existing.sources.includes(u.url)) existing.sources.push(u.url);
+            }
+          }
+        });
+      }
+
+      const extractedBrands = Array.from(uniqueBrandsMap.values());
+
+      // Final sort
+      extractedBrands.sort((a, b) => {
+        if (b.entity_points !== a.entity_points) return b.entity_points - a.entity_points;
+        return b.mention_count - a.mention_count;
+      });
+
+      console.log(`[LIVE LLM/${model}] Final extracted brands: ${extractedBrands.length}`);
+
+      result = {
+        success: llmResult.success,
+        response: llmResult.response,
+        tokens: llmResult.tokens,
+        cost: llmResult.cost,
+        latency_ms: llmResult.latency_ms,
+        error: llmResult.error,
+        extracted_brands: extractedBrands  // Brand entities from API or text extraction fallback
+      };
+    }
+
     totalCost += result.cost;
 
     if (result.success) {
@@ -1520,6 +2449,9 @@ async function getLiveLLMWithValidation(
       }
 
       console.log(`[LIVE LLM/${model}] Total merged citations: ${extractedCitations.length}`);
+      if (result.extracted_brands) {
+        console.log(`[LIVE LLM/${model}] Extracted brands: ${result.extracted_brands.length}`);
+      }
 
       results.set(model, {
         response: result.response,
@@ -1529,6 +2461,7 @@ async function getLiveLLMWithValidation(
         brand_mentioned: brandData.mentioned,
         brand_mention_count: brandData.count,
         citations: extractedCitations,
+        extracted_brands: result.extracted_brands,
       });
 
       responses.push(result.response);
@@ -1912,6 +2845,7 @@ function createModelResult(
     ai_search_volume?: number;
     response_time_ms?: number;
     is_ai_overview?: boolean;
+    extracted_brands?: ExtractedBrandEntity[];
   }
 ): ModelResult {
   const config = AI_MODELS[modelId] || {
@@ -1989,7 +2923,8 @@ function createModelResult(
     ai_search_volume: extraData?.ai_search_volume,
     response_time_ms: extraData?.response_time_ms,
     potential_competitors: potentialCompetitors,
-    is_ai_overview: extraData?.is_ai_overview
+    is_ai_overview: extraData?.is_ai_overview,
+    extracted_brands: extraData?.extracted_brands
   };
 }
 
@@ -2184,6 +3119,7 @@ serve(async (req: Request) => {
                   brand_mention_count: modelData.brand_mention_count,
                   is_cited: isCited,
                   response_time_ms: modelData.latency_ms,
+                  extracted_brands: modelData.extracted_brands, // Brand entities from LLM Scraper API
                 }
               ));
             } else {

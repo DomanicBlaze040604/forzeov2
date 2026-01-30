@@ -259,6 +259,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
     const [processingStatus, setProcessingStatus] = useState('');
     const [generatedPrompts, setGeneratedPrompts] = useState<string[]>([]);
     const [newManualPrompt, setNewManualPrompt] = useState("");
+    const [locationSearch, setLocationSearch] = useState(""); // For searchable location field
 
     // Reset form
     const resetForm = useCallback(() => {
@@ -703,20 +704,44 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                             </div>
                             <div className="space-y-3">
                                 <Label className="text-sm font-semibold text-gray-700">Target Location *</Label>
-                                <Select onValueChange={handleLocationChange} value={formData.location}>
+                                {/* Search input for location */}
+                                <Input
+                                    placeholder="Type to search locations..."
+                                    value={locationSearch}
+                                    onChange={(e) => setLocationSearch(e.target.value)}
+                                    className="h-10 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 mb-2"
+                                />
+                                <Select onValueChange={(value) => { handleLocationChange(value); setLocationSearch(""); }} value={formData.location}>
                                     <SelectTrigger className="h-12 bg-white border-gray-200">
                                         <SelectValue placeholder="Select location" />
                                     </SelectTrigger>
                                     <SelectContent className="bg-white border-gray-200 max-h-80">
-                                        {/* Group by category */}
-                                        {Array.from(new Set(LOCATIONS.map(l => l.category))).map(category => (
-                                            <div key={category}>
-                                                <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50">{category}</div>
-                                                {LOCATIONS.filter(l => l.category === category).map(l => (
-                                                    <SelectItem key={l.code} value={l.code} className="text-gray-900 hover:bg-gray-100">{l.name}</SelectItem>
-                                                ))}
-                                            </div>
-                                        ))}
+                                        {/* Filter locations based on search */}
+                                        {(() => {
+                                            const searchLower = locationSearch.toLowerCase().trim();
+                                            const filteredLocations = searchLower
+                                                ? LOCATIONS.filter(l =>
+                                                    l.name.toLowerCase().includes(searchLower) ||
+                                                    l.code.toLowerCase().includes(searchLower) ||
+                                                    l.category.toLowerCase().includes(searchLower)
+                                                )
+                                                : LOCATIONS;
+
+                                            if (searchLower && filteredLocations.length === 0) {
+                                                return <div className="px-3 py-2 text-sm text-gray-500">No locations match "{locationSearch}"</div>;
+                                            }
+
+                                            // Group by category
+                                            const categories = Array.from(new Set(filteredLocations.map(l => l.category)));
+                                            return categories.map(category => (
+                                                <div key={category}>
+                                                    <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50">{category}</div>
+                                                    {filteredLocations.filter(l => l.category === category).map(l => (
+                                                        <SelectItem key={l.code} value={l.code} className="text-gray-900 hover:bg-gray-100">{l.name}</SelectItem>
+                                                    ))}
+                                                </div>
+                                            ));
+                                        })()}
                                     </SelectContent>
                                 </Select>
                             </div>

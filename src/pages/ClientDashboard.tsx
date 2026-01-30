@@ -1,9 +1,11 @@
 /**
  * FORZEO GEO DASHBOARD - Redesigned UI v6.0
  */
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles } from 'lucide-react';
 import { AgencyOverview } from "@/components/AgencyOverview";
 import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
 import { useAuth } from "../hooks/useAuth";
@@ -19,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useClientDashboard, AI_MODELS } from "@/hooks/useClientDashboard";
+import { useClientDashboard, AI_MODELS, cleanAndAnalyzeResponse } from "@/hooks/useClientDashboard";
 import { MODEL_LOGOS } from "@/components/ModelLogos";
 import { ScheduleManager } from "@/components/ScheduleManager";
 import { UniversalImport } from "@/components/UniversalImport";
@@ -140,10 +142,20 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">(() => {
+    // Restore from localStorage on mount
+    const saved = localStorage.getItem('forzeo_activeTab');
+    const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "intelligence", "brands"];
+    return (saved && validTabs.includes(saved)) ? saved as any : "overview";
+  });
+
+  // Persist activeTab to localStorage
+  useEffect(() => {
+    localStorage.setItem('forzeo_activeTab', activeTab);
+  }, [activeTab]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -166,11 +178,11 @@ export default function ClientDashboard() {
   const [newCompetitor, setNewCompetitor] = useState("");
   const [bulkPromptsOpen, setBulkPromptsOpen] = useState(false);
   const [bulkPrompts, setBulkPrompts] = useState("");
+  const [bulkRunProgress, setBulkRunProgress] = useState<{ current: number, total: number } | null>(null);
   const [promptLocation, setPromptLocation] = useState<string>(""); // Empty means use client default
-  const [promptSentiment, setPromptSentiment] = useState<string>("Neutral");
-  const [promptFocus, setPromptFocus] = useState<string>("General");
-  const [selectedPromptCompetitors, setSelectedPromptCompetitors] = useState<string[]>([]);
-  const [keywordsInput, setKeywordsInput] = useState("");
+  const [genTone, setGenTone] = useState<string>("neutral");
+  const [genFocus, setGenFocus] = useState<string>("general");
+  const [seedKeywords, setSeedKeywords] = useState("");
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -185,7 +197,9 @@ export default function ClientDashboard() {
   const [generatedContent, setGeneratedContent] = useState("");
   const [generatingContent, setGeneratingContent] = useState(false);
   const [showBrandOnly, setShowBrandOnly] = useState(false);
-  const [dateRangeFilter, setDateRangeFilter] = useState<"7d" | "30d" | "90d" | "all">("all");
+  const [dateRangeFilter, setDateRangeFilter] = useState<"7d" | "30d" | "90d" | "all" | "custom">("all");
+  const [customDateStart, setCustomDateStart] = useState<string>("");
+  const [customDateEnd, setCustomDateEnd] = useState<string>("");
   const [modelFilter, setModelFilter] = useState<string[]>([]);
   const [promptsTabView, setPromptsTabView] = useState<"active" | "suggested" | "inactive">("active");
   const [sourcesGapView, setSourcesGapView] = useState<"all" | "gap">("all");
@@ -293,8 +307,18 @@ export default function ClientDashboard() {
         const mentionedComps = selectedClient?.competitors.filter(c => response.includes(c.toLowerCase())) || [];
 
         mr.citations.forEach(c => {
-          if (!stats[c.domain]) stats[c.domain] = { count: 0, type: classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name), avg: 0, prompts: new Map() };
+          // Use AI category if available, else fallback to static
+          const aiType = citationMeta?.[c.domain]?.category;
+          const staticType = classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
+          const finalType = aiType || staticType;
+
+          if (!stats[c.domain]) stats[c.domain] = { count: 0, type: finalType, avg: 0, prompts: new Map() };
           stats[c.domain].count++;
+
+          // If AI type is newly available, update existing entry
+          if (stats[c.domain].type !== finalType) {
+            stats[c.domain].type = finalType;
+          }
 
           if (!stats[c.domain].prompts.has(pText)) {
             stats[c.domain].prompts.set(pText, { text: pText, visible: false, competitors: new Set() });
@@ -319,7 +343,7 @@ export default function ClientDashboard() {
         competitors: Array.from(p.competitors)
       }))
     })).sort((a, b) => b.count - a.count);
-  }, [filteredAuditResults, selectedClient]);
+  }, [filteredAuditResults, selectedClient, citationMeta]);
 
   // Group citations by domain type for pie chart
   const typeSegments = useMemo(() => {
@@ -369,10 +393,77 @@ export default function ClientDashboard() {
       }
     }
   };
+  // Helper function to parse bulk prompts with proper handling of quoted multi-line strings
+  const parseBulkPrompts = (input: string): string[] => {
+    const results: string[] = [];
+    const text = input.trim();
+    if (!text) return results;
+
+    let i = 0;
+    let currentPrompt = '';
+    let inQuote = false;
+    let quoteChar = '';
+
+    while (i < text.length) {
+      const char = text[i];
+
+      // Check for quote start/end
+      if ((char === '"' || char === "'") && !inQuote) {
+        // Starting a quoted prompt - save any current unquoted prompt first
+        if (currentPrompt.trim().length > 3) {
+          results.push(currentPrompt.replace(/\s+/g, ' ').trim());
+        }
+        currentPrompt = '';
+        inQuote = true;
+        quoteChar = char;
+        i++;
+        continue;
+      }
+
+      if (inQuote && char === quoteChar) {
+        // Ending a quoted prompt
+        if (currentPrompt.trim().length > 3) {
+          results.push(currentPrompt.replace(/\s+/g, ' ').trim());
+        }
+        currentPrompt = '';
+        inQuote = false;
+        quoteChar = '';
+        i++;
+        continue;
+      }
+
+      // Handle newlines
+      if (char === '\n' && !inQuote) {
+        // Not in a quote - newline ends the current prompt
+        if (currentPrompt.trim().length > 3) {
+          results.push(currentPrompt.replace(/\s+/g, ' ').trim());
+        }
+        currentPrompt = '';
+        i++;
+        continue;
+      }
+
+      // Add character to current prompt (convert newlines in quotes to spaces)
+      if (char === '\n' && inQuote) {
+        currentPrompt += ' ';
+      } else {
+        currentPrompt += char;
+      }
+      i++;
+    }
+
+    // Don't forget the last prompt
+    if (currentPrompt.trim().length > 3) {
+      results.push(currentPrompt.replace(/\s+/g, ' ').trim());
+    }
+
+    return results;
+  };
+
   const handleBulkAdd = async () => {
     if (bulkPrompts.trim()) {
       try {
-        const promptTexts = bulkPrompts.split("\n").filter(l => l.trim().length > 3);
+        const promptTexts = parseBulkPrompts(bulkPrompts);
         await addMultiplePrompts(promptTexts);
         setBulkPrompts("");
         setBulkPromptsOpen(false);
@@ -401,17 +492,17 @@ export default function ClientDashboard() {
     }
   };
   const handleGeneratePrompts = async () => {
-    if (!keywordsInput.trim()) return;
+    if (!seedKeywords.trim()) return;
     setGeneratingPrompts(true);
     try {
-      const g = await generatePromptsFromKeywords(keywordsInput, {
-        sentiment: promptSentiment,
-        focus: promptFocus,
-        competitors: selectedPromptCompetitors
+      const g = await generatePromptsFromKeywords(seedKeywords, {
+        sentiment: genTone,
+        focus: genFocus,
+        competitors: (selectedClient?.competitors || []) // auto-include client competitors if any, or empty array
       });
       if (g?.length) {
         addMultiplePrompts(g);
-        setKeywordsInput("");
+        setSeedKeywords("");
       }
     } finally {
       setGeneratingPrompts(false);
@@ -785,11 +876,11 @@ export default function ClientDashboard() {
               {/* Client Badge - Hidden on small mobile to save space if needed, or kept compact */}
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
 
-                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap", dateRangeFilter !== "all" ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Calendar className="h-3.5 w-3.5" /> {dateRangeLabel}</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setDateRangeFilter("7d")} className={cn(dateRangeFilter === "7d" && "bg-blue-50")}>Last 7 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("30d")} className={cn(dateRangeFilter === "30d" && "bg-blue-50")}>Last 30 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("90d")} className={cn(dateRangeFilter === "90d" && "bg-blue-50")}>Last 90 days</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setDateRangeFilter("all")} className={cn(dateRangeFilter === "all" && "bg-blue-50")}>All Time</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+                <DropdownMenu><DropdownMenuTrigger asChild><button className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap", dateRangeFilter !== "all" ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-white/50")}><Calendar className="h-3.5 w-3.5" /> {dateRangeFilter === "7d" ? "Last 7 days" : dateRangeFilter === "30d" ? "Last 30 days" : dateRangeFilter === "90d" ? "Last 90 days" : dateRangeFilter === "custom" ? "Custom Range" : "All Time"}</button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-64"><DropdownMenuItem onClick={() => setDateRangeFilter("7d")} className={cn(dateRangeFilter === "7d" && "bg-blue-50")}>Last 7 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("30d")} className={cn(dateRangeFilter === "30d" && "bg-blue-50")}>Last 30 days</DropdownMenuItem><DropdownMenuItem onClick={() => setDateRangeFilter("90d")} className={cn(dateRangeFilter === "90d" && "bg-blue-50")}>Last 90 days</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setDateRangeFilter("all")} className={cn(dateRangeFilter === "all" && "bg-blue-50")}>All Time</DropdownMenuItem><DropdownMenuSeparator /><div className="px-2 py-2"><p className="text-xs font-medium text-gray-500 mb-2">Custom Range</p><div className="flex flex-col gap-2"><input type="date" value={customDateStart} onChange={(e) => { setCustomDateStart(e.target.value); setDateRangeFilter("custom"); }} className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Start date" /><input type="date" value={customDateEnd} onChange={(e) => { setCustomDateEnd(e.target.value); setDateRangeFilter("custom"); }} className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="End date" /></div></div></DropdownMenuContent></DropdownMenu>
                 {/* All Models filter removed per UI overhaul */}
               </div>
 
-              <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+              <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => window.print()}><FileText className="h-4 w-4 mr-2" /> Export as PDF (Print)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Forzeo Discovery Engine"><span className={cn("w-2 h-2 rounded-full", includeTavily ? "bg-amber-500" : "bg-gray-300")} />{includeTavily ? "Discovery On" : "Discovery Off"}</button>
               {isAdmin && <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>}
             </div>
@@ -1064,9 +1155,9 @@ export default function ClientDashboard() {
             {isAdmin ? (
               <span className="text-sm text-gray-500 hidden sm:inline"> {prompts.length} total prompts</span>
             ) : (
-              <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= (isAgency ? 15 : 30) ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/{isAgency ? 15 : 30} Prompts</span>
+              <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= (isAgency ? 15 : 100) ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/{isAgency ? 15 : 100} Prompts</span>
             )}
-            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800 whitespace-nowrap" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 30)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800 whitespace-nowrap" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 100)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
           </div>
         </div>
 
@@ -1097,16 +1188,16 @@ export default function ClientDashboard() {
           <table className="w-full">
             <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200">
               <tr>
-                <th className="w-10 px-3 py-3 text-left"><Checkbox checked={selectedPromptIds.size === filteredPrompts.length && filteredPrompts.length > 0} onCheckedChange={(checked) => { if (checked) { setSelectedPromptIds(new Set(filteredPrompts.map(p => p.id))); } else { setSelectedPromptIds(new Set()); } }} /></th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="w-10 px-3 py-3 text-left" title="Select prompts for bulk actions"><Checkbox checked={selectedPromptIds.size === filteredPrompts.length && filteredPrompts.length > 0} onCheckedChange={(checked) => { if (checked) { setSelectedPromptIds(new Set(filteredPrompts.map(p => p.id))); } else { setSelectedPromptIds(new Set()); } }} /></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" title="The question you want AI models to answer">
                   <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Prompt <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Visibility</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Position</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Brands</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Citations</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-36">Recommendations</th>
-                {isAdmin && <th className="px-4 py-3 text-end text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Actions</th>}
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24" title="How many AI models mentioned your brand vs total models tested">Visibility</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20" title="Your brand's average position in AI-generated ranked lists (#1 is best)">Position</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="Other brands that AI mentioned alongside or instead of yours">Brands</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24" title="Number of web sources the AI referenced in its response">Citations</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-36" title="AI-generated suggestions to improve your visibility">Recommendations</th>
+                {isAdmin && <th className="px-4 py-3 text-end text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="Run audits, edit, or archive prompts">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -1180,25 +1271,45 @@ export default function ClientDashboard() {
                             return <span className="text-xs text-gray-400 italic">None</span>;
                           }
 
-                          const displayBrands = brandsArray.slice(0, 5);
+                          const displayBrands = brandsArray.slice(0, 6);
+                          const overflowCount = brandsArray.length - displayBrands.length;
 
                           return (
-                            <>
+                            <div className="flex items-center gap-1.5">
                               {displayBrands.map((brand, idx) => {
                                 const isUserBrand = brand.toLowerCase() === brandName;
                                 const domain = `${brand.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
                                 return (
                                   <div
                                     key={idx}
-                                    className={cn("flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium", isUserBrand ? "bg-green-100 text-green-700 border border-green-200" : "bg-gray-100 text-gray-600 border border-gray-200")}
                                     title={brand}
+                                    className={cn(
+                                      "flex items-center justify-center h-7 w-7 rounded-md border transition-all hover:scale-110",
+                                      isUserBrand
+                                        ? "bg-green-50 border-green-200 shadow-sm ring-1 ring-green-100"
+                                        : "bg-white border-gray-200 shadow-sm"
+                                    )}
                                   >
-                                    <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=12`} alt="" className="h-3 w-3 rounded-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                    <span className="truncate max-w-[60px]">{brand}</span>
+                                    <img
+                                      src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+                                      alt={brand}
+                                      className="h-4 w-4 rounded-sm"
+                                      onError={(e) => {
+                                        // Fallback to first letter if favicon fails
+                                        e.currentTarget.style.display = 'none';
+                                        e.currentTarget.parentElement!.innerText = brand.charAt(0).toUpperCase();
+                                        e.currentTarget.parentElement!.className += " text-[10px] font-bold text-gray-500 uppercase";
+                                      }}
+                                    />
                                   </div>
                                 );
                               })}
-                            </>
+                              {overflowCount > 0 && (
+                                <div className="h-7 w-7 rounded-md bg-gray-50 border border-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500 shadow-sm whitespace-nowrap px-1">
+                                  +{overflowCount}
+                                </div>
+                              )}
+                            </div>
                           );
                         })()}
                       </div>
@@ -1300,8 +1411,8 @@ export default function ClientDashboard() {
                   <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                   <p className="text-gray-600 font-medium">No prompts yet</p>
                   <p className="text-sm text-gray-500 mt-1">Add your first prompt to get started with audits.</p>
-                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 30)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
-                  {!isAdmin && prompts.length >= (isAgency ? 15 : 30) && <p className="text-xs text-red-500 mt-2">{isAgency ? 'Agency' : 'Free'} prompt limit reached ({isAgency ? '15/15' : '30/30'})</p>}
+                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 100)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+                  {!isAdmin && prompts.length >= (isAgency ? 15 : 100) && <p className="text-xs text-red-500 mt-2">{isAgency ? 'Agency' : 'Free'} prompt limit reached ({isAgency ? '15/15' : '100/100'})</p>}
                 </>
               )}
             </div>
@@ -1311,69 +1422,115 @@ export default function ClientDashboard() {
         {/* Floating Action Bar for Bulk Operations */}
         {selectedPromptIds.size > 0 && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white rounded-xl shadow-2xl px-6 py-3 flex items-center gap-4 animate-in slide-in-from-bottom-4">
-            <span className="text-sm font-medium">{selectedPromptIds.size} selected</span>
-            <div className="h-4 w-px bg-gray-600" />
-            {selectedPromptIds.size === 1 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  const promptId = Array.from(selectedPromptIds)[0];
-                  const prompt = prompts.find(pr => pr.id === promptId);
-                  if (prompt) {
-                    setEditingPromptId(promptId);
-                    setEditingPromptText(prompt.prompt_text);
-                    setEditPromptOpen(true);
+            {bulkRunProgress ? (
+              <div className="flex items-center gap-4 min-w-[300px]">
+                <span className="text-sm font-medium whitespace-nowrap text-blue-200">Running...</span>
+                <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${(bulkRunProgress.current / bulkRunProgress.total) * 100}%` }}></div>
+                </div>
+                <span className="text-sm font-medium whitespace-nowrap">{bulkRunProgress.current} / {bulkRunProgress.total}</span>
+              </div>
+            ) : (
+              <>
+                <span className="text-sm font-medium">{selectedPromptIds.size} selected</span>
+                <div className="h-4 w-px bg-gray-600" />
+
+                {/* Run Audit Button */}
+                {isAdmin && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        if (selectedPromptIds.size === 0) return;
+                        const idsToRun = Array.from(selectedPromptIds);
+                        setBulkRunProgress({ current: 0, total: idsToRun.length });
+
+                        for (let i = 0; i < idsToRun.length; i++) {
+                          try {
+                            await runSinglePrompt(idsToRun[i]);
+                          } catch (e) {
+                            console.error("Run error", e);
+                          }
+                          setBulkRunProgress({ current: i + 1, total: idsToRun.length });
+                        }
+
+                        setBulkRunProgress(null);
+                        setSelectedPromptIds(new Set());
+                        toast.success(`Completed ${idsToRun.length} audits`);
+                      }}
+                      className="text-green-400 hover:text-green-300 hover:bg-gray-800"
+                    >
+                      <Play className="h-4 w-4 mr-1.5" />
+                      Run Audit
+                    </Button>
+                    <div className="h-4 w-px bg-gray-600" />
+                  </>
+                )}
+
+                {selectedPromptIds.size === 1 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const promptId = Array.from(selectedPromptIds)[0];
+                      const prompt = prompts.find(pr => pr.id === promptId);
+                      if (prompt) {
+                        setEditingPromptId(promptId);
+                        setEditingPromptText(prompt.prompt_text);
+                        setEditPromptOpen(true);
+                        setSelectedPromptIds(new Set());
+                      }
+                    }}
+                    className="text-white hover:bg-gray-700"
+                  >
+                    <Settings className="h-4 w-4 mr-1.5" />
+                    Edit
+                  </Button>
+                )}
+                {selectedPromptIds.size === 1 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const promptId = Array.from(selectedPromptIds)[0];
+                      const prompt = prompts.find(pr => pr.id === promptId);
+                      if (prompt) {
+                        setEditingLocationPromptId(promptId);
+                        setEditingLocationValue(prompt.location_name || "");
+                        setEditLocationOpen(true);
+                      }
+                    }}
+                    className="text-white hover:bg-gray-700"
+                  >
+                    <Globe className="h-4 w-4 mr-1.5" />
+                    Location
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    for (const id of selectedPromptIds) {
+                      await deletePrompt(id);
+                    }
                     setSelectedPromptIds(new Set());
-                  }
-                }}
-                className="text-white hover:bg-gray-700"
-              >
-                <Settings className="h-4 w-4 mr-1.5" />
-                Edit
-              </Button>
+                  }}
+                  className="text-white hover:bg-gray-700"
+                >
+                  <Archive className="h-4 w-4 mr-1.5" />
+                  Archive{selectedPromptIds.size > 1 ? ` (${selectedPromptIds.size})` : ''}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedPromptIds(new Set())}
+                  className="text-gray-400 hover:text-white hover:bg-gray-700"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </>
             )}
-            {selectedPromptIds.size === 1 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  const promptId = Array.from(selectedPromptIds)[0];
-                  const prompt = prompts.find(pr => pr.id === promptId);
-                  if (prompt) {
-                    setEditingLocationPromptId(promptId);
-                    setEditingLocationValue(prompt.location_name || "");
-                    setEditLocationOpen(true);
-                  }
-                }}
-                className="text-white hover:bg-gray-700"
-              >
-                <Globe className="h-4 w-4 mr-1.5" />
-                Location
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                for (const id of selectedPromptIds) {
-                  await deletePrompt(id);
-                }
-                setSelectedPromptIds(new Set());
-              }}
-              className="text-white hover:bg-gray-700"
-            >
-              <Archive className="h-4 w-4 mr-1.5" />
-              Archive{selectedPromptIds.size > 1 ? ` (${selectedPromptIds.size})` : ''}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelectedPromptIds(new Set())}
-              className="text-gray-400 hover:text-white hover:bg-gray-700"
-            >
-              <X className="h-4 w-4" />
-            </Button>
           </div>
         )}
 
@@ -1428,7 +1585,33 @@ export default function ClientDashboard() {
     return (
       <div className="space-y-6">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3"><div className="p-2 bg-blue-100 rounded-lg"><Globe className="h-5 w-5 text-blue-600" /></div><div><h4 className="font-medium text-blue-900">What are Sources?</h4><p className="text-sm text-blue-700 mt-0.5">Sources are the origin websites where AI models pull facts from. These are the domains that the AI references when generating responses - the places where the information comes from.</p></div></div>
-        <div className="flex items-center gap-2"><button onClick={() => setSourcesView("domains")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "domains" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>Domains ({domainStats.length})</button><button onClick={() => setSourcesView("urls")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "urls" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>URLs ({allCitations.length})</button></div>
+        <div className="flex items-center gap-2">
+          {sourcesView === "domains" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const uncategorized = domainStats
+                  .filter(d => !citationMeta?.[d.domain])
+                  .map(d => d.domain);
+
+                if (uncategorized.length === 0) {
+                  toast.success("All domains categorized!");
+                  return;
+                }
+
+                toast.info(`Categorizing ${uncategorized.length} domains...`);
+                categorizeCitations(uncategorized);
+              }}
+              className="hidden md:flex"
+            >
+              <Sparkles className="h-3.5 w-3.5 mr-1 text-purple-600" />
+              Categorize with AI
+            </Button>
+          )}
+          <button onClick={() => setSourcesView("domains")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "domains" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>Domains ({domainStats.length})</button>
+          <button onClick={() => setSourcesView("urls")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "urls" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>URLs ({allCitations.length})</button>
+        </div>
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">Source Usage by Domain</h3><div className="flex items-center gap-4 text-xs">{domainStats.slice(0, 5).map((s, i) => (<div key={i} className="flex items-center gap-1.5"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} alt="" className="h-3.5 w-3.5 rounded" /><span className="text-gray-600">{s.domain}</span></div>))}</div></div>
           <div className="h-48 flex items-end gap-2 border-b border-gray-100 pb-4">{domainStats.slice(0, 15).map((s, i) => { const max = Math.max(...domainStats.slice(0, 15).map(x => x.count), 1); const h = (s.count / max) * 100; const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; return (<div key={i} className="flex-1 flex flex-col items-center gap-1 group cursor-pointer" onClick={() => setExpandedDomain(expandedDomain === s.domain ? null : s.domain)}><div className="w-full rounded-t hover:opacity-80 transition-opacity relative" style={{ height: `${Math.max(h, 4)}%`, backgroundColor: t.dot, minHeight: 4 }}><div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">{s.domain}: {s.count}</div></div><span className="text-xs text-gray-500">{s.count}</span></div>); })}</div>
@@ -1781,7 +1964,7 @@ export default function ClientDashboard() {
               <div><Label>Tone of Voice Reference</Label><Textarea placeholder="Paste a sample press release or product description here. The AI will analyze and mimic its style." value={toneOfVoice} onChange={(e) => setToneOfVoice(e.target.value)} className="mt-1 h-24" /></div>
               <div className="p-4 bg-gray-50 rounded-lg"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Content will include:</Label><Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(selectedClient?.industry || "") ? selectedClient?.industry : "Custom"; const customInd = Object.keys(industries).includes(selectedClient?.industry || "") ? "" : selectedClient?.industry || ""; setEditClientForm({ name: selectedClient?.name || "", brand_name: selectedClient?.brand_name || "", target_region: selectedClient?.target_region || "", industry: clientIndustry || "Custom", customIndustry: customInd, primary_color: selectedClient?.primary_color || "#3b82f6", logo_url: "", competitors: selectedClient?.competitors?.join(", ") || "", website: selectedClient?.brand_domain || "" }); setEditClientOpen(true); }} className="text-xs"><Settings className="h-3 w-3 mr-1" />Edit</Button></div><div className="flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><Building2 className="h-3.5 w-3.5" />{c}</span>)}</div></div>
               <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : "Generate Content"}</Button>
-              {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="prose prose-sm max-w-none p-4 bg-gray-50 rounded-lg border max-h-[500px] overflow-y-auto"><pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans">{generatedContent}</pre></div></div>)}
+              {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="prose prose-sm max-w-none p-4 bg-gray-50 rounded-lg border max-h-[500px] overflow-y-auto"><ReactMarkdown remarkPlugins={[remarkGfm]}>{generatedContent}</ReactMarkdown></div></div>)}
             </div>
           </div>
           <div className="space-y-4">
@@ -2385,76 +2568,56 @@ export default function ClientDashboard() {
         </Select>
         <p className="text-xs text-blue-600 mt-1">AI responses will be personalized for this location</p>
       </div>
-      <div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div><div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div><div><Label>Multiple Prompts (one per line)</Label><Textarea placeholder={"Best dating apps in India\nDating apps with verification\nSafe dating apps for women"} value={bulkPrompts} onChange={(e) => setBulkPrompts(e.target.value)} rows={6} className="mt-1" /></div>      <div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or generate with AI</span></div></div>
+      <div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div>
+      <div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div>
+      <div><Label>Multiple Prompts (one per line)</Label><Textarea placeholder={"Prompt 1\nPrompt 2\nPrompt 3"} value={bulkPrompts} onChange={(e) => setBulkPrompts(e.target.value)} rows={6} className="mt-1" /></div>
 
-      {/* Generator Options */}
-      <div className="bg-gray-50/50 p-4 rounded-lg border border-gray-100 space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-gray-500 uppercase tracking-wider">Tone</Label>
-            <Select value={promptSentiment} onValueChange={setPromptSentiment}>
-              <SelectTrigger className="bg-white h-8 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Neutral">Neutral (Standard)</SelectItem>
-                <SelectItem value="Positive">Positive (Validation)</SelectItem>
-                <SelectItem value="Negative">Negative (Crisis)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs text-gray-500 uppercase tracking-wider">Focus</Label>
-            <Select value={promptFocus} onValueChange={setPromptFocus}>
-              <SelectTrigger className="bg-white h-8 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="General">General Visibility</SelectItem>
-                <SelectItem value="Feature">Features & Pricing</SelectItem>
-                <SelectItem value="Competitor">Competitor Comparison</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {promptFocus === "Competitor" && selectedClient?.competitors && selectedClient.competitors.length > 0 && (
-          <div className="space-y-2">
-            <Label className="text-xs text-gray-500 uppercase tracking-wider">Include Competitors</Label>
-            <div className="flex flex-wrap gap-2">
-              {selectedClient.competitors.map((comp) => (
-                <div key={comp} className="flex items-center space-x-2 bg-white px-2 py-1 rounded border border-gray-200">
-                  <Checkbox
-                    id={`comp-${comp}`}
-                    checked={selectedPromptCompetitors.includes(comp)}
-                    onCheckedChange={(checked) => {
-                      if (checked) setSelectedPromptCompetitors([...selectedPromptCompetitors, comp]);
-                      else setSelectedPromptCompetitors(selectedPromptCompetitors.filter(c => c !== comp));
-                    }}
-                    className="h-3.5 w-3.5"
-                  />
-                  <label htmlFor={`comp-${comp}`} className="text-sm cursor-pointer select-none text-gray-700">{comp}</label>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
+      <div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or generate with AI</span></div></div>
+      <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Seed Keywords</Label>
-          <div className="flex gap-2">
-            <Input
-              placeholder="dating apps, verification, safety"
-              value={keywordsInput}
-              onChange={(e) => setKeywordsInput(e.target.value)}
-              className="bg-white"
-            />
-            <Button onClick={handleGeneratePrompts} disabled={generatingPrompts}>
-              {generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            </Button>
-          </div>
+          <Label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Tone</Label>
+          <Select value={genTone} onValueChange={setGenTone}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="neutral">Neutral (Standard)</SelectItem>
+              <SelectItem value="investigative">Investigative</SelectItem>
+              <SelectItem value="commercial">Commercial/Buying</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Focus</Label>
+          <Select value={genFocus} onValueChange={setGenFocus}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="general">General Visibility</SelectItem>
+              <SelectItem value="comparison">Competitor Comparison</SelectItem>
+              <SelectItem value="features">Feature Specific</SelectItem>
+              <SelectItem value="price">Price/Cost</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
-
-      {/* Import File Button moved to allow spacing */}
-      {/* Replaced logic ends here, existing import logic follows in footer usually? No, I am replacing the content inside the space-y-4 div of BulkPromptsDialog */}
-    </div><DialogFooter><Button variant="outline" onClick={() => { setImportDialogOpen(true); setBulkPromptsOpen(false); }}>Import File</Button><Button onClick={handleBulkAdd} disabled={!bulkPrompts.trim()}>Add {bulkPrompts.split("\n").filter(l => l.trim().length > 3).length} Prompts</Button></DialogFooter></DialogContent></Dialog>);
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <Label className="text-xs text-gray-500 uppercase tracking-wider block">Seed Prompts</Label>
+        </div>
+        <div className="flex gap-2">
+          <Input placeholder="e.g. brand strategy, market positioning, competitors" value={seedKeywords} onChange={(e) => setSeedKeywords(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleGeneratePrompts()} />
+          <Button onClick={handleGeneratePrompts} disabled={generatingPrompts || !seedKeywords.trim()} className="bg-blue-600 hover:bg-blue-700 text-white w-12 p-0 flex-shrink-0">
+            {generatingPrompts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          </Button>
+        </div>
+        <p className="text-[10px] text-gray-400 mt-1.5 flex items-center gap-1"><Sparkles className="h-3 w-3" /> AI will generate 5 relevant search prompts to track based on these inputs.</p>
+      </div>
+    </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => { setImportDialogOpen(true); setBulkPromptsOpen(false); }}>Import File</Button>
+        <Button onClick={handleBulkAdd} disabled={!bulkPrompts.trim()}>Add {parseBulkPrompts(bulkPrompts).length} Prompts</Button>
+      </DialogFooter>
+    </DialogContent>
+    </Dialog>
+    );
   }
 
   function InsightsTab() {
@@ -2934,16 +3097,41 @@ export default function ClientDashboard() {
                     </div>
                   )}
 
-                  {displayResult?.model_results.map((mr, i) => {
+                  {/* Enforce strict order based on AI_MODELS constant */}
+                  {AI_MODELS.map((modelDef, i) => {
+                    // Find corresponding result for this model
+                    const mr = displayResult?.model_results.find(r => r.model === modelDef.id);
+
+                    // If no result for this model, skip it (or show placeholder if desired)
+                    if (!mr) return null;
+
                     const Logo = MODEL_LOGOS[mr.model]?.Logo;
                     const color = MODEL_LOGOS[mr.model]?.color || "#666";
 
-                    // Competitor Analysis - Sort alphabetically for consistent order
-                    const responseText = mr.raw_response?.toLowerCase() || "";
-                    const competitorMentions = (selectedClient?.competitors || []).map(comp => {
-                      const matches = responseText.match(new RegExp(comp.toLowerCase(), "gi"));
-                      return { name: comp, count: matches ? matches.length : 0 };
-                    }).filter(c => c.count > 0).sort((a, b) => a.name.localeCompare(b.name));
+                    // Clean response text for display and analysis (handles historical data)
+                    const { cleanedResponse } = cleanAndAnalyzeResponse(
+                      mr.raw_response || "",
+                      selectedClient?.brand_name || "",
+                      selectedClient?.competitors || []
+                    );
+
+                    // Competitor Analysis
+                    const responseText = cleanedResponse.toLowerCase();
+                    let competitorMentions = (mr.competitors_found || []).map(c => ({
+                      name: c.name,
+                      count: c.count,
+                      rank: c.rank
+                    }));
+
+                    // Fallback for old data or if competitors_found is empty but regex finds matches
+                    if (competitorMentions.length === 0) {
+                      competitorMentions = (selectedClient?.competitors || []).map(comp => {
+                        const matches = responseText.match(new RegExp(comp.toLowerCase(), "gi"));
+                        return { name: comp, count: matches ? matches.length : 0, rank: null as number | null };
+                      }).filter(c => c.count > 0);
+                    }
+
+                    competitorMentions.sort((a, b) => a.name.localeCompare(b.name));
 
                     const topCompetitor = competitorMentions[0];
 
@@ -2955,9 +3143,15 @@ export default function ClientDashboard() {
                             {Logo && <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-100"><Logo className="h-5 w-5" style={{ color }} /></div>}
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-gray-900">{mr.model_name}</span>
-                              {/* Show indicator for Google AI Overview when actual AI Overview not available */}
-                              {mr.model === "google_ai_overview" && !mr.raw_response && (
-                                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">No AI Data</span>
+                              {/* Show indicator for Google AI Overview status */}
+                              {mr.model === "google_ai_overview" && (
+                                mr.is_ai_overview === true ? (
+                                  <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-medium">AI Overview</span>
+                                ) : mr.raw_response ? (
+                                  <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">Featured Snippet</span>
+                                ) : (
+                                  <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs font-medium">No AI Data</span>
+                                )
                               )}
                             </div>
                           </div>
@@ -2973,65 +3167,28 @@ export default function ClientDashboard() {
                         </div>
 
                         {/* Response Preview */}
-                        {mr.raw_response && (
+                        {cleanedResponse && (
                           <div className="p-4 border-b border-gray-100">
                             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">AI Response</div>
-                            <div className="p-4 bg-gray-50 rounded-lg text-sm text-gray-700 leading-relaxed max-w-none">
+                            <div className="p-4 bg-gray-50 rounded-lg text-sm text-gray-700 leading-relaxed max-w-none prose prose-sm prose-blue">
                               {/* Enhanced markdown-style formatting */}
-                              {mr.raw_response.split('\n').map((line, idx) => {
-                                const trimmedLine = line.trim();
-                                if (!trimmedLine) return <br key={idx} />;
-
-                                // Helper to render inline bold text (**text**)
-                                const renderWithBold = (text: string) => {
-                                  const parts = text.split(/\*\*(.*?)\*\*/g);
-                                  return parts.map((part, i) =>
-                                    i % 2 === 1 ? <strong key={i} className="font-semibold text-gray-900">{part}</strong> : part
-                                  );
-                                };
-
-                                // Handle headings (## Heading)
-                                if (/^#{1,3}\s+/.test(trimmedLine)) {
-                                  const level = trimmedLine.match(/^(#+)/)?.[1].length || 2;
-                                  const headingText = trimmedLine.replace(/^#+\s+/, '');
-                                  return (
-                                    <p key={idx} className={cn(
-                                      "font-bold text-gray-900 mt-4 mb-2",
-                                      level === 1 && "text-base",
-                                      level === 2 && "text-sm uppercase tracking-wide",
-                                      level >= 3 && "text-sm"
-                                    )}>
-                                      {renderWithBold(headingText)}
-                                    </p>
-                                  );
-                                }
-
-                                // Handle numbered lists (1. 2. etc)
-                                if (/^\d+\./.test(trimmedLine)) {
-                                  const numMatch = trimmedLine.match(/^(\d+)\./);
-                                  const num = numMatch ? numMatch[1] : '';
-                                  const content = trimmedLine.substring(trimmedLine.indexOf('.') + 1).trim();
-                                  return (
-                                    <p key={idx} className="my-1.5 pl-1 flex gap-2">
-                                      <span className="font-semibold text-gray-800 min-w-[20px]">{num}.</span>
-                                      <span>{renderWithBold(content)}</span>
-                                    </p>
-                                  );
-                                }
-
-                                // Handle bullet points
-                                if (/^[-•*]\s/.test(trimmedLine)) {
-                                  return (
-                                    <p key={idx} className="my-1 pl-1 flex gap-2">
-                                      <span className="text-gray-400">•</span>
-                                      <span>{renderWithBold(trimmedLine.substring(1).trim())}</span>
-                                    </p>
-                                  );
-                                }
-
-                                // Regular paragraph with bold support
-                                return <p key={idx} className="my-2">{renderWithBold(trimmedLine)}</p>;
-                              })}
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  p: ({ node, ...props }) => <p className="mb-3 leading-relaxed last:mb-0" {...props} />,
+                                  a: ({ node, ...props }) => <a className="text-blue-600 hover:underline font-medium" target="_blank" rel="noopener noreferrer" {...props} />,
+                                  ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
+                                  ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />,
+                                  li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                  h1: ({ node, ...props }) => <h1 className="text-xl font-bold mt-6 mb-3 text-gray-900" {...props} />,
+                                  h2: ({ node, ...props }) => <h2 className="text-lg font-bold mt-5 mb-2 text-gray-900" {...props} />,
+                                  h3: ({ node, ...props }) => <h3 className="text-base font-bold mt-4 mb-2 text-gray-900" {...props} />,
+                                  code: ({ node, ...props }) => <code className="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-pink-600" {...props} />,
+                                  strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
+                                }}
+                              >
+                                {cleanedResponse}
+                              </ReactMarkdown>
                             </div>
 
                             {/* Competitor Mentions Block */}
@@ -3052,7 +3209,7 @@ export default function ClientDashboard() {
                                         return (
                                           <div key={k} className="flex items-center gap-1">
                                             <Badge variant="secondary" className="text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-200">
-                                              {comp.name} ({comp.count}x)
+                                              {comp.name} {comp.rank ? <span className="ml-1 font-semibold text-blue-600">#{comp.rank}</span> : <span className="text-gray-400 ml-1">({comp.count}x)</span>}
                                             </Badge>
                                             {!isTracked && (
                                               <button onClick={() => handleAddCompetitor(comp.name)} className="text-blue-600 hover:bg-blue-50 rounded-full p-0.5 transition-colors" title="Add to competitors">
@@ -3069,13 +3226,89 @@ export default function ClientDashboard() {
                             )}
                           </div>
                         )}
+                        {/* Show indicator for AI Overview source type */}
+                        {mr.model === "google_ai_overview" && mr.raw_response && mr.is_ai_overview === false && (
+                          <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
+                            ⚠️ This content is from <strong>Featured Snippet</strong>, not Google's AI Overview. AI Overview was not available for this query.
+                          </div>
+                        )}
                         {/* Show 'No AI Overview available' message when Google AI Overview has no response */}
                         {!mr.raw_response && mr.model === "google_ai_overview" && (
                           <div className="p-4 border-b border-gray-100">
                             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">AI Response</div>
-                            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-center">
-                              <span className="text-amber-700 font-medium">No AI Overview available for this prompt</span>
-                              <p className="text-xs text-amber-600 mt-1">Google did not generate an AI Overview for this query.</p>
+                            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center">
+                              <span className="text-gray-600 font-medium">No AI Overview available for this prompt</span>
+                              <p className="text-xs text-gray-500 mt-1">Google did not generate an AI Overview or Featured Snippet for this query.</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Extracted Brands - now placed BEFORE citations, right after competitors */}
+                        {mr.extracted_brands && mr.extracted_brands.length > 0 && (
+                          <div className="p-4 border-b border-gray-100">
+                            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Brands Mentioned ({mr.extracted_brands.length})</div>
+                            <div className="flex flex-wrap gap-2">
+                              {mr.extracted_brands.map((brand, j) => {
+                                const isOwnBrand = brand.is_own_brand;
+                                const isCompetitor = brand.is_competitor;
+                                const isNew = !isOwnBrand && !isCompetitor;
+
+                                return (
+                                  <div key={j} className="flex items-center gap-1">
+                                    <Badge
+                                      variant={isOwnBrand ? "default" : "secondary"}
+                                      className={cn(
+                                        "text-xs",
+                                        isOwnBrand && "bg-green-100 text-green-700 border-green-200 hover:bg-green-200",
+                                        isCompetitor && "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200",
+                                        isNew && "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
+                                      )}
+                                      title={brand.positions && brand.positions.length > 1
+                                        ? `Positions: ${brand.positions.join(", ")}`
+                                        : `Position: ${brand.position}`
+                                      }
+                                    >
+                                      {brand.title}
+                                      <span className="ml-1 opacity-70">({brand.mention_count}x)</span>
+                                      {brand.entity_points && brand.entity_points > 0.5 && (
+                                        <span className="ml-1 text-purple-500 font-medium" title="Entity Points Score">
+                                          {brand.entity_points.toFixed(2)}pts
+                                        </span>
+                                      )}
+                                      {/* Show average rank for all brands */}
+                                      {brand.positions && brand.positions.length > 0 && (
+                                        <span
+                                          className={cn(
+                                            "ml-1 font-medium",
+                                            brand.position <= 3 ? "text-amber-500" : "text-gray-500"
+                                          )}
+                                          title={`Avg rank: ${(brand.positions.reduce((a, b) => a + b, 0) / brand.positions.length).toFixed(1)}`}
+                                        >
+                                          #{brand.position}
+                                          {brand.positions.length > 1 && (
+                                            <span className="opacity-60"> (avg: {(brand.positions.reduce((a, b) => a + b, 0) / brand.positions.length).toFixed(1)})</span>
+                                          )}
+                                        </span>
+                                      )}
+                                    </Badge>
+                                    {isNew && (
+                                      <button
+                                        onClick={() => handleAddCompetitor(brand.title)}
+                                        className="text-blue-600 hover:bg-blue-50 rounded-full p-0.5 transition-colors"
+                                        title="Add to competitors"
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-400"></span>Your brand</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400"></span>Known competitor</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-400"></span>New discovery</span>
+                              <span className="flex items-center gap-1 ml-2 border-l pl-2"><span className="text-purple-500 font-medium">pts</span>= Entity Points (earlier mentions score higher)</span>
                             </div>
                           </div>
                         )}
@@ -3095,6 +3328,8 @@ export default function ClientDashboard() {
                             </div>
                           </div>
                         )}
+
+
                       </div>
                     );
                   })}
@@ -3214,56 +3449,113 @@ export default function ClientDashboard() {
                         <p className="text-sm text-gray-500 mt-1">Try selecting a different filter.</p>
                       </div>
                     ) : (
-                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm overflow-x-auto">
                         <table className="w-full">
-                          <thead className="bg-gray-50 border-b border-gray-200">
+                          <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200">
                             <tr>
-                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
-                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Visibility</th>
-                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Position</th>
-                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Models (Visible)</th>
-                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Citations</th>
-                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-16"></th>
+                              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Visibility</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Position</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Brands</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Citations</th>
+                              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-16 px-6"></th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                             {filteredHistory.map((run, idx) => {
                               const citationCount = run.model_results.reduce((sum, mr) => sum + mr.citations.length, 0);
-                              const avgRank = run.summary.average_rank;
                               const sov = run.summary.share_of_voice || 0;
 
-                              // Filter models to only show those where brand was mentioned visible
-                              const visibleModels = run.model_results.filter(mr => mr.brand_mentioned);
+                              // Calculate average rank dynamically if missing from summary
+                              let avgRank = run.summary.average_rank;
+                              if (!avgRank) {
+                                const ranks = run.model_results
+                                  .map(mr => mr.brand_rank)
+                                  .filter((r): r is number => typeof r === 'number' && r > 0);
+
+                                if (ranks.length > 0) {
+                                  avgRank = Number((ranks.reduce((a, b) => a + b, 0) / ranks.length).toFixed(1));
+                                }
+                              }
+
+                              // Extract unique brands from extracted_brands or fallback
+                              const uniqueBrands = new Set<string>();
+                              run.model_results.forEach(mr => {
+                                if (mr.extracted_brands && mr.extracted_brands.length > 0) {
+                                  mr.extracted_brands.forEach(b => uniqueBrands.add(b.title));
+                                } else if (mr.brand_mentioned) {
+                                  // Fallback for older runs if brands weren't extracted
+                                  uniqueBrands.add(selectedClient?.brand_name || "Client");
+                                }
+                              });
+
+                              // Convert to array and prioritize own brand
+                              const brandsArray = Array.from(uniqueBrands).sort((a, b) => {
+                                const aIsOwn = a.toLowerCase() === (selectedClient?.brand_name || "").toLowerCase();
+                                const bIsOwn = b.toLowerCase() === (selectedClient?.brand_name || "").toLowerCase();
+                                if (aIsOwn) return -1;
+                                if (bIsOwn) return 1;
+                                return a.localeCompare(b);
+                              });
+
+                              const displayBrands = brandsArray.slice(0, 5);
+                              const overflowCount = brandsArray.length - displayBrands.length;
 
                               return (
-                                <tr key={run.id || idx} className="hover:bg-gray-50 transition-colors">
-                                  <td className="px-4 py-4 text-sm text-gray-700">
-                                    {new Date(run.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                    {run.hasNew && <Badge className="ml-2 bg-green-100 text-green-700 hover:bg-green-100 border-0 text-[10px] px-1.5 py-0 h-4">New</Badge>}
+                                <tr key={run.id || idx} className="hover:bg-gray-50/50 transition-colors group">
+                                  <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                                    <div className="flex items-center gap-2">
+                                      {new Date(run.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                      {run.hasNew && <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-0 text-[10px] px-1.5 py-0 h-4">New</Badge>}
+                                    </div>
                                   </td>
                                   <td className="px-4 py-4 text-center">
-                                    <span className={cn("text-sm font-semibold", sov > 50 ? "text-green-600" : sov > 0 ? "text-yellow-600" : "text-gray-400")}>
+                                    <div className={cn(
+                                      "inline-flex items-center justify-center font-bold text-lg",
+                                      sov >= 70 ? "text-green-600" : sov >= 30 ? "text-yellow-600" : sov > 0 ? "text-orange-600" : "text-gray-400"
+                                    )}>
                                       {sov}%
-                                    </span>
+                                    </div>
                                   </td>
-                                  <td className="px-4 py-4 text-center text-sm text-gray-500">
-                                    {avgRank ? `#${avgRank}` : "—"}
+                                  <td className="px-4 py-4 text-center">
+                                    <div className={cn(
+                                      "inline-flex items-center justify-center min-w-[32px] h-8 rounded-lg font-bold",
+                                      avgRank ? (avgRank <= 3 ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-gray-50 text-gray-600 border border-gray-100") : "text-gray-300"
+                                    )}>
+                                      {avgRank ? `#${avgRank}` : "—"}
+                                    </div>
                                   </td>
+                                  {/* Brands Column */}
                                   <td className="px-4 py-4">
-                                    <div className="flex items-center justify-center gap-1">
-                                      {visibleModels.length > 0 ? (
+                                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                      {displayBrands.length > 0 ? (
                                         <>
-                                          {visibleModels.slice(0, 4).map((mr, i) => {
-                                            const Logo = MODEL_LOGOS[mr.model]?.Logo;
-                                            const color = MODEL_LOGOS[mr.model]?.color || "#666";
-                                            return Logo ? (
-                                              <div key={i} className="p-1 bg-green-50 border border-green-100 rounded" title={`${mr.model_name}: Visible`}>
-                                                <Logo className="h-4 w-4" style={{ color }} />
+                                          {displayBrands.map((brand, i) => {
+                                            const domain = `${brand.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
+                                            const isOwn = brand.toLowerCase() === (selectedClient?.brand_name || "").toLowerCase();
+
+                                            return (
+                                              <div key={i} className={cn(
+                                                "flex items-center justify-center h-7 w-7 rounded-md border transition-all hover:scale-110",
+                                                isOwn ? "bg-green-50 border-green-200 shadow-sm ring-1 ring-green-100" : "bg-white border-gray-200 shadow-sm"
+                                              )} title={brand}>
+                                                <img
+                                                  src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+                                                  alt={brand}
+                                                  className="h-4 w-4 rounded-sm"
+                                                  onError={(e) => {
+                                                    e.currentTarget.style.display = 'none';
+                                                    e.currentTarget.parentElement!.innerText = brand.charAt(0).toUpperCase();
+                                                    e.currentTarget.parentElement!.className += " text-[10px] font-bold text-gray-500 uppercase flex items-center justify-center w-full h-full";
+                                                  }}
+                                                />
                                               </div>
-                                            ) : null;
+                                            );
                                           })}
-                                          {visibleModels.length > 4 && (
-                                            <span className="text-xs text-gray-400 ml-1">+{visibleModels.length - 4}</span>
+                                          {overflowCount > 0 && (
+                                            <div className="h-7 w-7 rounded-md bg-gray-50 border border-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500 shadow-sm">
+                                              +{overflowCount}
+                                            </div>
                                           )}
                                         </>
                                       ) : (
@@ -3272,12 +3564,17 @@ export default function ClientDashboard() {
                                     </div>
                                   </td>
                                   <td className="px-4 py-4 text-center">
-                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">{citationCount}</Badge>
+                                    <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                                      {citationCount}
+                                    </div>
                                   </td>
-                                  <td className="px-4 py-4 text-center">
+                                  <td className="px-6 py-4 text-right">
                                     <button
-                                      onClick={() => setDetailTab("models")}
-                                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                      onClick={() => {
+                                        setSelectedResponseDate(run.created_at);
+                                        setDetailTab("models");
+                                      }}
+                                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all hover:scale-110"
                                       title="View details"
                                     >
                                       <Eye className="h-4 w-4" />
