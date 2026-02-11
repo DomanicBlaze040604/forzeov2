@@ -130,7 +130,21 @@ const BRAND_STOPWORDS = new Set([
   // Generic list markers
   "next", "ghost", "fresh", "wave", "balance", "endorphin", "gt", "gts", "loft", "ego",
   "rider", "pegasus", "vaporfly", "duomax", "flytefoam", "pwrrunpb", "cloudfoam",
-  "boost", "bounce", "lightstrike", "ultra", "max", "air", "react", "zoom", "zoomx"
+  "boost", "bounce", "lightstrike", "ultra", "max", "air", "react", "zoom", "zoomx",
+  // Additional generic words (from brand extraction issues)
+  "category", "source", "smooth", "frame", "varies", "available", "buy", "combines",
+  "racer", "selections", "reliable", "lab", "tested", "super", "long", "runs",
+  "recommendations", "value", "overall", "trainer", "rounder", "full", "prices",
+  "nitrofoam", "pumagrip", "runrepeat", "theruntesters", "womensrunning"
+]);
+
+// Common multi-word phrases that are NOT brand names
+const BRAND_PHRASE_BLOCKLIST = new Set([
+  "top recommendations", "best overall", "best value", "best daily trainer",
+  "category these", "key features", "best cushioned", "best super shoe",
+  "lab tested", "long runs", "best stability", "full nitrofoam", "best daily",
+  "shoe model", "runner's world", "the run testers", "best overall shoe",
+  "best running shoe", "best running shoes", "running shoe", "running shoes"
 ]);
 
 // ============================================
@@ -647,16 +661,17 @@ function parseBrandData(
   let totalCount = 0;
   const matchedTerms: string[] = [];
 
-  // Count all mentions of brand and tags
+  // Count all mentions of brand and tags using word boundary matching
   for (const term of allTerms) {
     if (!term) continue;
     const termLower = term.toLowerCase();
-    let idx = 0;
-    let count = 0;
-    while ((idx = lower.indexOf(termLower, idx)) !== -1) {
-      count++;
-      idx++;
-    }
+    // Use word boundary regex for accurate matching - prevent partial matches
+    // Escape special regex characters in the brand name
+    const escapedTerm = termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Word boundary: must be preceded/followed by non-alphanumeric or start/end
+    const wordBoundaryRegex = new RegExp(`(?:^|[^a-z0-9])${escapedTerm}(?:[^a-z0-9]|$)`, 'gi');
+    const matches = lower.match(wordBoundaryRegex);
+    const count = matches ? matches.length : 0;
     if (count > 0) {
       totalCount += count;
       matchedTerms.push(term);
@@ -1788,6 +1803,12 @@ Important: Please provide specific recommendations with actual business names, w
       // Skip stopwords (generic terms like "running", "features", "price")
       if (BRAND_STOPWORDS.has(key)) {
         console.log(`[ChatGPT LLM Scraper] Filtering out stopword: "${entity.title}"`);
+        continue;
+      }
+
+      // Skip common multi-word phrases (like "Top Recommendations", "Best Overall")
+      if (BRAND_PHRASE_BLOCKLIST.has(key)) {
+        console.log(`[ChatGPT LLM Scraper] Filtering out phrase: "${entity.title}"`);
         continue;
       }
 

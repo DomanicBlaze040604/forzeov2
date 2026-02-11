@@ -220,6 +220,10 @@ export function VisibilityGraphs({ clientId, brandName }: VisibilityGraphsProps)
     useEffect(() => {
         fetchAllData();
 
+        // Track visibility — drop realtime events when tab is hidden
+        let tabVisible = !document.hidden;
+        let needsRefreshOnVisible = false;
+
         // Set up realtime subscription for new scheduled runs
         const channel = supabase
             .channel("schedule_runs_changes")
@@ -227,14 +231,30 @@ export function VisibilityGraphs({ clientId, brandName }: VisibilityGraphsProps)
                 "postgres_changes",
                 { event: "INSERT", schema: "public", table: "schedule_runs", filter: `client_id=eq.${clientId}` },
                 (payload) => {
+                    // Drop events when tab is hidden — prevents invisible re-renders
+                    if (!tabVisible) {
+                        needsRefreshOnVisible = true;
+                        return;
+                    }
                     console.log("[VisibilityGraphs] New run:", payload.new);
                     setRuns(prev => [payload.new as ScheduleRun, ...prev]);
                 }
             )
             .subscribe();
 
+        // When tab becomes visible, refresh if we missed events
+        const handleVisibility = () => {
+            tabVisible = !document.hidden;
+            if (tabVisible && needsRefreshOnVisible) {
+                needsRefreshOnVisible = false;
+                fetchAllData();
+            }
+        };
+        document.addEventListener("visibilitychange", handleVisibility);
+
         return () => {
             supabase.removeChannel(channel);
+            document.removeEventListener("visibilitychange", handleVisibility);
         };
     }, [clientId, timeRange, dataSource]);
 

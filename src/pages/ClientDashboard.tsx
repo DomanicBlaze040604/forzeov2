@@ -226,6 +226,9 @@ export default function ClientDashboard() {
   // Prompt multi-select for bulk actions
   const [selectedPromptIds, setSelectedPromptIds] = useState<Set<string>>(new Set());
 
+  // Brand Visibility View All modal
+  const [showBrandVisibilityModal, setShowBrandVisibilityModal] = useState(false);
+
 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
@@ -253,6 +256,102 @@ export default function ClientDashboard() {
     filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { const response = mr.raw_response?.toLowerCase() || ""; if (mr.brand_mentioned) mentions[selectedClient.brand_name] += mr.brand_mention_count; selectedClient.competitors.forEach(comp => { const regex = new RegExp(comp.toLowerCase(), "gi"); const matches = response.match(regex); if (matches) mentions[comp] += matches.length; }); }); });
     const total = Object.values(mentions).reduce((a, b) => a + b, 0) || 1;
     return Object.entries(mentions).map(([name, count]) => ({ name, mentions: count, percentage: Math.round((count / total) * 100) })).sort((a, b) => b.mentions - a.mentions);
+  }, [selectedClient, filteredAuditResults]);
+
+  const detailedBrandStats = useMemo(() => {
+    if (!selectedClient) return [];
+
+    // Initialize stats for client brand and competitors
+    const stats: Record<string, {
+      mentions: number;
+      totalRank: number;
+      rankCount: number;
+      auditsWithMentions: number;
+    }> = {};
+
+    const allBrands = [selectedClient.brand_name, ...selectedClient.competitors];
+    allBrands.forEach(b => {
+      stats[b] = { mentions: 0, totalRank: 0, rankCount: 0, auditsWithMentions: 0 };
+    });
+
+    let totalMentionsAllBrands = 0;
+
+    filteredAuditResults.forEach(result => {
+      const brandsFoundInThisAudit = new Set<string>();
+
+      result.model_results.forEach(mr => {
+        const response = mr.raw_response?.toLowerCase() || "";
+
+        // Client Brand Stats
+        if (mr.brand_mentioned) {
+          if (stats[selectedClient.brand_name]) {
+            stats[selectedClient.brand_name].mentions += mr.brand_mention_count;
+            totalMentionsAllBrands += mr.brand_mention_count;
+            brandsFoundInThisAudit.add(selectedClient.brand_name);
+
+            // Try to get rank
+            let rank = mr.brand_rank;
+            if (!rank && mr.raw_response) {
+              const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors);
+              rank = brandRank;
+            }
+            if (rank) {
+              stats[selectedClient.brand_name].totalRank += rank;
+              stats[selectedClient.brand_name].rankCount++;
+            }
+          }
+        }
+
+        // Competitor Stats
+        selectedClient.competitors.forEach(comp => {
+          if (!stats[comp]) return;
+
+          // Check mentions
+          const regex = new RegExp(`(?:^|[^a-z0-9])${comp.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[^a-z0-9]|$)`, "gi");
+          const matches = response.match(regex);
+          if (matches && matches.length > 0) {
+            stats[comp].mentions += matches.length;
+            totalMentionsAllBrands += matches.length;
+            brandsFoundInThisAudit.add(comp);
+
+            // Check rank (from competitors_found or parse new)
+            let rank: number | null = null;
+            if (mr.competitors_found) {
+              const cf = mr.competitors_found.find(c => c.name.toLowerCase() === comp.toLowerCase());
+              if (cf && cf.rank) rank = cf.rank;
+            }
+
+            if (!rank) {
+              // Parse rank from text if not in metadata
+              const { competitorStats } = cleanAndAnalyzeResponse(mr.raw_response || "", selectedClient.brand_name, selectedClient.competitors);
+              const cs = competitorStats.find(c => c.name.toLowerCase() === comp.toLowerCase());
+              if (cs && cs.rank) rank = cs.rank;
+            }
+
+            if (rank) {
+              stats[comp].totalRank += rank;
+              stats[comp].rankCount++;
+            }
+          }
+        });
+      });
+
+      // Increment audit presence for brands found in this audit
+      brandsFoundInThisAudit.forEach(brand => {
+        if (stats[brand]) {
+          stats[brand].auditsWithMentions++;
+        }
+      });
+    });
+
+    // Format final array
+    return Object.entries(stats).map(([name, data]) => ({
+      name,
+      mentions: data.mentions,
+      percentage: totalMentionsAllBrands > 0 ? Math.round((data.mentions / totalMentionsAllBrands) * 100) : 0,
+      avgRank: data.rankCount > 0 ? Math.round((data.totalRank / data.rankCount) * 10) / 10 : null,
+      auditPresence: data.auditsWithMentions
+    })).sort((a, b) => b.percentage - a.percentage);
   }, [selectedClient, filteredAuditResults]);
 
   const filteredPromptsByTab = useMemo(() => {
@@ -1023,7 +1122,7 @@ export default function ClientDashboard() {
             {filteredAuditResults.length === 0 && <div className="text-center py-8 text-gray-500"><BarChart3 className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p className="text-sm">Run audits to see visibility data</p></div>}
           </div>
           <div className="col-span-1 md:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
-            <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Brand Visibility</h3></div>
+            <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Brand Visibility</h3><button onClick={() => setShowBrandVisibilityModal(true)} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">View All <ChevronRight className="h-3.5 w-3.5" /></button></div>
             <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; const brandDomain = isBrand ? selectedClient?.brand_domain : `${c.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><img src={`https://www.google.com/s2/favicons?domain=${brandDomain}&sz=20`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }} /><Building2 className="h-5 w-5 text-gray-400 hidden" /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
           </div>
         </div>
@@ -1090,6 +1189,7 @@ export default function ClientDashboard() {
         <div className="mt-6">
           {selectedClient && selectedClient.id && <UniversalImport clientId={selectedClient.id} onImportComplete={() => refreshData()} />}
         </div>
+        <BrandVisibilityModal />
       </div>
     );
   }
@@ -1206,7 +1306,29 @@ export default function ClientDashboard() {
                 const isLoading = loadingPromptId === p.id;
                 const visibleCount = r?.model_results.filter(mr => mr.brand_mentioned).length || 0;
                 const totalCount = r?.model_results.length || 0;
-                const pos = r?.summary.average_rank;
+                // Calculate position: use summary.average_rank, or compute from model results, or parse from raw_response
+                let pos = r?.summary?.average_rank;
+                if (!pos && r?.model_results && visibleCount > 0) {
+                  // First try using existing brand_rank field
+                  const ranksFromModels = r.model_results
+                    .filter(mr => mr.brand_mentioned && mr.brand_rank != null)
+                    .map(mr => mr.brand_rank as number);
+                  if (ranksFromModels.length > 0) {
+                    pos = Math.round(ranksFromModels.reduce((a, b) => a + b, 0) / ranksFromModels.length * 10) / 10;
+                  } else {
+                    // Fallback: parse rank from raw_response using cleanAndAnalyzeResponse
+                    const parsedRanks: number[] = [];
+                    r.model_results.forEach(mr => {
+                      if (mr.brand_mentioned && mr.raw_response && selectedClient) {
+                        const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors);
+                        if (brandRank !== null) parsedRanks.push(brandRank);
+                      }
+                    });
+                    if (parsedRanks.length > 0) {
+                      pos = Math.round(parsedRanks.reduce((a, b) => a + b, 0) / parsedRanks.length * 10) / 10;
+                    }
+                  }
+                }
                 const cit = r?.summary.total_citations || 0;
                 const isInactive = p.is_active === false;
 
@@ -2949,6 +3071,30 @@ export default function ClientDashboard() {
     const uniqueCitations = Array.from(new Map(allPromptCitations.map(c => [c.url, c])).values());
     const tavilyData = selectedPromptDetail ? tavilyResults[selectedPromptDetail] as any : null;
 
+    // Calculate average rank from model results if summary.average_rank is missing
+    let computedAvgRank = displayResult?.summary?.average_rank || null;
+    if (!computedAvgRank && displayResult?.model_results) {
+      // First try using existing brand_rank field
+      const ranksFromModels = displayResult.model_results
+        .filter(mr => mr.brand_mentioned && mr.brand_rank != null)
+        .map(mr => mr.brand_rank as number);
+      if (ranksFromModels.length > 0) {
+        computedAvgRank = Math.round(ranksFromModels.reduce((a, b) => a + b, 0) / ranksFromModels.length * 10) / 10;
+      } else if (selectedClient) {
+        // Fallback: parse rank from raw_response using cleanAndAnalyzeResponse
+        const parsedRanks: number[] = [];
+        displayResult.model_results.forEach(mr => {
+          if (mr.brand_mentioned && mr.raw_response) {
+            const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors);
+            if (brandRank !== null) parsedRanks.push(brandRank);
+          }
+        });
+        if (parsedRanks.length > 0) {
+          computedAvgRank = Math.round(parsedRanks.reduce((a, b) => a + b, 0) / parsedRanks.length * 10) / 10;
+        }
+      }
+    }
+
     const handleGenerateVisibilityContent = async () => {
       if (!prompt && !result) return;
       setGeneratingVisibilityContent(true);
@@ -3002,7 +3148,7 @@ export default function ClientDashboard() {
                   <div className="text-xs font-medium text-green-600 mt-0.5">Visibility</div>
                 </div>
                 <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-2 text-center">
-                  <div className="text-2xl font-bold text-blue-700">{displayResult?.summary.average_rank ? `#${displayResult.summary.average_rank}` : "--"}</div>
+                  <div className="text-2xl font-bold text-blue-700">{computedAvgRank ? `#${computedAvgRank}` : "--"}</div>
                   <div className="text-xs font-medium text-blue-600 mt-0.5">Avg Rank</div>
                 </div>
                 <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-2 text-center">
@@ -3970,4 +4116,87 @@ export default function ClientDashboard() {
       </Dialog>
     );
   }
+  function BrandVisibilityModal() {
+    const clientStats = detailedBrandStats.find(s => s.name === selectedClient?.brand_name);
+    const sov = clientStats?.percentage || 0;
+    const rank = clientStats?.avgRank;
+
+    return (
+      <Dialog open={showBrandVisibilityModal} onOpenChange={setShowBrandVisibilityModal}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col p-6">
+          <DialogHeader className="mb-4">
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Users className="h-5 w-5 text-blue-600" />
+              Brand Visibility Landscape
+            </DialogTitle>
+            <p className="text-sm text-gray-500">Detailed breakdown of brand mentions across all audits</p>
+          </DialogHeader>
+
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 shrink-0">
+            <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl">
+              <div className="text-sm text-blue-600 font-medium mb-1">Your Share of Voice</div>
+              <div className="text-3xl font-bold text-blue-700">{sov}%</div>
+            </div>
+            <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl">
+              <div className="text-sm text-indigo-600 font-medium mb-1">Avg. Position</div>
+              <div className="text-3xl font-bold text-indigo-700">{rank ? `#${rank}` : '-'}</div>
+            </div>
+            <div className="bg-gray-50 border border-gray-100 p-4 rounded-xl">
+              <div className="text-sm text-gray-600 font-medium mb-1">Audits with Presence</div>
+              <div className="text-3xl font-bold text-gray-700">{clientStats?.auditPresence || 0} <span className="text-base font-normal text-gray-400">/ {filteredAuditResults.length}</span></div>
+            </div>
+          </div>
+
+          <div className="overflow-y-auto flex-1 -mx-2 px-2 border rounded-lg border-gray-100">
+            <table className="w-full relative">
+              <thead className="sticky top-0 bg-white z-10 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-16">Rank</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Brand</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Mentions</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-1/3 pl-8">Visibility Share</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Avg Rank</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {detailedBrandStats.map((brand, i) => {
+                  const isClient = brand.name === selectedClient?.brand_name;
+                  const brandDomain = isClient ? selectedClient?.brand_domain : `${brand.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
+                  return (
+                    <tr key={i} className={cn("hover:bg-gray-50/80 transition-colors", isClient && "bg-blue-50/40 hover:bg-blue-50/60")}>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-500">#{i + 1}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <img src={`https://www.google.com/s2/favicons?domain=${brandDomain}&sz=32`} className="w-6 h-6 rounded-md bg-white border border-gray-100 shadow-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }} />
+                          <div className="w-6 h-6 rounded-md bg-gray-100 hidden flex items-center justify-center text-[10px] font-bold text-gray-400 uppercase">{brand.name.substring(0, 2)}</div>
+                          <span className={cn("font-medium", isClient ? "text-blue-700" : "text-gray-900")}>{brand.name}</span>
+                          {isClient && <Badge className="ml-2 bg-blue-100 text-blue-700 hover:bg-blue-100 border-0 text-[10px] h-5">You</Badge>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-600 font-medium">{brand.mentions}</td>
+                      <td className="px-4 py-3 pl-8">
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${brand.percentage}%`, backgroundColor: isClient ? '#3b82f6' : '#9ca3af' }} />
+                          </div>
+                          <span className="text-sm font-medium w-9 text-right">{brand.percentage}%</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className={cn("inline-flex items-center px-2 py-0.5 rounded text-sm font-medium", brand.avgRank && brand.avgRank <= 3 ? "bg-amber-50 text-amber-700 border border-amber-100" : "text-gray-600")}>
+                          {brand.avgRank ? `#${brand.avgRank}` : '-'}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 }
+

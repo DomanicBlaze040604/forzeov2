@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Auth } from '@supabase/auth-ui-react'
 import { ThemeSupa } from '@supabase/auth-ui-shared'
 import { supabase } from '@/integrations/supabase/client'
@@ -12,33 +12,41 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [checkingOnboarding, setCheckingOnboarding] = useState(false)
   const [dashboardKey, setDashboardKey] = useState(0)
+  const sessionUserRef = useRef<string | null>(null)
+  const onboardingCheckedRef = useRef(false)
 
   useEffect(() => {
-    // Check current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
-
-      // Check if user needs onboarding
-      if (session?.user) {
-        checkUserOnboarding(session.user.id)
-      }
-    })
-
-    // Listen for auth changes (handles Google OAuth, email sign-in, etc.)
+    // Single unified auth listener — handles INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT
+    // No separate getSession() call needed — INITIAL_SESSION provides the session on mount
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('[Auth] Event:', event, 'User:', session?.user?.email)
-      setSession(session)
+      // TOKEN_REFRESHED fires on every browser tab switch — skip if same user
+      if (event === 'TOKEN_REFRESHED') {
+        if ((session?.user?.id || null) === sessionUserRef.current) {
+          return // Same user, just a token refresh — no re-render needed
+        }
+      }
 
-      // Check onboarding for ALL auth events that result in a session
-      if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
-        // Add delay for new OAuth users to allow profile creation
+      // Update ref and state
+      sessionUserRef.current = session?.user?.id || null
+      setSession(session)
+      setLoading(false)
+
+      // Check onboarding only on actual sign-in events
+      if (session?.user && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+        // Prevent duplicate onboarding checks (StrictMode double-mount + INITIAL_SESSION)
+        if (event === 'INITIAL_SESSION' && onboardingCheckedRef.current) return
+        onboardingCheckedRef.current = true
+
         const delay = event === 'SIGNED_IN' ? 1500 : 0
         setTimeout(() => {
           checkUserOnboarding(session.user.id)
         }, delay)
+      }
+
+      if (event === 'SIGNED_OUT') {
+        onboardingCheckedRef.current = false
       }
     })
 
@@ -114,14 +122,14 @@ function App() {
     setDashboardKey(prev => prev + 1)
   }
 
-  if (loading || checkingOnboarding) {
+  // Only show loading spinner on initial page load (before any session is resolved)
+  // NEVER flash a spinner for onboarding check — it happens silently in the background
+  if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-slate-700 font-medium">
-            {checkingOnboarding ? 'Checking your setup...' : 'Loading...'}
-          </p>
+          <p className="mt-4 text-slate-700 font-medium">Loading...</p>
         </div>
       </div>
     )

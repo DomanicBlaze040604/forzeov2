@@ -134,9 +134,37 @@ export function ScheduleManager({ clientId, prompts, selectedModels }: ScheduleM
     useEffect(() => {
         fetchSchedules();
 
-        // Refresh next_run_at display every second
-        const interval = setInterval(() => setTick(t => t + 1), 1000);
-        return () => clearInterval(interval);
+        // Refresh next_run_at display every second — but ONLY when tab is visible
+        let interval: ReturnType<typeof setInterval> | null = null;
+
+        const startTicking = () => {
+            if (!interval) {
+                interval = setInterval(() => setTick(t => t + 1), 1000);
+            }
+        };
+        const stopTicking = () => {
+            if (interval) {
+                clearInterval(interval);
+                interval = null;
+            }
+        };
+
+        // Only tick when tab is visible
+        if (!document.hidden) startTicking();
+
+        const handleVisibility = () => {
+            if (document.hidden) {
+                stopTicking();
+            } else {
+                startTicking();
+            }
+        };
+        document.addEventListener("visibilitychange", handleVisibility);
+
+        return () => {
+            stopTicking();
+            document.removeEventListener("visibilitychange", handleVisibility);
+        };
     }, [fetchSchedules]);
 
     // Reset form

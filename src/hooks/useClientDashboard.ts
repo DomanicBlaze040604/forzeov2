@@ -80,7 +80,7 @@
  * @author Forzeo Team
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -460,6 +460,19 @@ export function useClientDashboard() {
 
   const [auditProgress, setAuditProgress] = useState<number | null>(null);
 
+  // ============================================
+  // FETCH GUARD & DATA CACHE (prevents duplicate/cascading fetches)
+  // ============================================
+  const loadingClientRef = useRef<string | null>(null);
+  const dataCache = useRef<Map<string, {
+    prompts: Prompt[];
+    results: AuditResult[];
+    tavily: Record<string, unknown>;
+    citationMeta: Record<string, CitationMeta>;
+    timestamp: number;
+  }>>(new Map());
+  const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
   const setIncludeTavily = useCallback((include: boolean) => {
     setIncludeTavilyState(include);
     saveToStorage(STORAGE_KEYS.INCLUDE_TAVILY, include);
@@ -585,6 +598,252 @@ export function useClientDashboard() {
   // CLIENT MANAGEMENT - Supabase Primary
   // ============================================
 
+  // ============================================
+  // CENTRALIZED DATA LOADING (single entry point)
+  // ============================================
+
+  const loadClientData = useCallback(async (client: Client, forceRefresh = false) => {
+    // Guard: prevent concurrent fetches for the same or different client
+    const requestId = client.id + '_' + Date.now();
+    loadingClientRef.current = requestId;
+
+    // Check cache first (unless force refresh)
+    if (!forceRefresh) {
+      const cached = dataCache.current.get(client.id);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+        console.log(`[loadClientData] Cache hit for ${client.brand_name}, age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s`);
+        setPrompts(cached.prompts);
+        setAuditResults(cached.results);
+        setTavilyResults(cached.tavily);
+        setCitationMeta(cached.citationMeta);
+        updateSummaryDirect(cached.results);
+        return;
+      }
+    }
+
+    console.log(`[loadClientData] Loading data for: ${client.brand_name} (id: ${client.id})`);
+
+    let loadedPrompts: Prompt[] = [];
+    let loadedResults: AuditResult[] = [];
+    let loadedTavily: Record<string, unknown> = {};
+    let loadedCitationMeta: Record<string, CitationMeta> = {};
+
+    // --- Load Prompts ---
+    try {
+      const { data: promptsData } = await supabase
+        .from("prompts").select("*").eq("client_id", client.id).eq("is_active", true);
+      if (promptsData && promptsData.length > 0) {
+        loadedPrompts = promptsData.map(p => ({
+          id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
+          category: p.category || "custom", is_custom: p.is_custom, is_active: p.is_active,
+        }));
+      } else {
+        const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+        loadedPrompts = storedPrompts[client.id] || [];
+      }
+    } catch {
+      const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+      loadedPrompts = storedPrompts[client.id] || [];
+    }
+
+    // Stale check: abort if a newer load was started
+    if (loadingClientRef.current !== requestId) {
+      console.log(`[loadClientData] Aborted stale fetch for ${client.brand_name}`);
+      return;
+    }
+
+    // --- Load Audit Results ---
+    try {
+      const { data: resultsData } = await supabase
+        .from("audit_results").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
+      if (resultsData && resultsData.length > 0) {
+        loadedResults = resultsData.map(r => ({
+          id: r.id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
+          model_results: r.model_results || [],
+          summary: r.summary || {
+            share_of_voice: r.share_of_voice ?? 0,
+            average_rank: r.average_rank ?? null,
+            total_citations: r.total_citations ?? 0,
+            total_cost: r.total_cost ?? 0,
+          },
+          created_at: r.created_at,
+        }));
+      } else {
+        const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+        loadedResults = storedResults[client.id] || [];
+      }
+    } catch {
+      const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+      loadedResults = storedResults[client.id] || [];
+    }
+
+    // Stale check
+    if (loadingClientRef.current !== requestId) return;
+
+    // --- Load Tavily Results ---
+    try {
+      const { data: tavilyData } = await supabase
+        .from('tavily_results').select('*').eq('client_id', client.id)
+        .order('created_at', { ascending: false });
+      if (tavilyData && tavilyData.length > 0) {
+        const tavilyMap: Record<string, unknown> = {};
+        tavilyData.forEach(t => {
+          if (t.prompt_id && !tavilyMap[t.prompt_id]) {
+            tavilyMap[t.prompt_id] = {
+              success: true, query: t.query, answer: t.answer, sources: t.sources || [],
+              analysis: { brand_mentioned: false, brand_mention_count: 0, competitor_mentions: {}, top_domains: [], source_types: {}, insights: [] },
+              timestamp: t.created_at,
+            };
+          }
+        });
+        loadedTavily = tavilyMap;
+      }
+    } catch (err) { console.log("[Tavily] Database fetch failed:", err); }
+
+    // Stale check
+    if (loadingClientRef.current !== requestId) return;
+
+    // --- Load Citation Meta ---
+    try {
+      const { data } = await supabase
+        .from('citation_intelligence')
+        .select('domain, category, source_type, authority_tier, relationship_type, is_affiliate');
+      if (data) {
+        const meta: Record<string, CitationMeta> = {};
+        data.forEach((row: any) => {
+          meta[row.domain] = {
+            category: row.category, source_type: row.source_type,
+            authority_tier: row.authority_tier, relationship_type: row.relationship_type,
+            is_affiliate: row.is_affiliate
+          };
+        });
+        loadedCitationMeta = meta;
+      }
+    } catch (err) { console.error("Failed to fetch citation meta:", err); }
+
+    // Final stale check before setting state
+    if (loadingClientRef.current !== requestId) return;
+
+    // --- Set all state in one batch ---
+    setPrompts(loadedPrompts);
+    setAuditResults(loadedResults);
+    setTavilyResults(loadedTavily);
+    setCitationMeta(loadedCitationMeta);
+    updateSummaryDirect(loadedResults);
+
+    // Persist to localStorage (backup)
+    const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+    storedPrompts[client.id] = loadedPrompts;
+    saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+    const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+    storedResults[client.id] = loadedResults;
+    saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
+
+    // Store in memory cache
+    dataCache.current.set(client.id, {
+      prompts: loadedPrompts,
+      results: loadedResults,
+      tavily: loadedTavily,
+      citationMeta: loadedCitationMeta,
+      timestamp: Date.now(),
+    });
+
+    console.log(`[loadClientData] Loaded for ${client.brand_name}: ${loadedPrompts.length} prompts, ${loadedResults.length} results, ${Object.keys(loadedTavily).length} tavily, ${Object.keys(loadedCitationMeta).length} citation meta`);
+
+    // AUTO-AUDIT: Check if this is a new client that needs initial audits
+    const clientCreatedAt = new Date(client.created_at);
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const isNewClient = clientCreatedAt > fifteenMinutesAgo;
+    const hasNoResults = loadedResults.length === 0;
+    const hasPrompts = loadedPrompts.length > 0;
+
+    if (isNewClient && hasNoResults && hasPrompts) {
+      console.log("[Auto-Audit] New client detected with prompts but no results. Triggering auto-audit...");
+      toast.info(`🚀 Starting initial AI audit for ${client.brand_name}...`, {
+        description: `Running ${Math.min(loadedPrompts.length, 10)} prompts across 6 AI models`,
+        duration: 8000,
+      });
+
+      setTimeout(async () => {
+        try {
+          const promptsToAudit = loadedPrompts.slice(0, 10);
+          let completedCount = 0;
+          const totalPrompts = promptsToAudit.length;
+
+          for (const prompt of promptsToAudit) {
+            try {
+              setLoadingPromptId(prompt.id);
+              const { data, error } = await supabase.functions.invoke("geo-audit", {
+                body: {
+                  client_id: client.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
+                  brand_name: client.brand_name, brand_domain: client.brand_domain,
+                  brand_tags: client.brand_tags, competitors: client.competitors,
+                  location_code: client.location_code, location_name: client.target_region,
+                  models: ["chatgpt", "claude", "gemini", "perplexity", "google_ai_overview", "google_serp"],
+                  save_to_db: true
+                }
+              });
+
+              if (error || !data?.success) {
+                console.error(`[Auto-Audit] Error:`, error || data?.error);
+              } else {
+                completedCount++;
+                const progress = Math.round((completedCount / totalPrompts) * 100);
+                setAuditProgress(progress);
+
+                if (data.data) {
+                  const result: AuditResult = {
+                    id: data.data.id || crypto.randomUUID(),
+                    prompt_id: prompt.id,
+                    prompt_text: prompt.prompt_text,
+                    model_results: data.data.model_results,
+                    summary: data.data.summary,
+                    created_at: data.data.timestamp,
+                    client_id: client.id
+                  };
+
+                  setAuditResults(prev => {
+                    const exists = prev.some(r => r.prompt_id === prompt.id);
+                    const newAuditResults = exists
+                      ? prev.map(r => r.prompt_id === prompt.id ? result : r)
+                      : [result, ...prev];
+                    updateSummaryDirect(newAuditResults);
+                    const sr = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+                    sr[client.id] = newAuditResults;
+                    saveToStorage(STORAGE_KEYS.RESULTS, sr);
+                    // Invalidate cache so next load gets fresh data
+                    dataCache.current.delete(client.id);
+                    return newAuditResults;
+                  });
+                }
+
+                if (progress % 20 === 0) {
+                  toast.info(`📊 Audit progress: ${completedCount}/${totalPrompts} prompts analyzed (${progress}%)`, { duration: 2000 });
+                }
+              }
+            } catch (err) {
+              console.error(`[Auto-Audit] Exception:`, err);
+            } finally {
+              setLoadingPromptId(null);
+            }
+          }
+
+          console.log("[Auto-Audit] Complete.");
+          setAuditProgress(null);
+          toast.success(`✅ Initial audit complete!`, {
+            description: `${completedCount} prompts analyzed across 6 AI models.`,
+            duration: 6000,
+          });
+        } catch (autoErr) {
+          console.error("[Auto-Audit] Failed:", autoErr);
+          toast.error("Auto-audit encountered an error", {
+            description: "Some results may not have been collected. Try running manually.",
+          });
+        }
+      }, 2000);
+    }
+  }, []);
+
   const fetchClients = useCallback(async () => {
     try {
       const { data, error: fetchError } = await supabase
@@ -606,6 +865,8 @@ export function useClientDashboard() {
           const lastSelectedId = loadFromStorage<string>(STORAGE_KEYS.SELECTED_CLIENT, mappedClients[0]?.id);
           const lastSelected = mappedClients.find(c => c.id === lastSelectedId) || mappedClients[0];
           setSelectedClient(lastSelected);
+          // Load data for the selected client (single fetch, no useEffect cascade)
+          await loadClientData(lastSelected);
         }
         return;
       }
@@ -624,12 +885,15 @@ export function useClientDashboard() {
       setClients(defaultClients);
       saveToStorage(STORAGE_KEYS.CLIENTS, defaultClients);
       setSelectedClient(defaultClients[0]);
+      await loadClientData(defaultClients[0]);
     } else {
       setClients(storedClients);
       const lastSelectedId = loadFromStorage<string>(STORAGE_KEYS.SELECTED_CLIENT, storedClients[0]?.id);
-      setSelectedClient(storedClients.find(c => c.id === lastSelectedId) || storedClients[0]);
+      const lastSelected = storedClients.find(c => c.id === lastSelectedId) || storedClients[0];
+      setSelectedClient(lastSelected);
+      await loadClientData(lastSelected);
     }
-  }, []);
+  }, [loadClientData]);
 
   const addClient = useCallback(async (clientData: Partial<Client>): Promise<Client> => {
     // Check 1-brand limit for normal users
@@ -671,7 +935,7 @@ export function useClientDashboard() {
       name: clientData.name || "New Client",
       brand_name: clientData.brand_name || clientData.name || "New Brand",
       brand_domain: clientData.brand_domain || undefined,
-      slug: generateSlug(clientData.name || "new-client"),
+      slug: `${user.id.substring(0, 8)}-${generateSlug(clientData.name || "new-client")}`,
       target_region: clientData.target_region || "United States",
       location_code: clientData.location_code || 2840,
       industry: clientData.industry || "Custom",
@@ -763,98 +1027,9 @@ export function useClientDashboard() {
   const switchClient = useCallback(async (client: Client) => {
     setSelectedClient(client);
     saveToStorage(STORAGE_KEYS.SELECTED_CLIENT, client.id);
-
-    // Load prompts from Supabase first
-    try {
-      const { data: promptsData } = await supabase
-        .from("prompts").select("*").eq("client_id", client.id);
-      if (promptsData && promptsData.length > 0) {
-        const mappedPrompts: Prompt[] = promptsData.map(p => ({
-          id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
-          category: p.category || "custom", is_custom: p.is_custom, is_active: p.is_active,
-        }));
-        setPrompts(mappedPrompts);
-        const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-        storedPrompts[client.id] = mappedPrompts;
-        saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
-      } else {
-        const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-        setPrompts(storedPrompts[client.id] || []);
-      }
-    } catch {
-      const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-      setPrompts(storedPrompts[client.id] || []);
-    }
-
-    // Load results from Supabase
-    try {
-      const { data: resultsData } = await supabase
-        .from("audit_results").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
-      if (resultsData && resultsData.length > 0) {
-        const mappedResults: AuditResult[] = resultsData.map(r => ({
-          id: r.id, client_id: r.client_id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
-          model_results: r.model_results || [],
-          // Build summary from individual columns (database stores them separately, not as JSONB)
-          summary: r.summary || {
-            share_of_voice: r.share_of_voice ?? 0,
-            average_rank: r.average_rank ?? null,
-            total_citations: r.total_citations ?? 0,
-            total_cost: r.total_cost ?? 0,
-          },
-          created_at: r.created_at,
-        }));
-        setAuditResults(mappedResults);
-        updateSummary(mappedResults);
-        const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-        storedResults[client.id] = mappedResults;
-        saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
-
-        // Load Tavily results from database
-        try {
-          const { data: tavilyData } = await supabase
-            .from('tavily_results')
-            .select('*')
-            .eq('client_id', client.id)
-            .order('created_at', { ascending: false });
-
-          if (tavilyData && tavilyData.length > 0) {
-            const tavilyMap: Record<string, unknown> = {};
-            tavilyData.forEach(t => {
-              // Only keep the most recent result per prompt
-              if (t.prompt_id && !tavilyMap[t.prompt_id]) {
-                tavilyMap[t.prompt_id] = {
-                  success: true,
-                  query: t.query,
-                  answer: t.answer,
-                  sources: t.sources || [],
-                  analysis: {
-                    brand_mentioned: false,
-                    brand_mention_count: 0,
-                    competitor_mentions: {},
-                    top_domains: [],
-                    source_types: {},
-                    insights: [],
-                  },
-                  timestamp: t.created_at,
-                };
-              }
-            });
-            setTavilyResults(tavilyMap);
-            console.log("[Tavily] Loaded", Object.keys(tavilyMap).length, "results from database");
-          }
-        } catch (tavilyErr) {
-          console.log("[Tavily] Database fetch failed:", tavilyErr);
-        }
-
-        return;
-      }
-    } catch { /* fallback to localStorage */ }
-
-    const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-    const clientResults = storedResults[client.id] || [];
-    setAuditResults(clientResults);
-    updateSummary(clientResults);
-  }, []);
+    // Single entry point for data loading — no duplicate fetches
+    await loadClientData(client);
+  }, [loadClientData]);
 
   const updateBrandTags = useCallback(async (tags: string[]) => {
     if (!selectedClient) return;
@@ -1184,7 +1359,8 @@ export function useClientDashboard() {
   // AUDIT EXECUTION - Save to Supabase
   // ============================================
 
-  const updateSummary = useCallback((results: AuditResult[]) => {
+  // Plain function (not useCallback) — avoids identity changes polluting dependency arrays
+  const updateSummaryDirect = (results: AuditResult[]) => {
     if (results.length === 0) { setSummary(null); return; }
     let totalSov = 0, totalCitations = 0, totalCost = 0, rankSum = 0, rankCount = 0;
     for (const r of results) {
@@ -1198,7 +1374,9 @@ export function useClientDashboard() {
       average_rank: rankCount > 0 ? Math.round((rankSum / rankCount) * 10) / 10 : null,
       total_citations: totalCitations, total_cost: totalCost,
     });
-  }, []);
+  };
+  // Keep a stable reference alias for places that need a useCallback-style ref
+  const updateSummary = useCallback((results: AuditResult[]) => updateSummaryDirect(results), []);
 
   const runFullAudit = useCallback(async () => {
     if (!selectedClient || prompts.length === 0) return;
@@ -2125,193 +2303,16 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
   // ============================================
   // INITIALIZATION
   // ============================================
-
-  useEffect(() => { fetchClients(); }, [fetchClients]);
-
+  const initRef = useRef(false);
   useEffect(() => {
-    if (selectedClient) {
-      // Load from Supabase on client change
-      (async () => {
-        let loadedPrompts: Prompt[] = [];
-        let loadedResults: AuditResult[] = [];
-
-        try {
-          const { data: promptsData } = await supabase
-            .from("prompts").select("*").eq("client_id", selectedClient.id).eq("is_active", true);
-          if (promptsData && promptsData.length > 0) {
-            const mappedPrompts: Prompt[] = promptsData.map(p => ({
-              id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
-              category: p.category || "custom", is_custom: p.is_custom, is_active: p.is_active,
-            }));
-            setPrompts(mappedPrompts);
-            loadedPrompts = mappedPrompts;
-          } else {
-            const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-            setPrompts(storedPrompts[selectedClient.id] || []);
-            loadedPrompts = storedPrompts[selectedClient.id] || [];
-          }
-        } catch {
-          const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-          setPrompts(storedPrompts[selectedClient.id] || []);
-          loadedPrompts = storedPrompts[selectedClient.id] || [];
-        }
-
-        try {
-          const { data: resultsData } = await supabase
-            .from("audit_results").select("*").eq("client_id", selectedClient.id).order("created_at", { ascending: false });
-          if (resultsData && resultsData.length > 0) {
-            const mappedResults: AuditResult[] = resultsData.map(r => ({
-              id: r.id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
-              model_results: r.model_results || [],
-              summary: r.summary || {
-                share_of_voice: r.share_of_voice ?? 0,
-                average_rank: r.average_rank ?? null,
-                total_citations: r.total_citations ?? 0,
-                total_cost: r.total_cost ?? 0,
-              },
-              created_at: r.created_at,
-            }));
-            setAuditResults(mappedResults);
-            updateSummary(mappedResults);
-            loadedResults = mappedResults;
-          } else {
-            const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-            const clientResults = storedResults[selectedClient.id] || [];
-            setAuditResults(clientResults);
-            updateSummary(clientResults);
-            loadedResults = clientResults;
-          }
-        } catch {
-          const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-          const clientResults = storedResults[selectedClient.id] || [];
-          setAuditResults(clientResults);
-          updateSummary(clientResults);
-          loadedResults = clientResults;
-        }
-
-        // AUTO-AUDIT: Check if this is a new client that needs initial audits
-        const clientCreatedAt = new Date(selectedClient.created_at);
-        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-        const isNewClient = clientCreatedAt > fifteenMinutesAgo;
-        const hasNoResults = loadedResults.length === 0;
-        const hasPrompts = loadedPrompts.length > 0;
-
-        if (isNewClient && hasNoResults && hasPrompts) {
-          console.log("[Auto-Audit] New client detected with prompts but no results. Triggering auto-audit...");
-          console.log("[Auto-Audit] Client:", selectedClient.brand_name, "Prompts:", loadedPrompts.length);
-
-          // Show toast notification that auto-audit is starting
-          toast.info(`🚀 Starting initial AI audit for ${selectedClient.brand_name}...`, {
-            description: `Running ${Math.min(loadedPrompts.length, 10)} prompts across 6 AI models`,
-            duration: 8000,
-          });
-
-          // Run auto-audit after short delay
-          setTimeout(async () => {
-            try {
-              const promptsToAudit = loadedPrompts.slice(0, 10); // Limit to 10 prompts for initial audit
-              console.log(`[Auto-Audit] Running audit on ${promptsToAudit.length} prompts...`);
-
-              let completedCount = 0;
-              const totalPrompts = promptsToAudit.length;
-
-              for (const prompt of promptsToAudit) {
-                try {
-                  setLoadingPromptId(prompt.id); // Show spinner for this prompt
-                  console.log(`[Auto-Audit] Auditing: "${prompt.prompt_text.substring(0, 50)}..."`);
-
-                  const { data, error } = await supabase.functions.invoke("geo-audit", {
-                    body: {
-                      client_id: selectedClient.id,
-                      prompt_id: prompt.id,
-                      prompt_text: prompt.prompt_text,
-                      brand_name: selectedClient.brand_name,
-                      brand_domain: selectedClient.brand_domain,
-                      brand_tags: selectedClient.brand_tags,
-                      competitors: selectedClient.competitors,
-                      location_code: selectedClient.location_code,
-                      location_name: selectedClient.target_region,
-                      models: ["chatgpt", "claude", "gemini", "perplexity", "google_ai_overview", "google_serp"],
-                      save_to_db: true
-                    }
-                  });
-
-                  if (error || !data?.success) {
-                    console.error(`[Auto-Audit] Error:`, error || data?.error);
-                  } else {
-                    completedCount++;
-                    const progress = Math.round((completedCount / totalPrompts) * 100);
-                    setAuditProgress(progress);
-
-                    // INCREMENTAL UPDATE: Add result to state immediately so UI updates
-                    if (data.data) {
-                      const result: AuditResult = {
-                        id: data.data.id || crypto.randomUUID(),
-                        prompt_id: prompt.id,
-                        prompt_text: prompt.prompt_text,
-                        model_results: data.data.model_results,
-                        summary: data.data.summary,
-                        created_at: data.data.timestamp,
-                        client_id: selectedClient.id
-                      };
-
-                      setAuditResults(prev => {
-                        // Determine if we need to replace or add
-                        const exists = prev.some(r => r.prompt_id === prompt.id);
-                        const newAuditResults = exists
-                          ? prev.map(r => r.prompt_id === prompt.id ? result : r)
-                          : [result, ...prev]; // Add to top
-
-                        // Update summary + storage
-                        updateSummary(newAuditResults);
-                        const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-                        storedResults[selectedClient.id] = newAuditResults;
-                        saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
-
-                        return newAuditResults;
-                      });
-                    }
-
-                    // Show progress toast
-                    if (progress % 20 === 0) { // Notify every 20%
-                      toast.info(`📊 Audit progress: ${completedCount}/${totalPrompts} prompts analyzed (${progress}%)`, {
-                        duration: 2000,
-                      });
-                    }
-                  }
-                } catch (err) {
-                  console.error(`[Auto-Audit] Exception:`, err);
-                } finally {
-                  setLoadingPromptId(null); // specific prompt done
-                }
-              }
-
-              console.log("[Auto-Audit] Complete.");
-              setAuditProgress(null);
-
-              // Final sync to be safe
-              const { data: newResults } = await supabase
-                .from("audit_results").select("*").eq("client_id", selectedClient.id).order("created_at", { ascending: false });
-              if (newResults && newResults.length > 0) {
-                // ... mapped ...
-                // (We can skip or do a final consistency check, but the incremental updates should be enough)
-                // Keeping the original completion toast logic:
-                toast.success(`✅ Initial audit complete!`, {
-                  description: `${completedCount} prompts analyzed across 6 AI models.`,
-                  duration: 6000,
-                });
-              }
-            } catch (autoErr) {
-              console.error("[Auto-Audit] Failed:", autoErr);
-              toast.error("Auto-audit encountered an error", {
-                description: "Some results may not have been collected. Try running manually.",
-              });
-            }
-          }, 2000);
-        }
-      })();
+    if (!initRef.current) {
+      initRef.current = true;
+      fetchClients();
     }
-  }, [selectedClient, updateSummary]);
+  }, [fetchClients]);
+  // NOTE: The old useEffect that loaded prompts/results/auto-audit on selectedClient change
+  // has been REMOVED. Data loading is now handled by loadClientData() which is called
+  // explicitly from fetchClients() and switchClient() — no cascading re-renders.
 
   /**
    * Auto-discover competitors using Groq API
@@ -2811,12 +2812,8 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     }
   }, [selectedClient, citationMeta]);
 
-  // Load citation meta on client change
-  useEffect(() => {
-    if (selectedClient) {
-      fetchCitationMeta();
-    }
-  }, [selectedClient, fetchCitationMeta]);
+  // NOTE: The old useEffect that loaded citation meta on selectedClient change
+  // has been REMOVED. Citation meta is now loaded as part of loadClientData().
 
   // ============================================
   // RETURN

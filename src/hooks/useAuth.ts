@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -31,6 +31,7 @@ export function useAuth(): UseAuthReturn {
     const [isActive, setIsActive] = useState(true);
     const [loading, setLoading] = useState(true);
     const [assignedClientIds, setAssignedClientIds] = useState<string[]>([]);
+    const loadedRef = useRef(false);
 
     const fetchUserData = useCallback(async () => {
         try {
@@ -75,12 +76,6 @@ export function useAuth(): UseAuthReturn {
                 }
             }
 
-            // Update last login
-            await supabase
-                .from('profiles')
-                .update({ last_login_at: new Date().toISOString() })
-                .eq('id', authUser.id);
-
         } catch (error) {
             console.error('Error in fetchUserData:', error);
         } finally {
@@ -89,13 +84,26 @@ export function useAuth(): UseAuthReturn {
     }, []);
 
     useEffect(() => {
-        fetchUserData();
+        // Prevent double-fetch on StrictMode double-mount
+        if (!loadedRef.current) {
+            loadedRef.current = true;
+            fetchUserData();
+        }
 
         // Listen for auth state changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, _session) => {
-            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+            // Only refetch user data on actual sign-in, NOT token refresh
+            if (event === 'SIGNED_IN') {
                 fetchUserData();
+                // Update last login only on actual sign-in
+                if (_session?.user) {
+                    supabase.from('profiles')
+                        .update({ last_login_at: new Date().toISOString() })
+                        .eq('id', _session.user.id)
+                        .then(() => { });
+                }
             } else if (event === 'SIGNED_OUT') {
+                loadedRef.current = false;
                 setUser(null);
                 setRole('user');
                 setIsActive(false);

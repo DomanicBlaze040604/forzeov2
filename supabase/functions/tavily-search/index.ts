@@ -416,7 +416,7 @@ serve(async (req: Request) => {
         success: false,
         error: searchResult.error,
       }), {
-        status: 500,
+        status: 200, // Return 200 with error in body to avoid edge function error in SDK
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -475,7 +475,7 @@ serve(async (req: Request) => {
       success: false,
       error: String(err),
     }), {
-      status: 500,
+      status: 200, // Return 200 with error in body to avoid edge function error in SDK
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
