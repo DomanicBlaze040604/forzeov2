@@ -94,6 +94,11 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates (January 2026)
 
+### v2.7 - AI Location Context (Feb 12, 2026)
+- **Localized AI Prompts**: AI models now receive the user's specific target region (e.g., "India", "UK") in the prompt context.
+- **Local Pricing & Brands**: AI responses now prioritize local currency, pricing, and regional brand competitors instead of defaulting to US-centric data.
+- **Edge Function Update**: `geo-audit` updated to thread location context through to all LLM providers (ChatGPT, Gemini, Claude, Perplexity).
+
 ### v2.6 - UI Refinements & Admin Tools (Jan 30, 2026)
 - **Multi-Select Audit**: Admins can now select multiple prompts and run audits in bulk with a progress bar.
 - **Improved Data Display**:

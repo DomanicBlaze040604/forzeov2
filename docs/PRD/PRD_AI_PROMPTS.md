@@ -363,6 +363,18 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 }
 ```
 
+### 2.5 Location Intelligence Injection (New v2.7)
+
+**Purpose**: Ensure AI models provide locally relevant pricing, currency, and brands (e.g., ₹ INR for India, local competitors).
+
+**Logic**:
+If `locationName` is present and NOT "United States":
+1. Append context to `prompt_text`:
+   ```text
+   Respond with locally relevant information for {locationName}. Use local currency, local brands, and local pricing where applicable.
+   ```
+2. Thread this context through to all 4 Live LLM providers (ChatGPT, Claude, Gemini, Perplexity).
+
 ---
 
 ## 3. Response Parsing Logic

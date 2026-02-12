@@ -1471,7 +1471,8 @@ async function getLLMMentions(
  */
 async function getLiveLLMResponse(
   prompt: string,
-  model: "chatgpt" | "gemini" | "claude" | "perplexity"
+  model: "chatgpt" | "gemini" | "claude" | "perplexity",
+  locationName?: string
 ): Promise<{
   success: boolean;
   response: string;
@@ -1511,9 +1512,10 @@ async function getLiveLLMResponse(
 
     // Use the correct endpoint and parameters
     // Enhance prompt to get specific recommendations with sources/URLs
-    const enhancedPrompt = `${prompt}
-
-Important: Please provide specific recommendations with actual business names, websites, or sources. Include URLs where possible. Do not ask clarifying questions - provide direct answers with specific options.`;
+    const locationContext = locationName && locationName !== "United States"
+      ? `\nRespond with locally relevant information for ${locationName}. Use local currency, local brands, and local pricing where applicable.`
+      : "";
+    const enhancedPrompt = `${prompt}\n\nImportant: Please provide specific recommendations with actual business names, websites, or sources. Include URLs where possible. Do not ask clarifying questions - provide direct answers with specific options.${locationContext}`;
 
     const payload: any = {
       user_prompt: enhancedPrompt,
@@ -1656,7 +1658,8 @@ async function getChatGPTWithBrandEntities(
   brandName: string,
   brandTags: string[] = [],
   competitors: string[] = [],
-  locationCode: number = 2840
+  locationCode: number = 2840,
+  locationName?: string
 ): Promise<{
   success: boolean;
   response: string;
@@ -1670,9 +1673,10 @@ async function getChatGPTWithBrandEntities(
   const startTime = Date.now();
 
   // Enhanced prompt to get specific recommendations with sources
-  const enhancedPrompt = `${prompt}
-
-Important: Please provide specific recommendations with actual business names, websites, or sources. Include URLs where possible. Do not ask clarifying questions - provide direct answers with specific options.`;
+  const locationContext = locationName && locationName !== "United States"
+    ? `\nRespond with locally relevant information for ${locationName}. Use local currency, local brands, and local pricing where applicable.`
+    : "";
+  const enhancedPrompt = `${prompt}\n\nImportant: Please provide specific recommendations with actual business names, websites, or sources. Include URLs where possible. Do not ask clarifying questions - provide direct answers with specific options.${locationContext}`;
 
   const payload = {
     language_code: "en",
@@ -2206,7 +2210,8 @@ async function getLiveLLMWithValidation(
   brandName: string,
   brandTags: string[],
   competitors: string[],
-  models: Array<"chatgpt" | "gemini" | "claude" | "perplexity"> = ["chatgpt", "gemini", "claude"]
+  models: Array<"chatgpt" | "gemini" | "claude" | "perplexity"> = ["chatgpt", "gemini", "claude"],
+  locationName?: string
 ): Promise<{
   success: boolean;
   results: Map<string, {
@@ -2258,7 +2263,7 @@ async function getLiveLLMWithValidation(
 
     if (model === "chatgpt") {
       // Use ChatGPT LLM Scraper API for brand entity extraction
-      const scraperResult = await getChatGPTWithBrandEntities(prompt, brandName, brandTags, competitors);
+      const scraperResult = await getChatGPTWithBrandEntities(prompt, brandName, brandTags, competitors, 2840, locationName);
       result = {
         success: scraperResult.success,
         response: scraperResult.response,
@@ -2270,7 +2275,7 @@ async function getLiveLLMWithValidation(
       };
     } else {
       // Use standard LLM Response API for other models (Gemini, Claude, Perplexity)
-      const llmResult = await getLiveLLMResponse(prompt, model);
+      const llmResult = await getLiveLLMResponse(prompt, model, locationName);
 
       // MERGE BRANDS FROM MULTIPLE SOURCES
       // Source 1: API brand_entities (filtered)
@@ -2808,7 +2813,8 @@ async function queryClaude(
  */
 async function queryLLMDirect(
   prompt: string,
-  modelId: string
+  modelId: string,
+  locationName?: string
 ): Promise<{
   success: boolean;
   response: string;
@@ -2819,7 +2825,7 @@ async function queryLLMDirect(
 }> {
   // Use DataForSEO LIVE LLM API for all models
   if (["chatgpt", "gemini", "claude", "perplexity"].includes(modelId)) {
-    const result = await getLiveLLMResponse(prompt, modelId as "chatgpt" | "gemini" | "claude" | "perplexity");
+    const result = await getLiveLLMResponse(prompt, modelId as "chatgpt" | "gemini" | "claude" | "perplexity", locationName);
     return {
       success: result.success,
       response: result.response,
@@ -3104,7 +3110,8 @@ serve(async (req: Request) => {
             brand_name,
             sanitizedBrandTags,
             sanitizedCompetitors,
-            liveModels
+            liveModels,
+            location_name
           );
 
           totalCost += liveResult.totalCost;

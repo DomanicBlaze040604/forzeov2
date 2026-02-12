@@ -142,7 +142,7 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 }
 
 export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">(() => {
@@ -232,10 +232,13 @@ export default function ClientDashboard() {
 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
-    if (dateRangeFilter !== "all") { const now = new Date(); const days = dateRangeFilter === "7d" ? 7 : dateRangeFilter === "30d" ? 30 : 90; const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000); results = results.filter(r => new Date(r.created_at) >= cutoff); }
+    if (dateRangeFilter === "custom") {
+      if (customDateStart) { const start = new Date(customDateStart); results = results.filter(r => new Date(r.created_at) >= start); }
+      if (customDateEnd) { const end = new Date(customDateEnd); end.setHours(23, 59, 59, 999); results = results.filter(r => new Date(r.created_at) <= end); }
+    } else if (dateRangeFilter !== "all") { const now = new Date(); const days = dateRangeFilter === "7d" ? 7 : dateRangeFilter === "30d" ? 30 : 90; const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000); results = results.filter(r => new Date(r.created_at) >= cutoff); }
     if (modelFilter.length > 0) { results = results.map(r => ({ ...r, model_results: r.model_results.filter(mr => modelFilter.includes(mr.model)) })).filter(r => r.model_results.length > 0); }
     return results;
-  }, [auditResults, dateRangeFilter, modelFilter]);
+  }, [auditResults, dateRangeFilter, modelFilter, customDateStart, customDateEnd]);
 
   const allCitations = useMemo(() => {
     const citationMap = new Map<string, { url: string; title: string; domain: string; count: number; prompts: string[] }>();
@@ -509,7 +512,7 @@ export default function ClientDashboard() {
       // Check for quote start/end
       if ((char === '"' || char === "'") && !inQuote) {
         // Starting a quoted prompt - save any current unquoted prompt first
-        if (currentPrompt.trim().length > 3) {
+        if (currentPrompt.trim().length > 0) {
           results.push(currentPrompt.replace(/\s+/g, ' ').trim());
         }
         currentPrompt = '';
@@ -521,7 +524,7 @@ export default function ClientDashboard() {
 
       if (inQuote && char === quoteChar) {
         // Ending a quoted prompt
-        if (currentPrompt.trim().length > 3) {
+        if (currentPrompt.trim().length > 0) {
           results.push(currentPrompt.replace(/\s+/g, ' ').trim());
         }
         currentPrompt = '';
@@ -534,7 +537,7 @@ export default function ClientDashboard() {
       // Handle newlines
       if (char === '\n' && !inQuote) {
         // Not in a quote - newline ends the current prompt
-        if (currentPrompt.trim().length > 3) {
+        if (currentPrompt.trim().length > 0) {
           results.push(currentPrompt.replace(/\s+/g, ' ').trim());
         }
         currentPrompt = '';
@@ -552,7 +555,7 @@ export default function ClientDashboard() {
     }
 
     // Don't forget the last prompt
-    if (currentPrompt.trim().length > 3) {
+    if (currentPrompt.trim().length > 0) {
       results.push(currentPrompt.replace(/\s+/g, ' ').trim());
     }
 
@@ -563,9 +566,12 @@ export default function ClientDashboard() {
     if (bulkPrompts.trim()) {
       try {
         const promptTexts = parseBulkPrompts(bulkPrompts);
-        await addMultiplePrompts(promptTexts);
+        const locationCode = promptLocation ? locations[promptLocation] : undefined;
+        const locationName = promptLocation || undefined;
+        await addMultiplePrompts(promptTexts, undefined, locationCode, locationName);
         setBulkPrompts("");
         setBulkPromptsOpen(false);
+        setPromptLocation(""); // Reset location after adding
 
         // Auto-run full audit for non-admin users after bulk add
         if (!isAdmin && promptTexts.length > 0) {
@@ -600,7 +606,9 @@ export default function ClientDashboard() {
         competitors: (selectedClient?.competitors || []) // auto-include client competitors if any, or empty array
       });
       if (g?.length) {
-        addMultiplePrompts(g);
+        const locationCode = promptLocation ? locations[promptLocation] : undefined;
+        const locationName = promptLocation || undefined;
+        addMultiplePrompts(g, undefined, locationCode, locationName);
         setSeedKeywords("");
       }
     } finally {
@@ -1077,7 +1085,7 @@ export default function ClientDashboard() {
             <div className="mt-4 flex items-baseline gap-2">
               <span className="text-4xl font-bold text-gray-950">{(() => {
                 const totalResults = filteredAuditResults.flatMap(r => r.model_results || []);
-                const citedResults = totalResults.filter(mr => mr.is_cited);
+                const citedResults = totalResults.filter(mr => (mr as any).is_cited || (mr.citations && mr.citations.length > 0));
                 return totalResults.length > 0 ? Math.round((citedResults.length / totalResults.length) * 100) : 0;
               })()}%</span>
               <TrendIndicator value={0} />
@@ -1209,8 +1217,7 @@ export default function ClientDashboard() {
 
     return (
       <div className="space-y-4">
-        {/* Cache Buster: Force re-render 2026-01-15-v3 */}
-        {(() => { console.log("PromptsTab rendering - checking for stale code v3"); return null; })()}
+
         {/* Header with Tabs */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3 overflow-x-auto pb-1 md:pb-0">
@@ -1633,10 +1640,10 @@ export default function ClientDashboard() {
                   variant="ghost"
                   size="sm"
                   onClick={async () => {
-                    for (const id of selectedPromptIds) {
-                      await deletePrompt(id);
-                    }
+                    const idsToArchive = Array.from(selectedPromptIds);
+                    await bulkArchivePrompts(idsToArchive);
                     setSelectedPromptIds(new Set());
+                    toast.success(`Archived ${idsToArchive.length} prompt${idsToArchive.length > 1 ? 's' : ''}`);
                   }}
                   className="text-white hover:bg-gray-700"
                 >

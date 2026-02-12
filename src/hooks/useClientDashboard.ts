@@ -124,6 +124,28 @@ export function cleanAndAnalyzeResponse(
     .replace(/[ \t]+/g, " ")
     .trim();
 
+  // 1b. Deduplicate repeated responses (API sometimes returns content twice)
+  if (cleaned.length > 200) {
+    const halfLen = Math.floor(cleaned.length / 2);
+    // Check if the text is roughly duplicated by comparing two halves
+    // Find the nearest newline boundary around the midpoint for a clean split
+    const searchStart = Math.max(halfLen - 100, 0);
+    const searchEnd = Math.min(halfLen + 100, cleaned.length);
+    const midSection = cleaned.substring(searchStart, searchEnd);
+    const newlineOffset = midSection.indexOf('\n');
+    if (newlineOffset !== -1) {
+      const splitPoint = searchStart + newlineOffset + 1;
+      const firstHalf = cleaned.substring(0, splitPoint).trim();
+      const secondHalf = cleaned.substring(splitPoint).trim();
+      // If the second half starts the same way as the first half (first 150 chars match),
+      // the response is duplicated — keep only the first half
+      const compareLen = Math.min(150, firstHalf.length, secondHalf.length);
+      if (compareLen > 50 && firstHalf.substring(0, compareLen) === secondHalf.substring(0, compareLen)) {
+        cleaned = firstHalf;
+      }
+    }
+  }
+
   // 2. Analyze Mentions & Ranks
   const lowerText = cleaned.toLowerCase();
   const lowerBrand = brandName.toLowerCase();
@@ -188,13 +210,7 @@ export interface CitationMeta {
   is_affiliate?: boolean;
 }
 
-export interface CitationMeta {
-  category: string;
-  source_type: string;
-  authority_tier: number;
-  relationship_type: string;
-  is_affiliate?: boolean;
-}
+// (duplicate CitationMeta removed — see lines 205-211)
 
 export type PromptCategory =
   | "custom" | "imported" | "generated" | "niche" | "super_niche"
@@ -636,6 +652,8 @@ export function useClientDashboard() {
         loadedPrompts = promptsData.map(p => ({
           id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
           category: p.category || "custom", is_custom: p.is_custom, is_active: p.is_active,
+          niche_level: p.niche_level, tags: p.tags,
+          location_code: p.location_code, location_name: p.location_name,
         }));
       } else {
         const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
@@ -778,7 +796,7 @@ export function useClientDashboard() {
                   client_id: client.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
                   brand_name: client.brand_name, brand_domain: client.brand_domain,
                   brand_tags: client.brand_tags, competitors: client.competitors,
-                  location_code: client.location_code, location_name: client.target_region,
+                  location_code: prompt.location_code || client.location_code, location_name: prompt.location_name || client.target_region,
                   models: ["chatgpt", "claude", "gemini", "perplexity", "google_ai_overview", "google_serp"],
                   save_to_db: true
                 }
@@ -1126,7 +1144,7 @@ export function useClientDashboard() {
     }
   }, [selectedClient, prompts]);
 
-  const addMultiplePrompts = useCallback(async (promptTexts: string[], category?: PromptCategory) => {
+  const addMultiplePrompts = useCallback(async (promptTexts: string[], category?: PromptCategory, locationCode?: number, locationName?: string) => {
     if (!selectedClient) return;
 
     // Check agency prompt limit (15 prompts per brand)
@@ -1144,7 +1162,6 @@ export function useClientDashboard() {
         if (remainingSlots <= 0) {
           throw new Error('Agency users are limited to 15 prompts per brand. Delete some prompts or contact admin.');
         }
-        // Limit the number of prompts to add
         maxPromptsToAdd = Math.min(promptTexts.length, remainingSlots);
         if (maxPromptsToAdd < promptTexts.length) {
           console.warn(`Agency limit: Only adding ${maxPromptsToAdd} of ${promptTexts.length} prompts (limit: 15 per brand)`);
@@ -1152,12 +1169,40 @@ export function useClientDashboard() {
       }
     }
 
-    const newPrompts: Prompt[] = promptTexts.slice(0, maxPromptsToAdd).filter(t => t.trim()).map(text => {
+    // Deduplicate against existing prompts (case-insensitive, trimmed)
+    const existingTexts = new Set(prompts.map(p => p.prompt_text.trim().toLowerCase()));
+    const uniqueTexts = promptTexts
+      .slice(0, maxPromptsToAdd)
+      .map(t => t.trim())
+      .filter(t => t.length > 0)
+      .filter(t => !existingTexts.has(t.toLowerCase()));
+
+    if (uniqueTexts.length === 0) {
+      console.log('All prompts already exist, skipping insert.');
+      return;
+    }
+
+    // Also deduplicate within the input itself
+    const seenInBatch = new Set<string>();
+    const dedupedTexts = uniqueTexts.filter(t => {
+      const key = t.toLowerCase();
+      if (seenInBatch.has(key)) return false;
+      seenInBatch.add(key);
+      return true;
+    });
+
+    const skippedCount = promptTexts.length - dedupedTexts.length;
+    if (skippedCount > 0) {
+      console.log(`Skipped ${skippedCount} duplicate prompt(s).`);
+    }
+
+    const newPrompts: Prompt[] = dedupedTexts.map(text => {
       const nicheLevel = detectNicheLevel(text);
       return {
-        id: crypto.randomUUID(), client_id: selectedClient.id, prompt_text: text.trim(),
+        id: crypto.randomUUID(), client_id: selectedClient.id, prompt_text: text,
         category: category || (nicheLevel === "super_niche" ? "super_niche" : nicheLevel === "niche" ? "niche" : "imported"),
         is_custom: true, is_active: true, niche_level: nicheLevel,
+        location_code: locationCode, location_name: locationName,
       };
     });
 
@@ -1167,9 +1212,38 @@ export function useClientDashboard() {
         newPrompts.map(p => ({
           id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
           category: p.category, is_custom: p.is_custom, is_active: p.is_active,
+          location_code: p.location_code, location_name: p.location_name,
         }))
       );
-      if (insertError) throw insertError;
+
+      if (insertError) {
+        // If unique constraint violation on bulk, fall back to individual inserts
+        if (insertError.code === '23505') {
+          console.warn('Bulk insert hit duplicate constraint, falling back to individual inserts...');
+          const successfulPrompts: Prompt[] = [];
+          for (const p of newPrompts) {
+            const { error: singleError } = await supabase.from("prompts").insert({
+              id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
+              category: p.category, is_custom: p.is_custom, is_active: p.is_active,
+              location_code: p.location_code, location_name: p.location_name,
+            });
+            if (!singleError) {
+              successfulPrompts.push(p);
+            } else if (singleError.code !== '23505') {
+              console.error('Failed to insert prompt:', p.prompt_text, singleError);
+            }
+          }
+          if (successfulPrompts.length > 0) {
+            const allPrompts = [...prompts, ...successfulPrompts];
+            setPrompts(allPrompts);
+            const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+            storedPrompts[selectedClient.id] = allPrompts;
+            saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+          }
+          return;
+        }
+        throw insertError;
+      }
 
       // Only update local state if DB insert succeeded
       const allPrompts = [...prompts, ...newPrompts];
@@ -1223,6 +1297,52 @@ export function useClientDashboard() {
     setAuditResults(activeResults);
 
     // Recalculate summary based on remaining active prompts
+    if (activeResults.length === 0) {
+      setSummary(null);
+    } else {
+      let totalSov = 0, totalCitations = 0, totalCost = 0, rankSum = 0, rankCount = 0;
+      for (const r of activeResults) {
+        totalSov += r.summary.share_of_voice;
+        totalCitations += r.summary.total_citations;
+        totalCost += r.summary.total_cost;
+        if (r.summary.average_rank) { rankSum += r.summary.average_rank; rankCount++; }
+      }
+      setSummary({
+        total_prompts: activeResults.length,
+        overall_sov: Math.round(totalSov / activeResults.length),
+        average_rank: rankCount > 0 ? Math.round((rankSum / rankCount) * 10) / 10 : null,
+        total_citations: totalCitations,
+        total_cost: totalCost,
+      });
+    }
+  }, [selectedClient, prompts, auditResults]);
+
+  const bulkArchivePrompts = useCallback(async (promptIds: string[]) => {
+    if (!selectedClient || promptIds.length === 0) return;
+    const archiveSet = new Set(promptIds);
+
+    // 1. Single DB update
+    try {
+      await supabase
+        .from("prompts")
+        .update({ is_active: false })
+        .in("id", promptIds);
+    } catch (err) { console.error("Supabase batch archive failed:", err); }
+
+    // 2. Single local state update
+    const updatedPrompts = prompts.map(p =>
+      archiveSet.has(p.id) ? { ...p, is_active: false } : p
+    );
+    setPrompts(updatedPrompts);
+
+    // 3. Update localStorage
+    const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+    storedPrompts[selectedClient.id] = updatedPrompts;
+    saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+
+    // 4. Remove archived prompts' results from active view & recalculate summary
+    const activeResults = auditResults.filter(r => !archiveSet.has(r.prompt_id));
+    setAuditResults(activeResults);
     if (activeResults.length === 0) {
       setSummary(null);
     } else {
@@ -1383,8 +1503,10 @@ export function useClientDashboard() {
     setLoading(true);
     setError(null);
     const results: AuditResult[] = [...auditResults];
+    let failedCount = 0;
 
     for (const prompt of prompts) {
+      if (prompt.is_active === false) continue; // Skip inactive prompts
       if (results.find(r => r.prompt_id === prompt.id)) continue;
       setLoadingPromptId(prompt.id);
 
@@ -1393,7 +1515,9 @@ export function useClientDashboard() {
           body: {
             client_id: selectedClient.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
             brand_name: selectedClient.brand_name, brand_tags: selectedClient.brand_tags,
-            competitors: selectedClient.competitors, location_code: selectedClient.location_code,
+            competitors: selectedClient.competitors,
+            location_code: prompt.location_code || selectedClient.location_code,
+            location_name: selectedClient.target_region || "United States",
             models: selectedModels, niche_level: prompt.niche_level, save_to_db: true,
             skip_cache: true, // Force fresh results for every run
           },
@@ -1473,13 +1597,19 @@ export function useClientDashboard() {
             }
           }
         } else {
-          setError(fnError?.message || data?.error || "Audit failed");
+          // Don't set global error for individual prompt failures — just log and continue
+          failedCount++;
+          console.warn(`[Audit] Prompt failed: "${prompt.prompt_text.substring(0, 50)}..." — ${fnError?.message || data?.error || 'Unknown error'}`);
         }
         await new Promise(r => setTimeout(r, 300));
       } catch (err) {
-        console.error("Audit error CRITICAL:", err);
-        setError(err instanceof Error ? err.message : "Audit failed");
+        // Don't halt the loop — log and continue to next prompt
+        failedCount++;
+        console.error("[Audit] Exception on prompt:", prompt.prompt_text.substring(0, 50), err);
       }
+    }
+    if (failedCount > 0) {
+      console.warn(`[Audit] Completed with ${failedCount} failed prompt(s).`);
     }
     setLoading(false);
     setLoadingPromptId(null);
@@ -1502,7 +1632,9 @@ export function useClientDashboard() {
         body: {
           client_id: selectedClient.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
           brand_name: selectedClient.brand_name, brand_tags: selectedClient.brand_tags,
-          competitors: selectedClient.competitors, location_code: selectedClient.location_code,
+          competitors: selectedClient.competitors,
+          location_code: prompt.location_code || selectedClient.location_code,
+          location_name: selectedClient.target_region || "United States",
           models: selectedModels, niche_level: prompt.niche_level, save_to_db: true,
         },
       });
@@ -1648,7 +1780,8 @@ export function useClientDashboard() {
             brand_name: selectedClient.brand_name,
             brand_tags: selectedClient.brand_tags,
             competitors: selectedClient.competitors,
-            location_code: selectedClient.location_code,
+            location_code: prompt.location_code || selectedClient.location_code,
+            location_name: selectedClient.target_region || "United States",
             models: selectedModels,
             niche_level: prompt.niche_level,
             save_to_db: true,
@@ -1656,9 +1789,42 @@ export function useClientDashboard() {
         });
 
         if (!fnError && data?.success) {
+          // Process model results with cleanAndAnalyzeResponse for consistent brand detection
+          const processedModelResults = data.data.model_results.map((mr: any) => {
+            const analysis = cleanAndAnalyzeResponse(
+              mr.raw_response || "",
+              selectedClient.brand_name,
+              selectedClient.competitors
+            );
+            return {
+              ...mr,
+              raw_response: analysis.cleanedResponse,
+              brand_mentioned: analysis.brandMentions > 0,
+              brand_mention_count: analysis.brandMentions,
+              brand_rank: analysis.brandRank || mr.brand_rank,
+              competitors_found: analysis.competitorStats.filter(c => c.count > 0 || c.rank !== null),
+            };
+          });
+
+          // Recalculate summary based on processed results
+          let summaries = { sov: 0, rankSum: 0, rankCount: 0, citations: 0, cost: 0 };
+          processedModelResults.forEach((mr: any) => {
+            if (mr.brand_mentioned) summaries.sov += (100 / processedModelResults.length);
+            if (mr.brand_rank) { summaries.rankSum += mr.brand_rank; summaries.rankCount++; }
+            summaries.citations += (mr.citations?.length || 0);
+            summaries.cost += (mr.api_cost || 0);
+          });
+
           const result: AuditResult = {
             id: data.data.id || crypto.randomUUID(), prompt_id: prompt.id, prompt_text: prompt.prompt_text,
-            model_results: data.data.model_results, summary: data.data.summary, created_at: data.data.timestamp,
+            model_results: processedModelResults,
+            summary: {
+              share_of_voice: Math.round(summaries.sov),
+              average_rank: summaries.rankCount > 0 ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
+              total_citations: summaries.citations,
+              total_cost: summaries.cost
+            },
+            created_at: data.data.timestamp,
           };
           newResults.push(result);
           // Update local state incremental
@@ -1990,10 +2156,10 @@ export function useClientDashboard() {
           addMultiplePrompts(promptTexts);
         }
       } else {
-        addMultiplePrompts(data.split("\n").filter(l => l.trim().length > 3));
+        addMultiplePrompts(data.split("\n").filter(l => l.trim().length > 0));
       }
     } catch {
-      addMultiplePrompts(data.split("\n").filter(l => l.trim().length > 3));
+      addMultiplePrompts(data.split("\n").filter(l => l.trim().length > 0));
     }
   }, [addMultiplePrompts]);
 
@@ -2201,7 +2367,7 @@ CURRENT AI VISIBILITY AUDIT RESULTS:
 ${modelSummary}
 
 VISIBILITY METRICS:
-- Share of Voice: ${auditResult?.summary?.share_of_voice || 0}% (${auditResult?.summary?.share_of_voice || 0 >= 50 ? 'Good - appearing in most AI responses' : 'Improvement needed'})
+- Share of Voice: ${auditResult?.summary?.share_of_voice || 0}% (${(auditResult?.summary?.share_of_voice || 0) >= 50 ? 'Good - appearing in most AI responses' : 'Improvement needed'})
 - Average Rank: ${auditResult?.summary?.average_rank || 'Not ranked in lists'}
 - Total Citations: ${auditResult?.summary?.total_citations || 0}
 
@@ -2213,7 +2379,7 @@ COMPETITORS APPEARING IN AI RESPONSES: ${competitorContext}
 ${tavilyContext}
 
 CONTENT STRATEGY BASED ON ANALYSIS:
-1. Current gap: ${auditResult?.summary?.share_of_voice || 0 < 50 ? `${selectedClient.brand_name} is underrepresented vs competitors` : `${selectedClient.brand_name} has good visibility but can improve ranking`}
+1. Current gap: ${(auditResult?.summary?.share_of_voice || 0) < 50 ? `${selectedClient.brand_name} is underrepresented vs competitors` : `${selectedClient.brand_name} has good visibility but can improve ranking`}
 2. Target: Position ${selectedClient.brand_name} as a thought leader and trusted authority for "${promptText}"
 3. Approach: Address gaps where competitors are mentioned but the brand is not
 4. Citation strategy: Create content worthy of being cited by authoritative sources
@@ -2833,7 +2999,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     runFullAudit, runSinglePrompt, runCampaign, clearResults,
 
     // Prompts
-    addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, reactivatePrompt, clearAllPrompts, updatePrompt,
+    addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, bulkArchivePrompts, reactivatePrompt, clearAllPrompts, updatePrompt,
 
     // Export/Import
     exportToCSV, exportPrompts, exportFullReport, importData,
