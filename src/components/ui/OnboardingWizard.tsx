@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils";
 interface OnboardingWizardProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onComplete: () => void;
+    onComplete: (newClientId?: string) => void;
 }
 
 type Step = 'brand_details' | 'competitors' | 'seed_keywords' | 'review_prompts' | 'processing';
@@ -213,14 +214,22 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
     // Form Data with localStorage backup
     const [formData, setFormData] = useState<FormData>(() => {
-        try {
-            const saved = localStorage.getItem('onboarding_form_data');
-            if (saved) return JSON.parse(saved);
-        } catch (e) { console.warn("[Onboarding] localStorage error:", e); }
-        return {
+        const defaults: FormData = {
             brandName: '', website: '', industry: '', customIndustry: '', businessType: 'Online Business',
             location: 'US', competitors: [], seedKeywords: [], competitorUrls: {}
         };
+        try {
+            const saved = localStorage.getItem('onboarding_form_data');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                return { ...defaults, ...parsed, competitorUrls: parsed.competitorUrls || {} };
+            }
+        } catch (e) {
+            console.warn("[Onboarding] localStorage error:", e);
+            // If error, clear it to prevent stuck state
+            try { localStorage.removeItem('onboarding_form_data'); } catch { }
+        }
+        return defaults;
     });
 
     // Fetch user role on mount
@@ -243,10 +252,23 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         if (open) fetchUserRole();
     }, [open]);
 
-    // Save form data to localStorage
+    // Save form data to localStorage (with quota protection)
     useEffect(() => {
         if (formData.brandName || formData.website || formData.competitors.length > 0 || formData.seedKeywords.length > 0) {
-            localStorage.setItem('onboarding_form_data', JSON.stringify(formData));
+            try {
+                localStorage.setItem('onboarding_form_data', JSON.stringify(formData));
+            } catch (err: any) {
+                if (err?.name === 'QuotaExceededError' || err?.code === 22) {
+                    console.warn('[Onboarding] localStorage full, clearing old cache...');
+                    try {
+                        // Clear the heaviest keys to free space
+                        localStorage.removeItem('forzeo_audit_results_v3');
+                        localStorage.removeItem('forzeo_prompts_v3');
+                        localStorage.removeItem('forzeo_clients_v3');
+                        localStorage.setItem('onboarding_form_data', JSON.stringify(formData));
+                    } catch { /* silently fail — form state is in React memory anyway */ }
+                }
+            }
         }
     }, [formData]);
 
@@ -257,7 +279,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
     const [promptsPerKeyword, setPromptsPerKeyword] = useState(5); // User selectable: 3-10
     const [processingProgress, setProcessingProgress] = useState(0);
     const [processingStatus, setProcessingStatus] = useState('');
-    const [generatedPrompts, setGeneratedPrompts] = useState<string[]>([]);
+    const [generatedPrompts, setGeneratedPrompts] = useState<{ text: string, topic: string }[]>([]);
     const [newManualPrompt, setNewManualPrompt] = useState("");
     const [locationSearch, setLocationSearch] = useState(""); // For searchable location field
 
@@ -525,7 +547,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
         const locationName = LOCATIONS.find(l => l.code === formData.location)?.name?.replace(/^[^\s]+\s/, '') || 'United States';
         const maxPromptsAllowed = userLimits.maxPrompts;
-        const allPrompts: string[] = [];
+        const allPrompts: { text: string, topic: string }[] = [];
 
         // Generate prompts for each keyword
         for (const keyword of formData.seedKeywords) {
@@ -546,7 +568,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
             for (const p of keywordPrompts) {
                 if (allPrompts.length < maxPromptsAllowed) {
-                    allPrompts.push(p);
+                    allPrompts.push({ text: p, topic: keyword });
                 }
             }
         }
@@ -557,7 +579,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
     const handlePromptEdit = (idx: number, newVal: string) => {
         const updated = [...generatedPrompts];
-        updated[idx] = newVal;
+        updated[idx] = { ...updated[idx], text: newVal };
         setGeneratedPrompts(updated);
     };
 
@@ -573,7 +595,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
             return;
         }
         if (newManualPrompt.trim()) {
-            setGeneratedPrompts([...generatedPrompts, newManualPrompt.trim()]);
+            setGeneratedPrompts([...generatedPrompts, { text: newManualPrompt.trim(), topic: 'custom' }]);
             setNewManualPrompt("");
         }
     };
@@ -631,17 +653,21 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
             // Insert prompts
             if (generatedPrompts.length > 0) {
-                const promptsData = generatedPrompts.map(promptText => ({
+                const promptsData = generatedPrompts.map(p => ({
                     id: crypto.randomUUID(),
                     client_id: clientData.id,
-                    prompt_text: promptText,
-                    category: 'custom',
+                    prompt_text: p.text,
+                    category: 'custom', // Default to custom to avoid ENUM violation
+                    tags: p.topic ? [p.topic] : [],
                     is_custom: false,
                     is_active: true
                 }));
 
                 const { error: promptsError } = await supabase.from('prompts').insert(promptsData);
-                if (promptsError) console.error("Prompts insert error:", promptsError);
+                if (promptsError) {
+                    console.error("Prompts insert error:", promptsError);
+                    toast.error(`Failed to save prompts: ${promptsError.message}`);
+                }
             }
 
             setProcessingProgress(100);
@@ -654,7 +680,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
             setTimeout(() => {
                 resetForm();
-                onComplete();
+                onComplete(clientData.id);
                 onOpenChange(false);
             }, 1000);
 
@@ -937,7 +963,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                             {generatedPrompts.map((prompt, idx) => (
                                 <div key={idx} className="flex gap-2 items-start group">
                                     <Input
-                                        value={prompt}
+                                        value={prompt.text}
                                         onChange={(e) => handlePromptEdit(idx, e.target.value)}
                                         className="bg-white border-gray-200 text-sm h-9"
                                     />

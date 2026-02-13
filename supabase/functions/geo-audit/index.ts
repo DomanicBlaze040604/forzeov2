@@ -498,7 +498,8 @@ function validateRequest(body: AuditRequest): string | null {
   if (body.models && !Array.isArray(body.models)) {
     return "models must be an array";
   }
-  if (body.location_code && (body.location_code < 1 || body.location_code > 99999)) {
+  // DataForSEO location codes can be large (cities are 7 digits, e.g. 1007774)
+  if (body.location_code && (body.location_code < 1 || body.location_code > 99999999)) {
     return "invalid location_code";
   }
   return null;
@@ -1034,6 +1035,21 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
     });
 
     const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      // If JSON parse fails, we'll handle it in the response.ok check or error below
+    }
+
+    // SPECIAL HANDLING: DataForSEO sometimes returns HTTP 500 but with a valid success body (status_code 20000)
+    // We prioritize the body's status_code if it indicates success.
+    if (data && data.status_code === 20000) {
+      if (!response.ok) {
+        console.log(`[DataForSEO] HTTP ${response.status} but content valid (20000), proceeding as success.`);
+      }
+      return { data };
+    }
 
     if (!response.ok) {
       console.error(`[DataForSEO] HTTP ${response.status}: ${text.substring(0, 300)}`);
@@ -1052,10 +1068,13 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
       };
     }
 
-    const data = JSON.parse(text);
+    // If data wasn't parsed successfully in the try/catch block above, try again (or let it throw)
+    if (!data) {
+      data = JSON.parse(text);
+    }
 
     if (data.status_code !== 20000) {
-      console.error(`[DataForSEO] API Error: ${data.status_message}`);
+      console.error(`[DataForSEO] API Error: ${data.status_code} - ${data.status_message}`);
       return { error: data.status_message, status_code: data.status_code };
     }
 
@@ -3041,6 +3060,12 @@ serve(async (req: Request) => {
 
     const validationError = validateRequest(body);
     if (validationError) {
+      console.error(`[GEO Audit] Validation failed: ${validationError}`, JSON.stringify({
+        prompt_text: body.prompt_text?.substring(0, 50),
+        brand_name: body.brand_name,
+        models: body.models,
+        location_code: body.location_code,
+      }));
       return new Response(
         JSON.stringify({ success: false, error: validationError }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }

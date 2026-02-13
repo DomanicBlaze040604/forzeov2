@@ -1,0 +1,6 @@
+﻿src/hooks/useClientDashboard.ts(1941,7): error TS1005: 'try' expected.
+src/hooks/useClientDashboard.ts(1947,5): error TS1005: ',' expected.
+src/hooks/useClientDashboard.ts(1947,32): error TS1005: ')' expected.
+src/hooks/useClientDashboard.ts(1954,2): error TS1128: Declaration or statement expected.
+src/hooks/useClientDashboard.ts(1954,89): error TS1005: ';' expected.
+src/hooks/useClientDashboard.ts(3098,1): error TS1128: Declaration or statement expected.

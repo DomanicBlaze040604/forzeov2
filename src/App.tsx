@@ -12,6 +12,7 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [checkingOnboarding, setCheckingOnboarding] = useState(false)
   const [dashboardKey, setDashboardKey] = useState(0)
+  const [autoRunClientId, setAutoRunClientId] = useState<string | null>(null)
   const sessionUserRef = useRef<string | null>(null)
   const onboardingCheckedRef = useRef(false)
 
@@ -114,9 +115,14 @@ function App() {
     }
   }
 
-  const handleOnboardingComplete = async () => {
-    console.log("[Onboarding] Completed, refreshing dashboard...")
+  const handleOnboardingComplete = async (newClientId?: string) => {
+    console.log("[Onboarding] Completed, refreshing dashboard...", newClientId ? `Auto-run client: ${newClientId}` : '')
     setShowOnboarding(false)
+
+    // If a new client was created, trigger auto-run of prompts
+    if (newClientId) {
+      setAutoRunClientId(newClientId)
+    }
 
     // Trigger soft refresh of dashboard component
     setDashboardKey(prev => prev + 1)
@@ -239,7 +245,7 @@ function App() {
   return (
     <>
       <Toaster position="top-right" />
-      <ClientDashboard key={dashboardKey} />
+      <ClientDashboard key={dashboardKey} autoRunClientId={autoRunClientId} onAutoRunComplete={() => setAutoRunClientId(null)} />
 
       {/* Onboarding Wizard Popup */}
       {showOnboarding && session?.user && (

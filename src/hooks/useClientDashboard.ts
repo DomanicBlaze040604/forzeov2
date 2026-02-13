@@ -428,7 +428,41 @@ function loadFromStorage<T>(key: string, defaultValue: T): T {
 }
 
 function saveToStorage(key: string, value: unknown): void {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch (err) { console.error("Storage error:", err); }
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err: any) {
+    if (err?.name === 'QuotaExceededError' || err?.code === 22) {
+      console.warn('[Storage] Quota exceeded, pruning old data...');
+      try {
+        // Prune audit results first (largest data) — keep only latest 50 per client
+        const resultsKey = STORAGE_KEYS.RESULTS;
+        const stored = localStorage.getItem(resultsKey);
+        if (stored) {
+          const allResults: Record<string, any[]> = JSON.parse(stored);
+          for (const clientId of Object.keys(allResults)) {
+            if (allResults[clientId]?.length > 50) {
+              allResults[clientId] = allResults[clientId].slice(0, 50);
+            }
+          }
+          localStorage.setItem(resultsKey, JSON.stringify(allResults));
+        }
+        // Retry original save
+        localStorage.setItem(key, JSON.stringify(value));
+        console.log('[Storage] Pruned old data and saved successfully.');
+      } catch (retryErr) {
+        // If still failing, clear the results cache entirely
+        console.warn('[Storage] Still exceeding quota after pruning. Clearing results cache.');
+        try {
+          localStorage.removeItem(STORAGE_KEYS.RESULTS);
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch {
+          console.error('[Storage] Cannot save even after clearing results cache:', retryErr);
+        }
+      }
+    } else {
+      console.error("Storage error:", err);
+    }
+  }
 }
 
 function generateSlug(name: string): string {
@@ -453,10 +487,59 @@ function detectNicheLevel(promptText: string): "broad" | "niche" | "super_niche"
 }
 
 // ============================================
+// STARTUP: Proactive localStorage cleanup
+// ============================================
+let _storageCleanupDone = false;
+function cleanupStorageOnStartup() {
+  if (_storageCleanupDone) return;
+  _storageCleanupDone = true;
+  try {
+    // Estimate total usage
+    let totalBytes = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) totalBytes += (localStorage.getItem(key)?.length || 0) * 2; // UTF-16
+    }
+    const MB = totalBytes / (1024 * 1024);
+    console.log(`[Storage] Total localStorage usage: ${MB.toFixed(2)} MB`);
+
+    // If over 3.5 MB (limit is ~5 MB), prune aggressively
+    if (MB > 3.5) {
+      console.warn(`[Storage] Usage high (${MB.toFixed(2)} MB), pruning audit results cache...`);
+      const resultsRaw = localStorage.getItem(STORAGE_KEYS.RESULTS);
+      if (resultsRaw) {
+        try {
+          const allResults: Record<string, any[]> = JSON.parse(resultsRaw);
+          let pruned = false;
+          for (const clientId of Object.keys(allResults)) {
+            if (allResults[clientId]?.length > 30) {
+              allResults[clientId] = allResults[clientId].slice(0, 30);
+              pruned = true;
+            }
+          }
+          if (pruned) {
+            localStorage.setItem(STORAGE_KEYS.RESULTS, JSON.stringify(allResults));
+            console.log('[Storage] Pruned audit results successfully.');
+          }
+        } catch {
+          // Results cache corrupted, clear it
+          localStorage.removeItem(STORAGE_KEYS.RESULTS);
+          console.warn('[Storage] Cleared corrupted results cache.');
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Storage] Cleanup error:', e);
+  }
+}
+
+// ============================================
 // MAIN HOOK
 // ============================================
 
 export function useClientDashboard() {
+  // Run storage cleanup once on first mount
+  cleanupStorageOnStartup();
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -466,13 +549,22 @@ export function useClientDashboard() {
     loadFromStorage(STORAGE_KEYS.SELECTED_MODELS, ["chatgpt", "google_ai_overview", "google_serp"])
   );
   const [loading, setLoading] = useState(false);
-  const [loadingPromptId, setLoadingPromptId] = useState<string | null>(null);
+  const [loadingPromptIds, setLoadingPromptIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [includeTavily, setIncludeTavilyState] = useState<boolean>(
     loadFromStorage(STORAGE_KEYS.INCLUDE_TAVILY, true)
   );
   const [tavilyResults, setTavilyResults] = useState<Record<string, unknown>>({});
   const [citationMeta, setCitationMeta] = useState<Record<string, CitationMeta>>({});
+
+  // Auto-persist audit results to localStorage whenever they change
+  useEffect(() => {
+    if (selectedClient && auditResults.length > 0) {
+      const stored = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
+      stored[selectedClient.id] = auditResults;
+      saveToStorage(STORAGE_KEYS.RESULTS, stored);
+    }
+  }, [auditResults, selectedClient]);
 
   const [auditProgress, setAuditProgress] = useState<number | null>(null);
 
@@ -646,8 +738,11 @@ export function useClientDashboard() {
 
     // --- Load Prompts ---
     try {
-      const { data: promptsData } = await supabase
+      const { data: promptsData, error: promptError } = await supabase
         .from("prompts").select("*").eq("client_id", client.id).eq("is_active", true);
+
+      if (promptError) throw promptError;
+
       if (promptsData && promptsData.length > 0) {
         loadedPrompts = promptsData.map(p => ({
           id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
@@ -659,7 +754,9 @@ export function useClientDashboard() {
         const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
         loadedPrompts = storedPrompts[client.id] || [];
       }
-    } catch {
+    } catch (err: any) {
+      console.error("Prompts fetch failed:", err);
+      toast.error("Failed to load prompts: " + (err.message || "Unknown error"));
       const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
       loadedPrompts = storedPrompts[client.id] || [];
     }
@@ -768,97 +865,15 @@ export function useClientDashboard() {
 
     console.log(`[loadClientData] Loaded for ${client.brand_name}: ${loadedPrompts.length} prompts, ${loadedResults.length} results, ${Object.keys(loadedTavily).length} tavily, ${Object.keys(loadedCitationMeta).length} citation meta`);
 
-    // AUTO-AUDIT: Check if this is a new client that needs initial audits
-    const clientCreatedAt = new Date(client.created_at);
-    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-    const isNewClient = clientCreatedAt > fifteenMinutesAgo;
-    const hasNoResults = loadedResults.length === 0;
-    const hasPrompts = loadedPrompts.length > 0;
-
-    if (isNewClient && hasNoResults && hasPrompts) {
-      console.log("[Auto-Audit] New client detected with prompts but no results. Triggering auto-audit...");
-      toast.info(`🚀 Starting initial AI audit for ${client.brand_name}...`, {
-        description: `Running ${Math.min(loadedPrompts.length, 10)} prompts across 6 AI models`,
-        duration: 8000,
-      });
-
-      setTimeout(async () => {
-        try {
-          const promptsToAudit = loadedPrompts.slice(0, 10);
-          let completedCount = 0;
-          const totalPrompts = promptsToAudit.length;
-
-          for (const prompt of promptsToAudit) {
-            try {
-              setLoadingPromptId(prompt.id);
-              const { data, error } = await supabase.functions.invoke("geo-audit", {
-                body: {
-                  client_id: client.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
-                  brand_name: client.brand_name, brand_domain: client.brand_domain,
-                  brand_tags: client.brand_tags, competitors: client.competitors,
-                  location_code: prompt.location_code || client.location_code, location_name: prompt.location_name || client.target_region,
-                  models: ["chatgpt", "claude", "gemini", "perplexity", "google_ai_overview", "google_serp"],
-                  save_to_db: true
-                }
-              });
-
-              if (error || !data?.success) {
-                console.error(`[Auto-Audit] Error:`, error || data?.error);
-              } else {
-                completedCount++;
-                const progress = Math.round((completedCount / totalPrompts) * 100);
-                setAuditProgress(progress);
-
-                if (data.data) {
-                  const result: AuditResult = {
-                    id: data.data.id || crypto.randomUUID(),
-                    prompt_id: prompt.id,
-                    prompt_text: prompt.prompt_text,
-                    model_results: data.data.model_results,
-                    summary: data.data.summary,
-                    created_at: data.data.timestamp,
-                    client_id: client.id
-                  };
-
-                  setAuditResults(prev => {
-                    const exists = prev.some(r => r.prompt_id === prompt.id);
-                    const newAuditResults = exists
-                      ? prev.map(r => r.prompt_id === prompt.id ? result : r)
-                      : [result, ...prev];
-                    updateSummaryDirect(newAuditResults);
-                    const sr = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-                    sr[client.id] = newAuditResults;
-                    saveToStorage(STORAGE_KEYS.RESULTS, sr);
-                    // Invalidate cache so next load gets fresh data
-                    dataCache.current.delete(client.id);
-                    return newAuditResults;
-                  });
-                }
-
-                if (progress % 20 === 0) {
-                  toast.info(`📊 Audit progress: ${completedCount}/${totalPrompts} prompts analyzed (${progress}%)`, { duration: 2000 });
-                }
-              }
-            } catch (err) {
-              console.error(`[Auto-Audit] Exception:`, err);
-            } finally {
-              setLoadingPromptId(null);
-            }
-          }
-
-          console.log("[Auto-Audit] Complete.");
-          setAuditProgress(null);
-          toast.success(`✅ Initial audit complete!`, {
-            description: `${completedCount} prompts analyzed across 6 AI models.`,
-            duration: 6000,
-          });
-        } catch (autoErr) {
-          console.error("[Auto-Audit] Failed:", autoErr);
-          toast.error("Auto-audit encountered an error", {
-            description: "Some results may not have been collected. Try running manually.",
-          });
-        }
-      }, 2000);
+    // AUTO-AUDIT: Removed old in-hook auto-audit. Auto-run for new brands is now
+    // handled exclusively by ClientDashboard's autoRunClientId -> runFullAudit flow,
+    // which uses the user's selected models, has retry logic, and runs all prompts.
+    if (loadedResults.length === 0 && loadedPrompts.length > 0) {
+      const clientCreatedAt = new Date(client.created_at);
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+      if (clientCreatedAt > fifteenMinutesAgo) {
+        console.log("[loadClientData] New client detected with prompts but no results. Auto-run will be triggered by ClientDashboard.");
+      }
     }
   }, []);
 
@@ -1144,8 +1159,8 @@ export function useClientDashboard() {
     }
   }, [selectedClient, prompts]);
 
-  const addMultiplePrompts = useCallback(async (promptTexts: string[], category?: PromptCategory, locationCode?: number, locationName?: string) => {
-    if (!selectedClient) return;
+  const addMultiplePrompts = useCallback(async (promptTexts: string[], category?: PromptCategory, locationCode?: number, locationName?: string): Promise<Prompt[]> => {
+    if (!selectedClient) return [];
 
     // Check agency prompt limit (15 prompts per brand)
     const { data: { user } } = await supabase.auth.getUser();
@@ -1179,7 +1194,7 @@ export function useClientDashboard() {
 
     if (uniqueTexts.length === 0) {
       console.log('All prompts already exist, skipping insert.');
-      return;
+      return [];
     }
 
     // Also deduplicate within the input itself
@@ -1240,7 +1255,7 @@ export function useClientDashboard() {
             storedPrompts[selectedClient.id] = allPrompts;
             saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
           }
-          return;
+          return successfulPrompts;
         }
         throw insertError;
       }
@@ -1251,6 +1266,7 @@ export function useClientDashboard() {
       const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
       storedPrompts[selectedClient.id] = allPrompts;
       saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+      return newPrompts;
     } catch (err) {
       console.error("Supabase bulk insert failed:", err);
       throw err;
@@ -1498,30 +1514,63 @@ export function useClientDashboard() {
   // Keep a stable reference alias for places that need a useCallback-style ref
   const updateSummary = useCallback((results: AuditResult[]) => updateSummaryDirect(results), []);
 
-  const runFullAudit = useCallback(async () => {
-    if (!selectedClient || prompts.length === 0) return;
+  const runFullAudit = useCallback(async (promptsOverride?: Prompt[]) => {
+    const promptsToRun = promptsOverride || prompts;
+    if (!selectedClient || promptsToRun.length === 0) return;
     setLoading(true);
     setError(null);
-    const results: AuditResult[] = [...auditResults];
     let failedCount = 0;
 
-    for (const prompt of prompts) {
+    for (const prompt of promptsToRun) {
       if (prompt.is_active === false) continue; // Skip inactive prompts
-      if (results.find(r => r.prompt_id === prompt.id)) continue;
-      setLoadingPromptId(prompt.id);
+
+      // Check redundancy against FRESH state (ref would be better, but this reduces gap)
+      // Note: In strict concurrency, we might still double-audit if timing matches perfectly, 
+      // but functional update below prevents state corruption.
+      setLoadingPromptIds(prev => new Set(prev).add(prompt.id));
 
       try {
-        const { data, error: fnError } = await supabase.functions.invoke("geo-audit", {
-          body: {
+        // Retry logic: up to 2 retries with exponential backoff for edge function failures
+        let data: any = null;
+        let fnError: any = null;
+        const MAX_RETRIES = 2;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          const requestBody = {
             client_id: selectedClient.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
             brand_name: selectedClient.brand_name, brand_tags: selectedClient.brand_tags,
             competitors: selectedClient.competitors,
             location_code: prompt.location_code || selectedClient.location_code,
             location_name: selectedClient.target_region || "United States",
             models: selectedModels, niche_level: prompt.niche_level, save_to_db: true,
-            skip_cache: true, // Force fresh results for every run
-          },
-        });
+            skip_cache: true,
+          };
+
+          if (attempt === 0) {
+            console.log(`[Audit] Running prompt "${prompt.prompt_text.substring(0, 50)}..."`);
+          }
+
+          const result = await supabase.functions.invoke("geo-audit", { body: requestBody });
+          data = result.data;
+          fnError = result.error;
+          if (!fnError && data?.success) break; // Success — exit retry loop
+
+          console.warn(`[Audit] Attempt ${attempt + 1} failed:`, {
+            error: fnError?.message || fnError,
+            status: fnError?.status,
+            prompt: prompt.prompt_text.substring(0, 40),
+          });
+
+          if (attempt === MAX_RETRIES) {
+            console.error(`[Audit] Failed after ${MAX_RETRIES} retries:`, fnError);
+            toast.error(`Audit failed: ${prompt.prompt_text.substring(0, 30)}...`, {
+              description: fnError?.message || (typeof fnError === 'string' ? fnError : "Check console for details")
+            });
+          }
+          if (attempt < MAX_RETRIES) {
+            const delay = Math.pow(2, attempt + 1) * 1000; // 2s, 4s
+            await new Promise(r => setTimeout(r, delay));
+          }
+        }
 
         if (!fnError && data?.success) {
           // Clean and analyze results client-side for better accuracy
@@ -1536,12 +1585,14 @@ export function useClientDashboard() {
               raw_response: analysis.cleanedResponse,
               brand_mentioned: analysis.brandMentions > 0,
               brand_mention_count: analysis.brandMentions,
-              brand_rank: analysis.brandRank || mr.brand_rank, // Prefer client-side rank if found, else keep API rank
+              brand_rank: analysis.brandRank || mr.brand_rank,
               competitors_found: analysis.competitorStats.filter(c => c.count > 0 || c.rank !== null),
             };
           });
 
-          // Recalculate summary based on processed results
+          // Recalculate summary locally is tricky without full list, so we rely on updateSummaryDirect later
+          // But locally we can compute partials? No, simplest is to just push result.
+
           let summaries = { sov: 0, rankSum: 0, rankCount: 0, citations: 0, cost: 0 };
           processedModelResults.forEach((mr: any) => {
             if (mr.brand_mentioned) summaries.sov += (100 / processedModelResults.length);
@@ -1561,83 +1612,114 @@ export function useClientDashboard() {
             },
             created_at: data.data.timestamp,
           };
-          results.push(result);
-          setAuditResults([...results]);
-          const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-          storedResults[selectedClient.id] = results;
-          saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
-          updateSummary(results);
+
+          // Functional update to avoid race conditions
+          setAuditResults(prev => {
+            // Check if result already exists (prevent dupes even if race)
+            if (prev.find(r => r.prompt_id === prompt.id)) return prev;
+            const next = [...prev, result];
+            // Side-effect: update summary
+            // Note: calling updateSummary inside setState callback is bad practice, but we need updated list.
+            // We'll call updateSummary with the NEW list outside? 
+            // setAuditResults doesn't return the new value.
+            // We can re-calculate summary from 'next' here? 
+            // Better: use a separate useEffect for summary? 
+            // Or just update summary using 'next'.
+            setTimeout(() => updateSummaryDirect(next), 0);
+            return next;
+          });
+
+          // Persistence handled by useEffect
 
           // Run Tavily search if enabled
           if (includeTavily) {
+            // ... (keep logic same, omitted for brevity, logic remains valid)
             try {
-              console.log("[Tavily] Running source analysis for prompt:", prompt.prompt_text.substring(0, 50));
-              const { data: tavilyData, error: tavilyError } = await supabase.functions.invoke("tavily-search", {
+              // Fire and forget Tavily to avoid blocking next prompt loop?
+              // The original code awaited it. We'll await it to be safe.
+              console.log("[Tavily] Running for:", prompt.prompt_text.substring(0, 30));
+              const { data: tavilyData } = await supabase.functions.invoke("tavily-search", {
                 body: {
-                  client_id: selectedClient.id,
-                  prompt_id: prompt.id,
-                  prompt_text: prompt.prompt_text,
-                  brand_name: selectedClient.brand_name,
-                  competitors: selectedClient.competitors,
-                  search_depth: "advanced",
-                  max_results: 20,
-                  include_answer: true,
-                  save_to_db: true,
+                  client_id: selectedClient.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
+                  brand_name: selectedClient.brand_name, competitors: selectedClient.competitors,
+                  search_depth: "advanced", max_results: 20, include_answer: true, save_to_db: true,
                 },
               });
-
-              if (!tavilyError && tavilyData?.success) {
-                console.log("[Tavily] Got", tavilyData.sources?.length || 0, "sources");
+              if (tavilyData?.success) {
                 setTavilyResults(prev => ({ ...prev, [prompt.id]: tavilyData }));
-              } else {
-                console.warn("[Tavily] Search failed:", tavilyError || tavilyData?.error);
               }
-            } catch (tavilyErr) {
-              console.error("[Tavily] Exception:", tavilyErr);
-            }
+            } catch (err) { console.error("Tavily error:", err); }
           }
         } else {
-          // Don't set global error for individual prompt failures — just log and continue
           failedCount++;
-          console.warn(`[Audit] Prompt failed: "${prompt.prompt_text.substring(0, 50)}..." — ${fnError?.message || data?.error || 'Unknown error'}`);
+          console.warn(`[Audit] Prompt failed: "${prompt.prompt_text.substring(0, 50)}..."`);
         }
+        // Small delay between prompts to be nice to API
         await new Promise(r => setTimeout(r, 300));
       } catch (err) {
-        // Don't halt the loop — log and continue to next prompt
         failedCount++;
         console.error("[Audit] Exception on prompt:", prompt.prompt_text.substring(0, 50), err);
+      } finally {
+        setLoadingPromptIds(prev => { const n = new Set(prev); n.delete(prompt.id); return n; });
       }
     }
     if (failedCount > 0) {
       console.warn(`[Audit] Completed with ${failedCount} failed prompt(s).`);
     }
     setLoading(false);
-    setLoadingPromptId(null);
   }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
 
-  const runSinglePrompt = useCallback(async (promptId: string) => {
+  const runSinglePrompt = useCallback(async (promptOrId: string | Prompt) => {
     if (!selectedClient) return;
-    const prompt = prompts.find(p => p.id === promptId);
-    if (!prompt) return;
 
-    // Check if there's an existing result (for re-run)
-    const existingResultIndex = auditResults.findIndex(r => r.prompt_id === promptId);
+    let prompt: Prompt | undefined;
+    if (typeof promptOrId === 'string') {
+      prompt = prompts.find(p => p.id === promptOrId);
+    } else {
+      prompt = promptOrId;
+    }
 
-    setLoadingPromptId(promptId);
+    if (!prompt) {
+      console.warn("runSinglePrompt: Prompt not found", promptOrId);
+      return;
+    }
+
+    setLoadingPromptIds(prev => new Set(prev).add(prompt.id));
     setError(null);
 
     try {
-      // Run geo-audit
-      const { data, error: fnError } = await supabase.functions.invoke("geo-audit", {
-        body: {
+      // Retry logic: up to 2 retries with exponential backoff
+      let data: any = null;
+      let fnError: any = null;
+      const MAX_RETRIES = 2;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const requestBody = {
           client_id: selectedClient.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
           brand_name: selectedClient.brand_name, brand_tags: selectedClient.brand_tags,
           competitors: selectedClient.competitors,
           location_code: prompt.location_code || selectedClient.location_code,
           location_name: selectedClient.target_region || "United States",
           models: selectedModels, niche_level: prompt.niche_level, save_to_db: true,
-        },
-      });
+        };
+        if (attempt === 0) {
+          console.log(`[SingleAudit] Running prompt "${prompt.prompt_text.substring(0, 50)}..."`);
+        }
+        const result = await supabase.functions.invoke("geo-audit", { body: requestBody });
+        data = result.data;
+        fnError = result.error;
+        if (!fnError && data?.success) break;
+
+        console.warn(`[SingleAudit] Attempt ${attempt + 1} failed:`, {
+          error: fnError?.message || fnError,
+          status: fnError?.status,
+          prompt: prompt.prompt_text.substring(0, 40),
+        });
+
+        if (attempt < MAX_RETRIES) {
+          const delay = Math.pow(2, attempt + 1) * 1000;
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
 
       if (!fnError && data?.success) {
         // Clean and analyze results client-side for better accuracy
@@ -1657,7 +1739,7 @@ export function useClientDashboard() {
           };
         });
 
-        // Recalculate summary based on processed results
+        // Recalculate summary locally is tricky without full list, so we rely on updateSummaryDirect later
         let summaries = { sov: 0, rankSum: 0, rankCount: 0, citations: 0, cost: 0 };
         processedModelResults.forEach((mr: any) => {
           if (mr.brand_mentioned) summaries.sov += (100 / processedModelResults.length);
@@ -1678,45 +1760,36 @@ export function useClientDashboard() {
           created_at: data.data.timestamp,
         };
 
-        let newResults: AuditResult[];
-        if (existingResultIndex >= 0) {
-          // Replace existing result (re-run)
-          newResults = [...auditResults];
-          newResults[existingResultIndex] = result;
-        } else {
-          // Add new result
-          newResults = [...auditResults, result];
-        }
+        setAuditResults(prev => {
+          const index = prev.findIndex(r => r.prompt_id === prompt!.id);
+          let nextResults;
+          if (index >= 0) {
+            nextResults = [...prev];
+            nextResults[index] = result;
+          } else {
+            nextResults = [...prev, result];
+          }
+          setTimeout(() => updateSummaryDirect(nextResults), 0);
+          return nextResults;
+        });
 
-        setAuditResults(newResults);
-        const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-        storedResults[selectedClient.id] = newResults;
-        saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
-        updateSummary(newResults);
+        // Persistence handled by useEffect
 
         // Run Tavily search if enabled
         if (includeTavily) {
           try {
-            console.log("[Tavily] Running source analysis for prompt:", prompt.prompt_text.substring(0, 50));
-            const { data: tavilyData, error: tavilyError } = await supabase.functions.invoke("tavily-search", {
+            // Fire and forget, but await to not unmount early
+            console.log("[Tavily] Running for:", prompt.prompt_text.substring(0, 30));
+            const { data: tavilyData } = await supabase.functions.invoke("tavily-search", {
               body: {
-                client_id: selectedClient.id,
-                prompt_id: prompt.id,
-                prompt_text: prompt.prompt_text,
-                brand_name: selectedClient.brand_name,
-                competitors: selectedClient.competitors,
-                search_depth: "advanced",
-                max_results: 20,
-                include_answer: true,
-                save_to_db: true,
+                client_id: selectedClient.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
+                brand_name: selectedClient.brand_name, competitors: selectedClient.competitors,
+                search_depth: "advanced", max_results: 20, include_answer: true, save_to_db: true,
               },
             });
 
-            if (!tavilyError && tavilyData?.success) {
-              console.log("[Tavily] Got", tavilyData.sources?.length || 0, "sources");
+            if (tavilyData?.success) {
               setTavilyResults(prev => ({ ...prev, [prompt.id]: tavilyData }));
-            } else {
-              console.warn("[Tavily] Search failed:", tavilyError || tavilyData?.error);
             }
           } catch (tavilyErr) {
             console.error("[Tavily] Exception:", tavilyErr);
@@ -1729,7 +1802,7 @@ export function useClientDashboard() {
       console.error("Single audit error CRITICAL:", err);
       setError(err instanceof Error ? err.message : "Audit failed");
     } finally {
-      setLoadingPromptId(null);
+      setLoadingPromptIds(prev => { const n = new Set(prev); n.delete(prompt!.id); return n; });
     }
   }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
 
@@ -1768,7 +1841,7 @@ export function useClientDashboard() {
       const prompt = prompts.find(p => p.id === promptId);
       if (!prompt) continue;
 
-      setLoadingPromptId(promptId);
+      setLoadingPromptIds(prev => new Set(prev).add(promptId));
 
       try {
         const { data, error: fnError } = await supabase.functions.invoke("geo-audit", {
@@ -1861,11 +1934,16 @@ export function useClientDashboard() {
         } else {
           console.error("Campaign prompt failed:", fnError || data?.error);
         }
-        await new Promise(r => setTimeout(r, 500)); // Rate limit buffer
+        await new Promise(r => setTimeout(r, 500));
       } catch (err) {
         console.error("Campaign run error:", err);
+      } finally {
+        // Ensure cleanup happens
+        const pid = promptId;
+        setLoadingPromptIds(prev => { const n = new Set(prev); n.delete(pid); return n; });
       }
     }
+
 
     // Final state update
     setAuditResults(newResults);
@@ -1875,8 +1953,7 @@ export function useClientDashboard() {
     updateSummary(newResults);
 
     setLoading(false);
-    setLoadingPromptId(null);
-  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary]);
+  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
 
   // ============================================
   // EXPORT/IMPORT FUNCTIONS
@@ -2989,7 +3066,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     auditProgress,
     // State
     clients, selectedClient, prompts, auditResults, summary, costBreakdown,
-    selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults,
+    selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults,
 
     // Client management
     addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily,

@@ -141,20 +141,27 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
   return <span className="flex items-center gap-0.5 text-gray-400 text-xs"><Minus className="h-3 w-3" />0{suffix}</span>;
 }
 
-export default function ClientDashboard() {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptId, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
+interface ClientDashboardProps {
+  autoRunClientId?: string | null;
+  onAutoRunComplete?: () => void;
+}
+
+export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: ClientDashboardProps = {}) {
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">(() => {
     // Restore from localStorage on mount
-    const saved = localStorage.getItem('forzeo_activeTab');
-    const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "intelligence", "brands"];
-    return (saved && validTabs.includes(saved)) ? saved as any : "overview";
+    try {
+      const saved = localStorage.getItem('forzeo_activeTab');
+      const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "intelligence", "brands"];
+      return (saved && validTabs.includes(saved)) ? saved as any : "overview";
+    } catch { return "overview"; }
   });
 
   // Persist activeTab to localStorage
   useEffect(() => {
-    localStorage.setItem('forzeo_activeTab', activeTab);
+    try { localStorage.setItem('forzeo_activeTab', activeTab); } catch { /* quota exceeded — non-critical */ }
   }, [activeTab]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -228,6 +235,39 @@ export default function ClientDashboard() {
 
   // Brand Visibility View All modal
   const [showBrandVisibilityModal, setShowBrandVisibilityModal] = useState(false);
+
+  // Auto-run prompts after onboarding creates a new brand
+  const autoRunTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!autoRunClientId || autoRunTriggeredRef.current) return;
+
+    // If we haven't loaded the right client yet, switch to it
+    if (selectedClient?.id !== autoRunClientId) {
+      const targetClient = clients.find(c => c.id === autoRunClientId);
+      if (targetClient) {
+        console.log('[AutoRun] Switching to new brand:', targetClient.brand_name);
+        switchClient(targetClient);
+      } else {
+        // Client not in list yet — dashboard may still be loading. 
+        // Refresh to pick up the new client.
+        console.log('[AutoRun] New client not found yet, refreshing...');
+        refreshData();
+      }
+      return; // Wait for next render when selectedClient matches
+    }
+
+    // Now the right client is selected — wait for prompts to load
+    if (prompts.length > 0 && !loading) {
+      console.log('[AutoRun] Triggering runFullAudit for new brand:', autoRunClientId, `(${prompts.length} prompts)`);
+      toast.info(`Auto-starting audit for ${prompts.length} prompts...`);
+      autoRunTriggeredRef.current = true;
+      // Small delay to let UI render first
+      setTimeout(() => {
+        runFullAudit();
+        onAutoRunComplete?.();
+      }, 1500);
+    }
+  }, [autoRunClientId, selectedClient?.id, clients, prompts.length, loading]);
 
 
   const filteredAuditResults = useMemo(() => {
@@ -484,10 +524,10 @@ export default function ClientDashboard() {
         setNewPrompt("");
         setPromptLocation(""); // Reset location after adding
 
-        // Auto-run audit for non-admin users
-        if (!isAdmin && newPromptObj) {
+        // Auto-run audit for all users (admin or not)
+        if (newPromptObj) {
           toast.info("🚀 Prompt added! Running audit automatically...");
-          setTimeout(() => runSinglePrompt(newPromptObj.id), 500);
+          setTimeout(() => runSinglePrompt(newPromptObj), 500); // Pass object directly
         }
       } catch (err: any) {
         alert(err.message || "Failed to add prompt.");
@@ -608,8 +648,13 @@ export default function ClientDashboard() {
       if (g?.length) {
         const locationCode = promptLocation ? locations[promptLocation] : undefined;
         const locationName = promptLocation || undefined;
-        addMultiplePrompts(g, undefined, locationCode, locationName);
+        const newPrompts = await addMultiplePrompts(g, undefined, locationCode, locationName);
         setSeedKeywords("");
+
+        if (newPrompts && newPrompts.length > 0) {
+          toast.info(`Running audit for ${newPrompts.length} new prompts...`);
+          setTimeout(() => runFullAudit(newPrompts), 500);
+        }
       }
     } finally {
       setGeneratingPrompts(false);
@@ -988,8 +1033,8 @@ export default function ClientDashboard() {
               </div>
 
               <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => window.print()}><FileText className="h-4 w-4 mr-2" /> Export as PDF (Print)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
-              <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Forzeo Discovery Engine"><span className={cn("w-2 h-2 rounded-full", includeTavily ? "bg-amber-500" : "bg-gray-300")} />{includeTavily ? "Discovery On" : "Discovery Off"}</button>
-              {isAdmin && <Button onClick={runFullAudit} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>}
+              {isAdmin && <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Forzeo Discovery Engine"><span className={cn("w-2 h-2 rounded-full", includeTavily ? "bg-amber-500" : "bg-gray-300")} />{includeTavily ? "Discovery On" : "Discovery Off"}</button>}
+              {isAdmin && <Button onClick={() => runFullAudit()} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>}
             </div>
           </div>
         </header>
@@ -1064,14 +1109,19 @@ export default function ClientDashboard() {
             <div className="mt-4 flex items-baseline gap-2">
               <span className="text-4xl font-bold text-gray-950">{(() => {
                 const allResults = filteredAuditResults.flatMap(r => r.model_results || []);
-                const brandMentions = allResults.filter(mr => mr.brand_mentioned).length;
-                const competitorMentions = allResults.reduce((total, mr) => {
-                  const competitors = selectedClient?.competitors || [];
+                // SOV = Brand Mentions / (Brand Mentions + Competitor Mentions) × 100
+                let brandMentionCount = 0;
+                let competitorMentionCount = 0;
+                const competitors = selectedClient?.competitors || [];
+                allResults.forEach(mr => {
+                  if (mr.brand_mentioned) brandMentionCount++;
                   const response = (mr.raw_response || "").toLowerCase();
-                  return total + competitors.filter(c => response.includes(c.toLowerCase())).length;
-                }, 0);
-                const totalMentions = brandMentions + competitorMentions;
-                return totalMentions > 0 ? Math.round((brandMentions / totalMentions) * 100) : 0;
+                  competitors.forEach(c => {
+                    if (response.includes(c.toLowerCase())) competitorMentionCount++;
+                  });
+                });
+                const totalMentions = brandMentionCount + competitorMentionCount;
+                return totalMentions > 0 ? Math.round((brandMentionCount / totalMentions) * 100) : 0;
               })()}%</span>
               <TrendIndicator value={0} />
             </div>
@@ -1112,7 +1162,7 @@ export default function ClientDashboard() {
             <div className="mt-4 flex items-baseline gap-2">
               <span className="text-4xl font-bold text-gray-950">
                 {(() => {
-                  const ranksWithValue = filteredAuditResults.filter(r => r.summary?.average_rank != null);
+                  const ranksWithValue = filteredAuditResults.filter(r => r.summary?.average_rank != null && r.summary.share_of_voice > 0);
                   if (ranksWithValue.length === 0) return "—";
                   const avgRank = Math.round(ranksWithValue.reduce((sum, r) => sum + (r.summary.average_rank || 0), 0) / ranksWithValue.length * 10) / 10;
                   return `#${avgRank}`;
@@ -1310,7 +1360,7 @@ export default function ClientDashboard() {
             <tbody className="divide-y divide-gray-100">
               {filteredPrompts.map((p) => {
                 const r = getPromptResult(p.id);
-                const isLoading = loadingPromptId === p.id;
+                const isLoading = loadingPromptIds.has(p.id);
                 const visibleCount = r?.model_results.filter(mr => mr.brand_mentioned).length || 0;
                 const totalCount = r?.model_results.length || 0;
                 // Calculate position: use summary.average_rank, or compute from model results, or parse from raw_response
