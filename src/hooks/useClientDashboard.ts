@@ -1379,6 +1379,50 @@ export function useClientDashboard() {
     }
   }, [selectedClient, prompts, auditResults]);
 
+  const bulkDeletePrompts = useCallback(async (promptIds: string[]) => {
+    if (!selectedClient || promptIds.length === 0) return;
+    const deleteSet = new Set(promptIds);
+
+    // 1. Permanently delete from database
+    try {
+      await supabase
+        .from("prompts")
+        .delete()
+        .in("id", promptIds);
+    } catch (err) { console.error("Supabase batch delete failed:", err); }
+
+    // 2. Remove from local state
+    const updatedPrompts = prompts.filter(p => !deleteSet.has(p.id));
+    setPrompts(updatedPrompts);
+
+    // 3. Update localStorage
+    const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+    storedPrompts[selectedClient.id] = updatedPrompts;
+    saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+
+    // 4. Remove deleted prompts' results and recalculate summary
+    const activeResults = auditResults.filter(r => !deleteSet.has(r.prompt_id));
+    setAuditResults(activeResults);
+    if (activeResults.length === 0) {
+      setSummary(null);
+    } else {
+      let totalSov = 0, totalCitations = 0, totalCost = 0, rankSum = 0, rankCount = 0;
+      for (const r of activeResults) {
+        totalSov += r.summary.share_of_voice;
+        totalCitations += r.summary.total_citations;
+        totalCost += r.summary.total_cost;
+        if (r.summary.average_rank) { rankSum += r.summary.average_rank; rankCount++; }
+      }
+      setSummary({
+        total_prompts: activeResults.length,
+        overall_sov: Math.round(totalSov / activeResults.length),
+        average_rank: rankCount > 0 ? Math.round((rankSum / rankCount) * 10) / 10 : null,
+        total_citations: totalCitations,
+        total_cost: totalCost,
+      });
+    }
+  }, [selectedClient, prompts, auditResults]);
+
   const updatePrompt = useCallback(async (promptId: string, updates: string | { prompt_text?: string, location_code?: number, location_name?: string }) => {
     if (!selectedClient) return;
 
@@ -1539,7 +1583,7 @@ export function useClientDashboard() {
             client_id: selectedClient.id, prompt_id: prompt.id, prompt_text: prompt.prompt_text,
             brand_name: selectedClient.brand_name, brand_tags: selectedClient.brand_tags,
             competitors: selectedClient.competitors,
-            location_code: prompt.location_code || selectedClient.location_code,
+            location_code: Number(prompt.location_code || selectedClient.location_code || 2840),
             location_name: selectedClient.target_region || "United States",
             models: selectedModels, niche_level: prompt.niche_level, save_to_db: true,
             skip_cache: true,
@@ -1556,6 +1600,7 @@ export function useClientDashboard() {
 
           console.warn(`[Audit] Attempt ${attempt + 1} failed:`, {
             error: fnError?.message || fnError,
+            errorDetails: JSON.stringify(fnError),
             status: fnError?.status,
             prompt: prompt.prompt_text.substring(0, 40),
           });
@@ -2244,46 +2289,76 @@ export function useClientDashboard() {
   // AI GENERATION FUNCTIONS
   // ============================================
 
-  const generatePromptsFromKeywords = useCallback(async (keywords: string, options: { sentiment?: string; focus?: string; competitors?: string[] } = {}): Promise<string[]> => {
+  // Location drilldown helper for granular geo-context in prompt generation
+  const getLocationDrilldown = useCallback((region: string): string => {
+    const geographyMap: Record<string, string[]> = {
+      "India": ["Mumbai", "Bangalore", "Delhi NCR"],
+      "UAE": ["Dubai", "Abu Dhabi"],
+      "United States": ["New York", "San Francisco", "Austin"],
+      "USA": ["New York", "San Francisco", "Austin"],
+      "UK": ["London", "Manchester"],
+      "United Kingdom": ["London", "Manchester"],
+      "Dubai": ["Dubai Marina", "Downtown Dubai", "Business Bay"],
+      "Bangalore": ["Indiranagar", "Koramangala", "Whitefield"],
+      "Mumbai": ["Bandra", "Lower Parel", "Andheri"],
+      "Singapore": ["CBD", "Orchard Road", "Marina Bay"],
+      "Australia": ["Sydney", "Melbourne", "Brisbane"],
+      "Canada": ["Toronto", "Vancouver", "Montreal"],
+      "Germany": ["Berlin", "Munich", "Frankfurt"],
+      "France": ["Paris", "Lyon", "Marseille"],
+    };
+    const subLocations = geographyMap[region];
+    if (subLocations) {
+      return `Drill down into specific sub-locations: ${subLocations.join(", ")}.`;
+    }
+    return `Focus on the most prominent commercial hubs within ${region}.`;
+  }, []);
+
+  const generatePromptsFromKeywords = useCallback(async (keywords: string, _options: { sentiment?: string; focus?: string; competitors?: string[] } = {}): Promise<string[]> => {
     if (!selectedClient) return [];
 
-    const { sentiment = "Neutral", focus = "General", competitors = [] } = options;
-    const competitorContext = competitors.length > 0 ? `Competitors to analyze against: ${competitors.join(", ")}` : "";
+    const brandName = selectedClient.brand_name;
+    const industry = selectedClient.industry;
+    const region = selectedClient.target_region || "United States";
+    const locationInstruction = getLocationDrilldown(region);
 
-    // Construct a more detailed prompt based on options
-    let systemInstruction = `You are an expert SEO and Brand Reputation Analyst. Generate 10 search prompts that real users would type into AI search engines (like Perplexity, SearchGPT, Google Gemini).`;
+    // GEO Strategist system prompt — Brand-Neutral Category Dominance
+    const systemInstruction = `You are a Generative Engine Optimization (GEO) Strategist. Your goal is to generate 10 high-intent search queries that real buyers use to discover top-tier solutions in a specific category.
 
-    let userPrompt = `Generate 10 search prompts based on these keywords: "${keywords}"\n\nContext:\nBrand: ${selectedClient.brand_name}\nIndustry: ${selectedClient.industry}\nRegion: ${selectedClient.target_region}\n${competitorContext}\n\n`;
+STRICT CONSTRAINTS:
+- BRAND NEUTRALITY: You must NEVER include the brand name "${brandName}" in any output. Focus entirely on category-level searches (e.g., "Best [Category]" instead of "${brandName} reviews").
+- BUYER INTENT: Prioritize queries that indicate a user is ready to purchase or compare (Commercial Investigation).
+- NO FILLER: Output ONLY the 10 prompts, one per line. No numbers, no introductory text, no conversational filler.`;
 
-    // Add Focus Logic
-    if (focus === "Competitor") {
-      userPrompt += `FOCUS: Generate prompts that directly compare ${selectedClient.brand_name} against its competitors. Examples: "Diff between ${selectedClient.brand_name} and ${competitors[0] || 'competitor'}", "Is ${selectedClient.brand_name} better than..."\n`;
-    } else if (focus === "Feature") {
-      userPrompt += `FOCUS: Generate prompts specific to features, pricing, and use-cases. Examples: "${selectedClient.brand_name} pricing", "${selectedClient.brand_name} for enterprise", "How to use..."\n`;
-    } else {
-      userPrompt += `FOCUS: Generate a mix of informational, navigational, and commercial investigation prompts.\n`;
-    }
+    // Construct the dynamic user prompt
+    const userPrompt = `Category Keyword: ${keywords}
+Industry: ${industry}
+Region: ${region}
 
-    // Add Sentiment Logic
-    if (sentiment === "Negative") {
-      userPrompt += `SENTIMENT SCENARIO: Generate "crisis" or "problem" searching prompts to test how the AI handles negative queries. Examples: "${selectedClient.brand_name} complaints", "${selectedClient.brand_name} reviews reddit", "Is ${selectedClient.brand_name} legit?", "Cancel ${selectedClient.brand_name} subscription".\n`;
-    } else if (sentiment === "Positive") {
-      userPrompt += `SENTIMENT SCENARIO: Generate prompts from highly interested buyers looking for validation. Examples: "Why is ${selectedClient.brand_name} the best?", "Success stories with ${selectedClient.brand_name}".\n`;
-    }
+Instructions:
+1. Generate 10 brand-neutral search prompts.
+2. ${locationInstruction}
+3. Prompt Mix Requirement:
+   - 3x "Pillar" Queries: (Top 5, Top 10, Best of 2026).
+   - 3x "Localized" Queries: (Best in [City/Area]).
+   - 3x "Industry Variations": High-intent variations specific to ${industry} (e.g., pricing, reliability, specific technical use-cases).
+   - 1x "Decision Criteria": A query asking the AI for advice on how to choose a provider in this category.
+4. STOPSHIP: Do NOT mention the brand "${brandName}" in any output.`;
 
-    userPrompt += `\nOutput ONLY the 10 prompts, one per line. No numbering, no introductory text.`;
-
-    // 1. Try Supabase Edge Function first (if backend logic exists)
+    // 1. Try Supabase Edge Function first
     try {
       const { data, error } = await supabase.functions.invoke("generate-content", {
-        body: { prompt: userPrompt, type: "prompts" },
+        body: { prompt: userPrompt, systemPrompt: systemInstruction, type: "prompts" },
       });
       if (!error && data?.response) {
-        return data.response.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 10 && !l.startsWith("-") && !l.match(/^\d+\./));
+        const parsed = data.response.split("\n")
+          .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").replace(/^[•]\s*/, "").trim())
+          .filter((l: string) => l.length > 10 && !l.toLowerCase().includes(brandName.toLowerCase()));
+        if (parsed.length >= 5) return parsed;
       }
-    } catch (err) { console.log("Generate prompts error:", err); }
+    } catch (err) { console.log("[GEO] Edge function error:", err); }
 
-    // 2. Direct Groq Fallback (Primary method if desired)
+    // 2. Direct Groq call (Primary method)
     const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
     if (!groqApiKey) return [];
 
@@ -2305,15 +2380,14 @@ export function useClientDashboard() {
       if (response.ok) {
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content || "";
-        // Clean up the output to ensure just lines of text
         return content.split("\n")
-          .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").trim())
-          .filter((l: string) => l.length > 5);
+          .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").replace(/^[•]\s*/, "").trim())
+          .filter((l: string) => l.length > 10 && !l.toLowerCase().includes(brandName.toLowerCase()));
       }
-    } catch (err) { console.error("Groq error:", err); }
+    } catch (err) { console.error("[GEO] Groq error:", err); }
 
     return [];
-  }, [selectedClient]);
+  }, [selectedClient, getLocationDrilldown]);
 
   const generateContent = useCallback(async (topic: string, contentType: string, tone?: string, audience?: string, keywords?: string): Promise<string | null> => {
     if (!selectedClient) return null;
@@ -3076,7 +3150,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     runFullAudit, runSinglePrompt, runCampaign, clearResults,
 
     // Prompts
-    addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, bulkArchivePrompts, reactivatePrompt, clearAllPrompts, updatePrompt,
+    addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt,
 
     // Export/Import
     exportToCSV, exportPrompts, exportFullReport, importData,

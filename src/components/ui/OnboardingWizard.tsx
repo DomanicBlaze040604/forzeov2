@@ -503,6 +503,141 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         }
     }, [formData.brandName, formData.industry, formData.customIndustry, formData.location, showNotification]);
 
+    // Location drilldown helper for granular geo-context
+    const getLocationDrilldown = useCallback((region: string): string => {
+        const geographyMap: Record<string, string[]> = {
+            "India": ["Mumbai", "Bangalore", "Delhi NCR"],
+            "UAE": ["Dubai", "Abu Dhabi"],
+            "United States": ["New York", "San Francisco", "Austin"],
+            "USA": ["New York", "San Francisco", "Austin"],
+            "UK": ["London", "Manchester"],
+            "United Kingdom": ["London", "Manchester"],
+            "Dubai": ["Dubai Marina", "Downtown Dubai", "Business Bay"],
+            "Bangalore": ["Indiranagar", "Koramangala", "Whitefield"],
+            "Mumbai": ["Bandra", "Lower Parel", "Andheri"],
+            "Singapore": ["CBD", "Orchard Road", "Marina Bay"],
+            "Australia": ["Sydney", "Melbourne", "Brisbane"],
+            "Canada": ["Toronto", "Vancouver", "Montreal"],
+            "Germany": ["Berlin", "Munich", "Frankfurt"],
+            "France": ["Paris", "Lyon", "Marseille"],
+        };
+        const subLocations = geographyMap[region];
+        if (subLocations) {
+            return `Drill down into specific sub-locations: ${subLocations.join(", ")}.`;
+        }
+        return `Focus on the most prominent commercial hubs within ${region}.`;
+    }, []);
+
+    // Generate prompts via LLM (Brand-Neutral GEO Strategist)
+    const handleGeneratePreview = useCallback(async () => {
+        const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
+        const locationName = LOCATIONS.find(l => l.code === formData.location)?.name?.replace(/^[^\s]+\s/, '') || 'United States';
+        const maxPromptsAllowed = userLimits.maxPrompts;
+        const allPrompts: { text: string, topic: string }[] = [];
+
+        setLoading(true);
+        setCurrentStep('review_prompts');
+
+        const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
+        const locationInstruction = getLocationDrilldown(locationName);
+
+        // GEO Strategist system prompt — Brand-Neutral Category Dominance
+        const systemInstruction = `You are a Generative Engine Optimization (GEO) Strategist. Your goal is to generate high-intent search queries that real buyers use to discover top-tier solutions in a specific category.
+
+STRICT CONSTRAINTS:
+- BRAND NEUTRALITY: You must NEVER include the brand name "${formData.brandName}" in any output. Focus entirely on category-level searches (e.g., "Best [Category]" instead of "${formData.brandName} reviews").
+- BUYER INTENT: Prioritize queries that indicate a user is ready to purchase or compare (Commercial Investigation).
+- NO FILLER: Output ONLY the prompts, one per line. No numbers, no introductory text, no conversational filler.`;
+
+        for (const keyword of formData.seedKeywords) {
+            if (allPrompts.length >= maxPromptsAllowed) break;
+
+            const promptsNeeded = Math.min(promptsPerKeyword, maxPromptsAllowed - allPrompts.length);
+
+            // Dynamic user prompt for this keyword
+            const userPrompt = `Category Keyword: ${keyword}
+Industry: ${finalIndustry}
+Region: ${locationName}
+
+Instructions:
+1. Generate ${promptsNeeded} brand-neutral search prompts.
+2. ${locationInstruction}
+3. Prompt Mix Requirement:
+   - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Pillar" Queries: (Top 5, Top 10, Best of 2026).
+   - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Localized" Queries: (Best in [City/Area]).
+   - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Industry Variations": High-intent variations specific to ${finalIndustry} (e.g., pricing, reliability, specific technical use-cases).
+   - 1x "Decision Criteria": A query asking the AI for advice on how to choose a provider in this category.
+4. STOPSHIP: Do NOT mention the brand "${formData.brandName}" in any output.`;
+
+            let generatedLines: string[] = [];
+
+            // Try LLM generation via Groq
+            if (groqApiKey) {
+                try {
+                    console.log(`[GEO Onboarding] Generating prompts for keyword: "${keyword}"`);
+                    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            model: "llama-3.1-8b-instant",
+                            messages: [
+                                { role: "system", content: systemInstruction },
+                                { role: "user", content: userPrompt }
+                            ],
+                            temperature: 0.7,
+                            max_tokens: 2048,
+                        }),
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        const content = data.choices?.[0]?.message?.content || "";
+                        generatedLines = content.split("\n")
+                            .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").replace(/^[•]\s*/, "").trim())
+                            .filter((l: string) => l.length > 10 && !l.toLowerCase().includes(formData.brandName.toLowerCase()))
+                            .slice(0, promptsNeeded);
+                        console.log(`[GEO Onboarding] Got ${generatedLines.length} prompts for "${keyword}"`);
+                    } else {
+                        console.warn(`[GEO Onboarding] Groq returned ${response.status}`);
+                    }
+                } catch (err) {
+                    console.error("[GEO Onboarding] Groq error:", err);
+                }
+            }
+
+            // Fallback to templates if LLM failed or no API key
+            if (generatedLines.length === 0) {
+                console.log(`[GEO Onboarding] Falling back to templates for "${keyword}"`);
+                generatedLines = [
+                    `Best ${keyword} options in ${locationName} for 2026`,
+                    `Top 10 ${keyword} providers compared`,
+                    `How to choose the right ${keyword} for ${finalIndustry}`,
+                    `Most reliable ${keyword} solutions with competitive pricing`,
+                    `${keyword} recommendations for small and mid-size businesses`,
+                    `Affordable ${keyword} alternatives worth considering`,
+                    `Premium ${keyword} services in ${locationName}`,
+                    `${keyword} features and integrations guide`,
+                    `${keyword} pricing comparison and reviews`,
+                    `What to look for when choosing ${keyword}`
+                ].slice(0, promptsNeeded);
+            }
+
+            for (const line of generatedLines) {
+                if (allPrompts.length < maxPromptsAllowed) {
+                    allPrompts.push({ text: line, topic: keyword });
+                }
+            }
+
+            // Small delay between keywords to avoid rate limiting
+            if (formData.seedKeywords.indexOf(keyword) < formData.seedKeywords.length - 1) {
+                await new Promise(r => setTimeout(r, 300));
+            }
+        }
+
+        setGeneratedPrompts(allPrompts);
+        setLoading(false);
+    }, [formData, userLimits.maxPrompts, promptsPerKeyword, getLocationDrilldown]);
+
     // Navigation
     const handleNext = useCallback(async () => {
         if (currentStep === 'brand_details') {
@@ -526,7 +661,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 showNotification('error', "Please add at least one seed keyword.");
                 return;
             }
-            handleGeneratePreview();
+            await handleGeneratePreview();
         } else if (currentStep === 'review_prompts') {
             if (generatedPrompts.length === 0) {
                 showNotification('error', "You need at least one prompt to proceed.");
@@ -534,7 +669,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
             }
             handleCommit();
         }
-    }, [currentStep, formData, showNotification, handleAutoFindCompetitors, generatedPrompts]);
+    }, [currentStep, formData, showNotification, handleAutoFindCompetitors, generatedPrompts, handleGeneratePreview]);
 
     const handleBack = useCallback(() => {
         if (currentStep === 'competitors') setCurrentStep('brand_details');
@@ -542,40 +677,6 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         else if (currentStep === 'review_prompts') setCurrentStep('seed_keywords');
     }, [currentStep]);
 
-    // Generate Preview (In-Memory)
-    const handleGeneratePreview = useCallback(() => {
-        const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
-        const locationName = LOCATIONS.find(l => l.code === formData.location)?.name?.replace(/^[^\s]+\s/, '') || 'United States';
-        const maxPromptsAllowed = userLimits.maxPrompts;
-        const allPrompts: { text: string, topic: string }[] = [];
-
-        // Generate prompts for each keyword
-        for (const keyword of formData.seedKeywords) {
-            if (allPrompts.length >= maxPromptsAllowed) break;
-
-            const keywordPrompts = [
-                `What are the best ${keyword} options available?`,
-                `Top rated ${keyword} reviews and comparison`,
-                `How to choose the right ${keyword}?`,
-                `Best ${keyword} for ${finalIndustry} in ${locationName}`,
-                `${keyword} recommendations and alternatives`,
-                `Affordable ${keyword} solutions`,
-                `Premium ${keyword} services`,
-                `${keyword} features guide`,
-                `${keyword} pricing comparison`,
-                `Why choose ${keyword}?`
-            ].slice(0, promptsPerKeyword);
-
-            for (const p of keywordPrompts) {
-                if (allPrompts.length < maxPromptsAllowed) {
-                    allPrompts.push({ text: p, topic: keyword });
-                }
-            }
-        }
-
-        setGeneratedPrompts(allPrompts);
-        setCurrentStep('review_prompts');
-    }, [formData, userLimits.maxPrompts, promptsPerKeyword]);
 
     const handlePromptEdit = (idx: number, newVal: string) => {
         const updated = [...generatedPrompts];

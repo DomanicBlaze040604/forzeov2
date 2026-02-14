@@ -147,7 +147,7 @@ interface ClientDashboardProps {
 }
 
 export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: ClientDashboardProps = {}) {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">(() => {
@@ -211,6 +211,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [promptsTabView, setPromptsTabView] = useState<"active" | "suggested" | "inactive">("active");
   const [sourcesGapView, setSourcesGapView] = useState<"all" | "gap">("all");
   const [sourcesTypeFilter, setSourcesTypeFilter] = useState<string>("all");
+  const [sourcesModelFilter, setSourcesModelFilter] = useState<string[]>([]);
+  const [sourcesModelFilterOpen, setSourcesModelFilterOpen] = useState(false);
   const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" });
   const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", primary_color: "#3b82f6", logo_url: "", competitors: "", website: "" });
   const [isAutoFinding, setIsAutoFinding] = useState(false);
@@ -281,9 +283,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   }, [auditResults, dateRangeFilter, modelFilter, customDateStart, customDateEnd]);
 
   const allCitations = useMemo(() => {
-    const citationMap = new Map<string, { url: string; title: string; domain: string; count: number; prompts: string[] }>();
-    for (const result of filteredAuditResults) { for (const mr of result.model_results) { for (const c of mr.citations) { const key = c.url; if (citationMap.has(key)) { const existing = citationMap.get(key)!; existing.count++; if (!existing.prompts.includes(result.prompt_text)) existing.prompts.push(result.prompt_text); } else { citationMap.set(key, { ...c, count: 1, prompts: [result.prompt_text] }); } } } }
-    return Array.from(citationMap.values()).sort((a, b) => b.count - a.count);
+    const citationMap = new Map<string, { url: string; title: string; domain: string; count: number; prompts: string[]; models: Set<string> }>();
+    for (const result of filteredAuditResults) { for (const mr of result.model_results) { for (const c of mr.citations) { const key = c.url; if (citationMap.has(key)) { const existing = citationMap.get(key)!; existing.count++; existing.models.add(mr.model); if (!existing.prompts.includes(result.prompt_text)) existing.prompts.push(result.prompt_text); } else { citationMap.set(key, { ...c, count: 1, prompts: [result.prompt_text], models: new Set([mr.model]) }); } } } }
+    return Array.from(citationMap.values()).map(c => ({ ...c, models: Array.from(c.models) })).sort((a, b) => b.count - a.count);
   }, [filteredAuditResults]);
 
   const modelStats = useMemo(() => {
@@ -441,7 +443,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const getPromptResult = (promptId: string) => filteredAuditResults.find(r => r.prompt_id === promptId);
 
   const domainStats = useMemo(() => {
-    const stats: Record<string, { count: number; type: string; avg: number; prompts: Map<string, { text: string; visible: boolean; competitors: Set<string> }> }> = {};
+    const stats: Record<string, { count: number; type: string; avg: number; models: Set<string>; prompts: Map<string, { text: string; visible: boolean; competitors: Set<string> }> }> = {};
     filteredAuditResults.forEach(result => {
       const pText = result.prompt_text;
       result.model_results.forEach(mr => {
@@ -454,8 +456,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           const staticType = classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
           const finalType = aiType || staticType;
 
-          if (!stats[c.domain]) stats[c.domain] = { count: 0, type: finalType, avg: 0, prompts: new Map() };
+          if (!stats[c.domain]) stats[c.domain] = { count: 0, type: finalType, avg: 0, models: new Set(), prompts: new Map() };
           stats[c.domain].count++;
+          stats[c.domain].models.add(mr.model);
 
           // If AI type is newly available, update existing entry
           if (stats[c.domain].type !== finalType) {
@@ -478,6 +481,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       count: data.count,
       type: data.type,
       avg: data.avg,
+      models: Array.from(data.models),
       promptCount: data.prompts.size,
       prompts: Array.from(data.prompts.values()).map(p => ({
         text: p.text,
@@ -502,17 +506,19 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   // Sources Tab State & Logic (Lifted to fix hooks)
   const [sourceSearch, setSourceSearch] = useState("");
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
-  const filteredDomainStats = useMemo(() => !sourceSearch ? domainStats : domainStats.filter(s => s.domain.toLowerCase().includes(sourceSearch.toLowerCase())), [domainStats, sourceSearch]);
-  const filteredUrlCitations = useMemo(() => !sourceSearch ? allCitations : allCitations.filter(c => c.url.toLowerCase().includes(sourceSearch.toLowerCase()) || c.domain.toLowerCase().includes(sourceSearch.toLowerCase()) || c.title?.toLowerCase().includes(sourceSearch.toLowerCase())), [allCitations, sourceSearch]);
-  const gapDomains = useMemo(() => { if (!selectedClient) return []; const brandDomains = new Set<string>(); const competitorDomains = new Map<string, Set<string>>(); filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { const response = mr.raw_response?.toLowerCase() || ""; const hasBrand = mr.brand_mentioned; mr.citations.forEach(c => { if (hasBrand) brandDomains.add(c.domain); selectedClient.competitors.forEach(comp => { if (response.includes(comp.toLowerCase())) { if (!competitorDomains.has(c.domain)) competitorDomains.set(c.domain, new Set()); competitorDomains.get(c.domain)!.add(comp); } }); }); }); }); return Array.from(competitorDomains.entries()).filter(([domain]) => !brandDomains.has(domain)).map(([domain, competitors]) => ({ domain, competitors: Array.from(competitors) })).slice(0, 20); }, [selectedClient, filteredAuditResults]);
-  const displayedStats = sourcesGapView === "gap" ? gapDomains.map(g => { const stat = domainStats.find(s => s.domain === g.domain); return stat ? { ...stat, gapCompetitors: g.competitors } : null; }).filter(Boolean) : filteredDomainStats;
+  const modelFilteredDomainStats = useMemo(() => sourcesModelFilter.length === 0 ? domainStats : domainStats.filter(s => s.models.some(m => sourcesModelFilter.includes(m))), [domainStats, sourcesModelFilter]);
+  const modelFilteredCitations = useMemo(() => sourcesModelFilter.length === 0 ? allCitations : allCitations.filter(c => c.models.some(m => sourcesModelFilter.includes(m))), [allCitations, sourcesModelFilter]);
+  const filteredDomainStats = useMemo(() => !sourceSearch ? modelFilteredDomainStats : modelFilteredDomainStats.filter(s => s.domain.toLowerCase().includes(sourceSearch.toLowerCase())), [modelFilteredDomainStats, sourceSearch]);
+  const filteredUrlCitations = useMemo(() => !sourceSearch ? modelFilteredCitations : modelFilteredCitations.filter(c => c.url.toLowerCase().includes(sourceSearch.toLowerCase()) || c.domain.toLowerCase().includes(sourceSearch.toLowerCase()) || c.title?.toLowerCase().includes(sourceSearch.toLowerCase())), [modelFilteredCitations, sourceSearch]);
+  const gapDomains = useMemo(() => { if (!selectedClient) return []; const brandDomains = new Set<string>(); const competitorDomains = new Map<string, Set<string>>(); filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { if (sourcesModelFilter.length > 0 && !sourcesModelFilter.includes(mr.model)) return; const response = mr.raw_response?.toLowerCase() || ""; const hasBrand = mr.brand_mentioned; mr.citations.forEach(c => { if (hasBrand) brandDomains.add(c.domain); selectedClient.competitors.forEach(comp => { if (response.includes(comp.toLowerCase())) { if (!competitorDomains.has(c.domain)) competitorDomains.set(c.domain, new Set()); competitorDomains.get(c.domain)!.add(comp); } }); }); }); }); return Array.from(competitorDomains.entries()).filter(([domain]) => !brandDomains.has(domain)).map(([domain, competitors]) => ({ domain, competitors: Array.from(competitors) })).slice(0, 20); }, [selectedClient, filteredAuditResults, sourcesModelFilter]);
+  const displayedStats = sourcesGapView === "gap" ? gapDomains.map(g => { const stat = modelFilteredDomainStats.find(s => s.domain === g.domain); return stat ? { ...stat, gapCompetitors: g.competitors } : null; }).filter(Boolean) : filteredDomainStats;
   const exportSources = () => { if (sourcesView === "domains") { if (domainStats.length === 0) return; const rows = [["Domain", "Type", "Citations", "Prompts", "Avg/Audit"]]; for (const s of domainStats) { rows.push([s.domain, s.type, s.count.toString(), s.promptCount.toString(), s.avg.toString()]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-domains-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } else { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-urls-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } };
 
   // Citations Tab State & Logic (Lifted to fix hooks)
   const [citationSearch, setCitationSearch] = useState("");
   const [selectedCitation, setSelectedCitation] = useState<string | null>(null);
   const filteredCitations = useMemo(() => !citationSearch ? allCitations : allCitations.filter(c => c.url.toLowerCase().includes(citationSearch.toLowerCase()) || c.domain.toLowerCase().includes(citationSearch.toLowerCase()) || c.title?.toLowerCase().includes(citationSearch.toLowerCase())), [allCitations, citationSearch]);
-  const citationsByPrompt = useMemo(() => { const map: Record<string, typeof allCitations> = {}; filteredAuditResults.forEach(r => { const promptCitations: typeof allCitations = []; r.model_results.forEach(mr => { mr.citations.forEach(c => { promptCitations.push({ ...c, count: 1, prompts: [r.prompt_text] }); }); }); if (promptCitations.length > 0) map[r.prompt_id] = promptCitations; }); return map; }, [filteredAuditResults]);
+  const citationsByPrompt = useMemo(() => { const map: Record<string, typeof allCitations> = {}; filteredAuditResults.forEach(r => { const promptCitations: typeof allCitations = []; r.model_results.forEach(mr => { mr.citations.forEach(c => { promptCitations.push({ ...c, count: 1, prompts: [r.prompt_text], models: [mr.model] }); }); }); if (promptCitations.length > 0) map[r.prompt_id] = promptCitations; }); return map; }, [filteredAuditResults]);
   const exportCitations = () => { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `citations-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); };
 
   const handleAddPrompt = async () => {
@@ -1135,7 +1141,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             <div className="mt-4 flex items-baseline gap-2">
               <span className="text-4xl font-bold text-gray-950">{(() => {
                 const totalResults = filteredAuditResults.flatMap(r => r.model_results || []);
-                const citedResults = totalResults.filter(mr => (mr as any).is_cited || (mr.citations && mr.citations.length > 0));
+                const brandDomain = selectedClient?.brand_domain?.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/.*$/, '') || '';
+                const citedResults = totalResults.filter(mr => (mr as any).is_cited || (brandDomain && mr.citations && mr.citations.some(c => c.domain.toLowerCase().includes(brandDomain) || brandDomain.includes(c.domain.toLowerCase()))));
                 return totalResults.length > 0 ? Math.round((citedResults.length / totalResults.length) * 100) : 0;
               })()}%</span>
               <TrendIndicator value={0} />
@@ -1312,9 +1319,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             {isAdmin ? (
               <span className="text-sm text-gray-500 hidden sm:inline"> {prompts.length} total prompts</span>
             ) : (
-              <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= (isAgency ? 15 : 100) ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/{isAgency ? 15 : 100} Prompts</span>
+              <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= (isAgency ? 15 : 200) ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/{isAgency ? 15 : 200} Prompts</span>
             )}
-            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800 whitespace-nowrap" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 100)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800 whitespace-nowrap" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 200)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
           </div>
         </div>
 
@@ -1590,8 +1597,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                   <p className="text-gray-600 font-medium">No prompts yet</p>
                   <p className="text-sm text-gray-500 mt-1">Add your first prompt to get started with audits.</p>
-                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 100)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
-                  {!isAdmin && prompts.length >= (isAgency ? 15 : 100) && <p className="text-xs text-red-500 mt-2">{isAgency ? 'Agency' : 'Free'} prompt limit reached ({isAgency ? '15/15' : '100/100'})</p>}
+                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 200)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
+                  {!isAdmin && prompts.length >= (isAgency ? 15 : 200) && <p className="text-xs text-red-500 mt-2">{isAgency ? 'Agency' : 'Free'} prompt limit reached ({isAgency ? '15/15' : '200/200'})</p>}
                 </>
               )}
             </div>
@@ -1700,6 +1707,23 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   <Archive className="h-4 w-4 mr-1.5" />
                   Archive{selectedPromptIds.size > 1 ? ` (${selectedPromptIds.size})` : ''}
                 </Button>
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      if (!confirm(`Permanently delete ${selectedPromptIds.size} prompt${selectedPromptIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+                      const idsToDelete = Array.from(selectedPromptIds);
+                      await bulkDeletePrompts(idsToDelete);
+                      setSelectedPromptIds(new Set());
+                      toast.success(`Deleted ${idsToDelete.length} prompt${idsToDelete.length > 1 ? 's' : ''}`);
+                    }}
+                    className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                  >
+                    <Trash2 className="h-4 w-4 mr-1.5" />
+                    Delete{selectedPromptIds.size > 1 ? ` (${selectedPromptIds.size})` : ''}
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1797,7 +1821,89 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           <div className="flex items-center justify-end gap-4 mt-4 text-xs">{Object.entries(DOMAIN_TYPES).slice(0, 6).map(([k, t]) => (<div key={k} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.dot }} /><span className="text-gray-600">{t.label}</span></div>))}</div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3">{sourcesView === "domains" && <><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></>}{sourcesView === "urls" && <span className="text-sm font-medium text-gray-700">All URLs ({allCitations.length})</span>}</div><div className="flex items-center gap-2"><select value={sourcesTypeFilter} onChange={(e) => setSourcesTypeFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"><option value="all">All Types</option>{Object.entries(DOMAIN_TYPES).map(([key, val]) => (<option key={key} value={key}>{val.label}</option>))}</select><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder={sourcesView === "urls" ? "Search URLs..." : "Search domains..."} value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportSources}><Download className="h-3.5 w-3.5 mr-1" /> Export {sourcesView === "domains" ? "Domains" : "URLs"}</Button></div></div>
+          <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3">{sourcesView === "domains" && <><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></>}{sourcesView === "urls" && <span className="text-sm font-medium text-gray-700">All URLs ({modelFilteredCitations.length})</span>}</div><div className="flex items-center gap-2">
+            {/* Multi-select LLM Model Filter */}
+            <div className="relative">
+              <button
+                onClick={() => setSourcesModelFilterOpen(!sourcesModelFilterOpen)}
+                className={cn(
+                  "h-9 px-3 rounded-lg border text-sm font-medium transition-colors flex items-center gap-2",
+                  sourcesModelFilter.length > 0
+                    ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                )}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {sourcesModelFilter.length === 0
+                  ? "All Models"
+                  : sourcesModelFilter.length === 1
+                    ? AI_MODELS.find(m => m.id === sourcesModelFilter[0])?.name || sourcesModelFilter[0]
+                    : `${sourcesModelFilter.length} Models`}
+                {sourcesModelFilter.length > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.5 bg-blue-200 text-blue-800 text-xs font-bold rounded-full">{sourcesModelFilter.length}</span>
+                )}
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", sourcesModelFilterOpen && "rotate-180")} />
+              </button>
+              {sourcesModelFilterOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSourcesModelFilterOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 w-64 bg-white rounded-lg border border-gray-200 shadow-lg z-50 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Filter by AI Engine</span>
+                      <button
+                        onClick={() => setSourcesModelFilter(sourcesModelFilter.length === AI_MODELS.length ? [] : AI_MODELS.map(m => m.id))}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        {sourcesModelFilter.length === AI_MODELS.length ? "Clear All" : "Select All"}
+                      </button>
+                    </div>
+                    {AI_MODELS.map(model => {
+                      const Logo = MODEL_LOGOS[model.id]?.Logo;
+                      const color = MODEL_LOGOS[model.id]?.color || "#666";
+                      const isSelected = sourcesModelFilter.includes(model.id);
+                      return (
+                        <label
+                          key={model.id}
+                          className={cn(
+                            "flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors",
+                            isSelected ? "bg-blue-50/50" : "hover:bg-gray-50"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {
+                              setSourcesModelFilter(prev =>
+                                prev.includes(model.id)
+                                  ? prev.filter(id => id !== model.id)
+                                  : [...prev, model.id]
+                              );
+                            }}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div className="flex items-center gap-2 flex-1">
+                            {Logo && <Logo className="h-4 w-4" style={{ color }} />}
+                            <span className="text-sm font-medium text-gray-700">{model.name}</span>
+                          </div>
+                          <span className="text-xs text-gray-400">{model.provider === "DataForSEO" ? "Google" : model.provider}</span>
+                        </label>
+                      );
+                    })}
+                    {sourcesModelFilter.length > 0 && (
+                      <div className="px-3 py-2 border-t border-gray-100">
+                        <button
+                          onClick={() => { setSourcesModelFilter([]); setSourcesModelFilterOpen(false); }}
+                          className="w-full text-center text-xs text-gray-500 hover:text-gray-700 font-medium py-1"
+                        >
+                          Reset to All Models
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+            <select value={sourcesTypeFilter} onChange={(e) => setSourcesTypeFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"><option value="all">All Types</option>{Object.entries(DOMAIN_TYPES).map(([key, val]) => (<option key={key} value={key}>{val.label}</option>))}</select><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder={sourcesView === "urls" ? "Search URLs..." : "Search domains..."} value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportSources}><Download className="h-3.5 w-3.5 mr-1" /> Export {sourcesView === "domains" ? "Domains" : "URLs"}</Button></div></div>
           {sourcesGapView === "gap" && sourcesView === "domains" && (<div className="px-4 py-3 bg-orange-50 border-b border-orange-100"><p className="text-sm text-orange-700"><AlertTriangle className="h-4 w-4 inline mr-1" />These domains cite your competitors but not your brand.</p></div>)}
           {sourcesView === "domains" ? (
             <div className="max-h-[600px] overflow-y-auto">
@@ -3244,7 +3350,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   <button onClick={() => setDetailTab("models")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "models" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Model Results</button>
                   <button onClick={() => setDetailTab("past_responses")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "past_responses" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Past Responses</button>
                   <button onClick={() => setDetailTab("citations")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all", detailTab === "citations" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Citations ({uniqueCitations.length})</button>
-                  <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Discovery Engine</button>
+                  {isAdmin && <button onClick={() => setDetailTab("tavily")} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "tavily" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>Discovery Engine</button>}
                   <button onClick={() => { if (recommendations) setDetailTab("insights"); else handleGenerateRecommendations(); }} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-1.5", detailTab === "insights" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900")}>
                     {generatingRecommendations ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
                     Insights
@@ -3429,6 +3535,22 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                             )}
                           </div>
                         )}
+
+                        {/* Citations - shown below response */}
+                        {mr.citations.length > 0 && (
+                          <div className="p-4 border-b border-gray-100">
+                            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Sources Cited ({mr.citations.length})</div>
+                            <div className="grid grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+                              {mr.citations.map((c, j) => (
+                                <a key={j} href={c.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 p-2.5 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:border-gray-300 transition-colors group">
+                                  <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded flex-shrink-0" />
+                                  <span className="text-sm text-gray-700 truncate flex-1 group-hover:text-gray-900">{c.title || c.domain}</span>
+                                  <ExternalLink className="h-3.5 w-3.5 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         {/* Show indicator for AI Overview source type */}
                         {mr.model === "google_ai_overview" && mr.raw_response && mr.is_ai_overview === false && (
                           <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
@@ -3446,8 +3568,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           </div>
                         )}
 
-                        {/* Extracted Brands - now placed BEFORE citations, right after competitors */}
-                        {mr.extracted_brands && mr.extracted_brands.length > 0 && (
+                        {/* Extracted Brands - admin only */}
+                        {isAdmin && mr.extracted_brands && mr.extracted_brands.length > 0 && (
                           <div className="p-4 border-b border-gray-100">
                             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Brands Mentioned ({mr.extracted_brands.length})</div>
                             <div className="flex flex-wrap gap-2">
@@ -3516,21 +3638,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           </div>
                         )}
 
-                        {/* Citations */}
-                        {mr.citations.length > 0 && (
-                          <div className="p-4">
-                            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Sources Cited ({mr.citations.length})</div>
-                            <div className="grid grid-cols-2 gap-2 max-h-80 overflow-y-auto">
-                              {mr.citations.map((c, j) => (
-                                <a key={j} href={c.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 p-2.5 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:border-gray-300 transition-colors group">
-                                  <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded flex-shrink-0" />
-                                  <span className="text-sm text-gray-700 truncate flex-1 group-hover:text-gray-900">{c.title || c.domain}</span>
-                                  <ExternalLink className="h-3.5 w-3.5 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
-                                </a>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+
 
 
                       </div>

@@ -1,0 +1,3 @@
+﻿src/components/ui/OnboardingWizard.tsx(537,95): error TS2448: Block-scoped variable 'handleGeneratePreview' used before its declaration.
+src/components/ui/OnboardingWizard.tsx(537,95): error TS2454: Variable 'handleGeneratePreview' is used before being assigned.
+src/hooks/useClientDashboard.ts(2272,76): error TS6133: 'options' is declared but its value is never read.
