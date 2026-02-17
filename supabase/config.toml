@@ -19,3 +19,9 @@ verify_jwt = false
 
 [functions.citation-analyzer]
 verify_jwt = false
+
+[functions.ai-search-volume]
+verify_jwt = false
+
+[functions.categorize-citations]
+verify_jwt = false

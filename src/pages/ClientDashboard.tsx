@@ -5,7 +5,8 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles, Tag } from 'lucide-react';
+import { SOVLineChart, CLIENT_COLOR, COMPETITOR_COLORS } from "@/components/SOVLineChart";
 import { AgencyOverview } from "@/components/AgencyOverview";
 import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
 import { useAuth } from "../hooks/useAuth";
@@ -25,8 +26,9 @@ import { useClientDashboard, AI_MODELS, cleanAndAnalyzeResponse } from "@/hooks/
 import { MODEL_LOGOS } from "@/components/ModelLogos";
 import { ScheduleManager } from "@/components/ScheduleManager";
 import { UniversalImport } from "@/components/UniversalImport";
-import { CampaignsList } from "@/components/CampaignsList";
-import { CampaignDetail } from "@/components/CampaignDetail";
+// CampaignsList/CampaignDetail replaced by inline TopicsTab
+// import { CampaignsList } from "@/components/CampaignsList";
+// import { CampaignDetail } from "@/components/CampaignDetail";
 import { SignalsDashboard } from "@/components/SignalsDashboard";
 import CitationIntelligence from "@/components/CitationIntelligence";
 import { toast } from "sonner";
@@ -102,6 +104,26 @@ function classifyDomain(domain: string, clientDomain?: string, competitors?: str
 }
 
 
+function roundToHundred(items: { key: string; value: number }[]): Map<string, number> {
+  const total = items.reduce((sum, it) => sum + it.value, 0);
+  if (total === 0) return new Map(items.map(it => [it.key, 0]));
+  const rawPcts = items.map(it => ({
+    key: it.key,
+    raw: (it.value / total) * 100,
+    floored: Math.floor((it.value / total) * 100),
+    remainder: ((it.value / total) * 100) % 1,
+  }));
+  const flooredSum = rawPcts.reduce((sum, p) => sum + p.floored, 0);
+  let deficit = 100 - flooredSum;
+  const sorted = [...rawPcts].sort((a, b) => b.remainder - a.remainder);
+  for (const item of sorted) {
+    if (deficit <= 0) break;
+    item.floored += 1;
+    deficit--;
+  }
+  return new Map(rawPcts.map(p => [p.key, p.floored]));
+}
+
 function DonutChart({ value, size = 120, label = "Citations", segments = [] }: { value: number; size?: number; label?: string; segments?: { type: string; count: number }[] }) {
   const strokeWidth = 14;
   const radius = (size - strokeWidth) / 2;
@@ -147,7 +169,7 @@ interface ClientDashboardProps {
 }
 
 export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: ClientDashboardProps = {}) {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">(() => {
@@ -163,7 +185,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   useEffect(() => {
     try { localStorage.setItem('forzeo_activeTab', activeTab); } catch { /* quota exceeded — non-critical */ }
   }, [activeTab]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  // selectedCampaignId removed - Topics tab replaced Campaigns
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [newPrompt, setNewPrompt] = useState("");
@@ -181,6 +203,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [editingLocationPromptId, setEditingLocationPromptId] = useState<string | null>(null);
   const [editingLocationValue, setEditingLocationValue] = useState<string>("");
   const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
+  const [categorizationProgress, setCategorizationProgress] = useState<{ completed: number; total: number; currentBatch: number; totalBatches: number; running: boolean } | null>(null);
   const [newTag, setNewTag] = useState("");
   const [newCompetitor, setNewCompetitor] = useState("");
   const [bulkPromptsOpen, setBulkPromptsOpen] = useState(false);
@@ -190,6 +213,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [genTone, setGenTone] = useState<string>("neutral");
   const [genFocus, setGenFocus] = useState<string>("general");
   const [seedKeywords, setSeedKeywords] = useState("");
+  const [promptTopic, setPromptTopic] = useState("");
+  const [inlineEditTopicId, setInlineEditTopicId] = useState<string | null>(null);
+  const [inlineEditTopicValue, setInlineEditTopicValue] = useState("");
+  const [editingPromptTopic, setEditingPromptTopic] = useState("");
+  const [expandedTopic, setExpandedTopic] = useState<string | null>(null);
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -204,6 +232,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [generatedContent, setGeneratedContent] = useState("");
   const [generatingContent, setGeneratingContent] = useState(false);
   const [showBrandOnly, setShowBrandOnly] = useState(false);
+  const [sovTimeRange, setSovTimeRange] = useState<"week" | "month" | "year">("week");
   const [dateRangeFilter, setDateRangeFilter] = useState<"7d" | "30d" | "90d" | "all" | "custom">("all");
   const [customDateStart, setCustomDateStart] = useState<string>("");
   const [customDateEnd, setCustomDateEnd] = useState<string>("");
@@ -302,6 +331,107 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     const total = Object.values(mentions).reduce((a, b) => a + b, 0) || 1;
     return Object.entries(mentions).map(([name, count]) => ({ name, mentions: count, percentage: Math.round((count / total) * 100) })).sort((a, b) => b.mentions - a.mentions);
   }, [selectedClient, filteredAuditResults]);
+
+  const sovTimeSeries = useMemo(() => {
+    if (!selectedClient) return { labels: [] as string[], series: [] as Array<{ name: string; isClient: boolean; domain: string; data: (number | null)[] }> };
+
+    const brandName = selectedClient.brand_name;
+    const brandDomain = selectedClient.brand_domain || `${brandName.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`;
+    const competitors = selectedClient.competitors || [];
+    const allBrands = [brandName, ...competitors];
+
+    const now = new Date();
+    let cutoff: Date;
+    let bucketFn: (d: Date) => string;
+    let labelFn: (k: string) => string;
+
+    if (sovTimeRange === "week") {
+      cutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+      bucketFn = (d) => d.toISOString().slice(0, 10);
+      labelFn = (k) => new Date(k + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    } else if (sovTimeRange === "month") {
+      cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      bucketFn = (d) => d.toISOString().slice(0, 10);
+      labelFn = (k) => new Date(k + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    } else {
+      cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+      bucketFn = (d) => d.toISOString().slice(0, 7);
+      labelFn = (k) => { const [y, m] = k.split("-"); return new Date(+y, +m - 1).toLocaleDateString("en-US", { month: "short", year: "2-digit" }); };
+    }
+
+    const results = auditResults.filter(r => new Date(r.created_at) >= cutoff);
+    // Count mentions per bucket using binary per-model-result (matching KPI card logic)
+    const buckets: Record<string, Record<string, number>> = {};
+
+    results.forEach(result => {
+      const bucket = bucketFn(new Date(result.created_at));
+      if (!buckets[bucket]) {
+        buckets[bucket] = {};
+        allBrands.forEach(b => { buckets[bucket][b] = 0; });
+      }
+      result.model_results.forEach(mr => {
+        // Binary: 1 mention per model result where brand is mentioned (same as KPI card)
+        if (mr.brand_mentioned) {
+          buckets[bucket][brandName] = (buckets[bucket][brandName] || 0) + 1;
+        }
+        // Binary: 1 per competitor per model result where competitor appears
+        const response = mr.raw_response?.toLowerCase() || "";
+        competitors.forEach(comp => {
+          const regex = new RegExp(comp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").toLowerCase(), "gi");
+          if (regex.test(response)) {
+            buckets[bucket][comp] = (buckets[bucket][comp] || 0) + 1;
+          }
+        });
+      });
+    });
+
+    // Use only dates that have data, plus fill any gaps between first and last
+    const dataKeys = Object.keys(buckets).sort();
+    if (dataKeys.length === 0) return { labels: [] as string[], series: [] as Array<{ name: string; isClient: boolean; domain: string; data: (number | null)[] }> };
+
+    const allKeys: string[] = [];
+    if (sovTimeRange === "year") {
+      const first = dataKeys[0], last = dataKeys[dataKeys.length - 1];
+      const [fy, fm] = first.split("-").map(Number);
+      const [ly, lm] = last.split("-").map(Number);
+      const cur = new Date(fy, fm - 1, 1);
+      const end = new Date(ly, lm - 1, 1);
+      while (cur <= end) {
+        allKeys.push(cur.toISOString().slice(0, 7));
+        cur.setMonth(cur.getMonth() + 1);
+      }
+    } else {
+      const cur = new Date(dataKeys[0] + "T00:00:00");
+      const end = new Date(dataKeys[dataKeys.length - 1] + "T00:00:00");
+      while (cur <= end) {
+        allKeys.push(cur.toISOString().slice(0, 10));
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+
+    const labels = allKeys.map(labelFn);
+
+    const competitorTotals = competitors
+      .map(c => ({ name: c, total: allKeys.reduce((sum, k) => sum + (buckets[k]?.[c] || 0), 0) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+
+    const trackedBrands = [brandName, ...competitorTotals.map(c => c.name)];
+
+    const series = trackedBrands.map(brand => ({
+      name: brand,
+      isClient: brand === brandName,
+      domain: brand === brandName ? brandDomain : `${brand.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
+      data: allKeys.map(k => {
+        const bucket = buckets[k];
+        if (!bucket) return null;
+        const total = Object.values(bucket).reduce((a, b) => a + b, 0);
+        return total > 0 ? Math.round(((bucket[brand] || 0) / total) * 100) : null;
+      }),
+    }));
+
+    return { labels, series };
+  }, [selectedClient, auditResults, sovTimeRange]);
 
   const detailedBrandStats = useMemo(() => {
     if (!selectedClient) return [];
@@ -442,6 +572,110 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
   const getPromptResult = (promptId: string) => filteredAuditResults.find(r => r.prompt_id === promptId);
 
+  // Topics aggregation (must be at top level, not inside conditional TopicsTab)
+  const topicData = useMemo(() => {
+    const grouped: Record<string, typeof prompts> = {};
+    prompts.filter(p => p.is_active !== false && p.topic).forEach(p => {
+      const key = p.topic!;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(p);
+    });
+
+    const topicEntries = Object.entries(grouped).map(([topic, topicPrompts]) => {
+      let totalVisible = 0, totalModels = 0, totalCitations = 0;
+      const allPositions: number[] = [];
+      const brandFreqMap = new Map<string, number>();
+      let totalSearchVolume = 0;
+      let hasSearchVolume = false;
+
+      topicPrompts.forEach(p => {
+        const r = getPromptResult(p.id);
+        if (!r) return;
+        const visibleCount = r.model_results.filter(mr => mr.brand_mentioned).length;
+        totalVisible += visibleCount;
+        totalModels += r.model_results.length;
+        totalCitations += r.summary.total_citations;
+        let pos = r.summary?.average_rank;
+        if (!pos && r.model_results && visibleCount > 0) {
+          const ranks = r.model_results.filter(mr => mr.brand_mentioned && mr.brand_rank != null).map(mr => mr.brand_rank as number);
+          if (ranks.length > 0) pos = ranks.reduce((a, b) => a + b, 0) / ranks.length;
+        }
+        if (pos) allPositions.push(pos);
+        r.model_results.forEach(mr => {
+          const response = (mr.raw_response || '').toLowerCase();
+          (selectedClient?.competitors || []).forEach(comp => {
+            if (response.includes(comp.toLowerCase())) brandFreqMap.set(comp, (brandFreqMap.get(comp) || 0) + 1);
+          });
+        });
+        if (p.estimated_search_volume != null) { totalSearchVolume += p.estimated_search_volume; hasSearchVolume = true; }
+      });
+
+      const avgPosition = allPositions.length > 0
+        ? Math.round(allPositions.reduce((a, b) => a + b, 0) / allPositions.length * 10) / 10 : null;
+
+      return {
+        topic, promptCount: topicPrompts.length, prompts: topicPrompts,
+        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "—",
+        visibilityPct: totalModels > 0 ? Math.round((totalVisible / totalModels) * 100) : 0,
+        avgPosition, citations: totalCitations,
+        brands: Array.from(brandFreqMap.keys()),
+        brandFrequencies: Object.fromEntries(brandFreqMap),
+        searchVolume: hasSearchVolume ? totalSearchVolume : null,
+      };
+    }).sort((a, b) => b.promptCount - a.promptCount);
+
+    const sorted = [...topicEntries];
+
+    // Add "Others" group for prompts without topics
+    const othersPrompts = prompts.filter(p => p.is_active !== false && !p.topic);
+    if (othersPrompts.length > 0) {
+      let totalVisible = 0, totalModels = 0, totalCitations = 0;
+      const allPositions: number[] = [];
+      const brandFreqMap = new Map<string, number>();
+      let totalSearchVolume = 0;
+      let hasSearchVolume = false;
+
+      othersPrompts.forEach(p => {
+        const r = getPromptResult(p.id);
+        if (!r) return;
+        const visibleCount = r.model_results.filter(mr => mr.brand_mentioned).length;
+        totalVisible += visibleCount;
+        totalModels += r.model_results.length;
+        totalCitations += r.summary.total_citations;
+        let pos = r.summary?.average_rank;
+        if (!pos && r.model_results && visibleCount > 0) {
+          const ranks = r.model_results.filter(mr => mr.brand_mentioned && mr.brand_rank != null).map(mr => mr.brand_rank as number);
+          if (ranks.length > 0) pos = ranks.reduce((a, b) => a + b, 0) / ranks.length;
+        }
+        if (pos) allPositions.push(pos);
+        r.model_results.forEach(mr => {
+          const response = (mr.raw_response || '').toLowerCase();
+          (selectedClient?.competitors || []).forEach(comp => {
+            if (response.includes(comp.toLowerCase())) brandFreqMap.set(comp, (brandFreqMap.get(comp) || 0) + 1);
+          });
+        });
+        if (p.estimated_search_volume != null) { totalSearchVolume += p.estimated_search_volume; hasSearchVolume = true; }
+      });
+
+      const avgPosition = allPositions.length > 0
+        ? Math.round(allPositions.reduce((a, b) => a + b, 0) / allPositions.length * 10) / 10 : null;
+
+      sorted.push({
+        topic: "Others", promptCount: othersPrompts.length, prompts: othersPrompts,
+        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "—",
+        visibilityPct: totalModels > 0 ? Math.round((totalVisible / totalModels) * 100) : 0,
+        avgPosition, citations: totalCitations,
+        brands: Array.from(brandFreqMap.keys()),
+        brandFrequencies: Object.fromEntries(brandFreqMap),
+        searchVolume: hasSearchVolume ? totalSearchVolume : null,
+      });
+    }
+
+    return sorted;
+  }, [prompts, auditResults, selectedClient]);
+
+  const unassignedPrompts = prompts.filter(p => p.is_active !== false && !p.topic);
+
   const domainStats = useMemo(() => {
     const stats: Record<string, { count: number; type: string; avg: number; models: Set<string>; prompts: Map<string, { text: string; visible: boolean; competitors: Set<string> }> }> = {};
     filteredAuditResults.forEach(result => {
@@ -526,7 +760,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       try {
         const locationCode = promptLocation ? locations[promptLocation] : undefined;
         const locationName = promptLocation || undefined;
-        const newPromptObj = await addCustomPrompt(newPrompt.trim(), undefined, locationCode, locationName);
+        const newPromptObj = await addCustomPrompt(newPrompt.trim(), undefined, locationCode, locationName, promptTopic.trim() || undefined);
         setNewPrompt("");
         setPromptLocation(""); // Reset location after adding
 
@@ -614,10 +848,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         const promptTexts = parseBulkPrompts(bulkPrompts);
         const locationCode = promptLocation ? locations[promptLocation] : undefined;
         const locationName = promptLocation || undefined;
-        await addMultiplePrompts(promptTexts, undefined, locationCode, locationName);
+        await addMultiplePrompts(promptTexts, undefined, locationCode, locationName, promptTopic.trim() || undefined);
         setBulkPrompts("");
         setBulkPromptsOpen(false);
         setPromptLocation(""); // Reset location after adding
+        setPromptTopic(""); // Reset topic after adding
 
         // Auto-run full audit for non-admin users after bulk add
         if (!isAdmin && promptTexts.length > 0) {
@@ -654,8 +889,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       if (g?.length) {
         const locationCode = promptLocation ? locations[promptLocation] : undefined;
         const locationName = promptLocation || undefined;
-        const newPrompts = await addMultiplePrompts(g, undefined, locationCode, locationName);
+        // Auto-assign seed keyword as topic for AI-generated prompts
+        const topicForGenerated = promptTopic.trim() || seedKeywords.trim();
+        const newPrompts = await addMultiplePrompts(g, undefined, locationCode, locationName, topicForGenerated || undefined);
         setSeedKeywords("");
+        setPromptTopic(""); // Reset topic after generating
 
         if (newPrompts && newPrompts.length > 0) {
           toast.info(`Running audit for ${newPrompts.length} new prompts...`);
@@ -920,10 +1158,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             if (isAdmin) return true;
             // Agency sees specific tabs
             if (isAgency) {
-              return ["overview", "prompts", "insights", "intelligence", "future-citations", "sources", "content", "brands"].includes(item.id);
+              return ["overview", "prompts", "topics", "insights", "intelligence", "future-citations", "sources", "content", "brands"].includes(item.id);
             }
             // Normal users see limited tabs
-            return !["topics", "intelligence", "schedules", "future-citations"].includes(item.id);
+            return !["intelligence", "schedules", "future-citations"].includes(item.id);
           }).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
@@ -1065,21 +1303,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           {activeTab === "prompts" && PromptsTab()}
           {activeTab === "schedules" && selectedClient && <ScheduleManager clientId={selectedClient.id} prompts={prompts} selectedModels={selectedModels} />}
           {activeTab === "future-citations" && selectedClient && <SignalsDashboard clientId={selectedClient.id} brandName={selectedClient.brand_name} />}
-          {activeTab === "topics" && selectedClient && (
-            <div className="animate-in fade-in">
-              {selectedCampaignId ? (
-                <CampaignDetail
-                  campaignId={selectedCampaignId}
-                  onBack={() => setSelectedCampaignId(null)}
-                />
-              ) : (
-                <CampaignsList
-                  clientId={selectedClient.id}
-                  onSelectCampaign={setSelectedCampaignId}
-                />
-              )}
-            </div>
-          )}
+          {activeTab === "topics" && selectedClient && TopicsTab()}
           {activeTab === "citations" && CitationsTab()}
           {activeTab === "sources" && SourcesTab()}
           {activeTab === "content" && ContentTab()}
@@ -1180,6 +1404,35 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             <div className="mt-3 text-xs font-medium text-gray-400">{filteredAuditResults.length} audits completed</div>
           </div>
         </div>
+        {/* SOV Trend Graph */}
+        <div className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-1">
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">Share of Voice</h3>
+              <p className="text-xs text-gray-400">Brand vs top competitors over time</p>
+            </div>
+            <div className="flex items-center bg-gray-100/80 p-1 rounded-xl">
+              {(["week", "month", "year"] as const).map(range => (
+                <button
+                  key={range}
+                  onClick={() => setSovTimeRange(range)}
+                  className={cn(
+                    "px-4 py-1.5 text-sm font-medium rounded-lg transition-all",
+                    sovTimeRange === range
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  )}
+                >
+                  {range === "week" ? "Week" : range === "month" ? "Month" : "Year"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <SOVLineChart labels={sovTimeSeries.labels} series={sovTimeSeries.series} height={240} />
+          {(selectedClient?.competitors || []).length === 0 && sovTimeSeries.series.length <= 1 && (
+            <p className="text-xs text-gray-400 mt-2">Add competitors in Settings to compare Share of Voice</p>
+          )}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
           <div className="col-span-1 md:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Eye className="h-4 w-4 text-gray-400" /> Visibility by Model</h3><p className="text-xs text-gray-500 mt-0.5">Percentage of responses mentioning your brand</p></div></div>
@@ -1197,17 +1450,36 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             <div className="flex flex-col items-center justify-center">
               <DonutChart value={allCitations.length} size={160} segments={typeSegments} />
               <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 mt-4 text-xs">
-                {typeSegments.slice(0, 6).map((seg) => {
-                  const t = DOMAIN_TYPES[seg.type] || DOMAIN_TYPES.other;
-                  const pct = allCitations.length > 0 ? Math.round((seg.count / allCitations.length) * 100) : 0;
+                {(() => {
+                  const displaySegs = typeSegments.slice(0, 6);
+                  const otherCount = typeSegments.slice(6).reduce((sum, s) => sum + s.count, 0);
+                  const items = [
+                    ...displaySegs.map(s => ({ key: s.type, value: s.count })),
+                    ...(otherCount > 0 ? [{ key: "__other__", value: otherCount }] : []),
+                  ];
+                  const pctMap = roundToHundred(items);
                   return (
-                    <div key={seg.type} className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t.dot }} />
-                      <span className="text-gray-700 font-medium">{t.label}</span>
-                      <span className="text-gray-400">({pct}%)</span>
-                    </div>
+                    <>
+                      {displaySegs.map((seg) => {
+                        const t = DOMAIN_TYPES[seg.type] || DOMAIN_TYPES.other;
+                        return (
+                          <div key={seg.type} className="flex items-center gap-1.5">
+                            <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t.dot }} />
+                            <span className="text-gray-700 font-medium">{t.label}</span>
+                            <span className="text-gray-400">({pctMap.get(seg.type) || 0}%)</span>
+                          </div>
+                        );
+                      })}
+                      {otherCount > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: "#6b7280" }} />
+                          <span className="text-gray-700 font-medium">Other</span>
+                          <span className="text-gray-400">({pctMap.get("__other__") || 0}%)</span>
+                        </div>
+                      )}
+                    </>
                   );
-                })}
+                })()}
               </div>
             </div>
             <div className="col-span-1 md:col-span-2 overflow-hidden overflow-x-auto">
@@ -1356,6 +1628,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" title="The question you want AI models to answer">
                   <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Prompt <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
                 </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32" title="Topic / seed keyword this prompt belongs to">Topic</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="Estimated AI search volume from DataForSEO">Est. Search Vol.</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24" title="How many AI models mentioned your brand vs total models tested">Visibility</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20" title="Your brand's average position in AI-generated ranked lists (#1 is best)">Position</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="Other brands that AI mentioned alongside or instead of yours">Brands</th>
@@ -1421,6 +1695,57 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         {p.location_name && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 flex-shrink-0 bg-blue-50 text-blue-600 border-blue-200 flex items-center gap-1"><Globe className="h-2.5 w-2.5" />{p.location_name}</Badge>}
                       </div>
                     </td>
+                    <td className="px-4 py-2.5">
+                      {inlineEditTopicId === p.id ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={inlineEditTopicValue}
+                          onChange={(e) => setInlineEditTopicValue(e.target.value)}
+                          onBlur={async () => {
+                            const newTopic = inlineEditTopicValue.trim();
+                            if (newTopic !== (p.topic || "")) {
+                              try {
+                                await updatePrompt(p.id, { topic: newTopic || "" });
+                              } catch (err: any) {
+                                console.error("Failed to update topic:", err);
+                              }
+                            }
+                            setInlineEditTopicId(null);
+                          }}
+                          onKeyDown={async (e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              (e.target as HTMLInputElement).blur();
+                            }
+                            if (e.key === "Escape") {
+                              setInlineEditTopicId(null);
+                            }
+                          }}
+                          className="w-full text-xs px-2 py-1 border border-violet-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                          placeholder="Enter topic..."
+                        />
+                      ) : (
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInlineEditTopicId(p.id);
+                            setInlineEditTopicValue(p.topic || "");
+                          }}
+                          className="cursor-pointer group/topic"
+                          title="Click to edit topic"
+                        >
+                          {p.topic ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-200 text-xs font-medium truncate max-w-[120px] group-hover/topic:border-violet-400 transition-colors">
+                              <Tag className="h-2.5 w-2.5 flex-shrink-0" />{p.topic}
+                            </span>
+                          ) : <span className="text-gray-300 text-xs hover:text-violet-400 transition-colors">+ Add topic</span>}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-center text-sm font-medium text-gray-600">
+                      {p.estimated_search_volume != null ? p.estimated_search_volume.toLocaleString() : <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-4 py-2.5 text-center">
                       <span className={cn("text-sm font-medium", visibleCount > 0 ? "text-gray-900" : "text-gray-400")}>
                         {r ? `${visibleCount}/${totalCount}` : "—"}
@@ -1430,29 +1755,41 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     <td className="px-4 py-2.5">
                       <div className="flex items-center justify-center gap-1">
                         {(() => {
-                          // Extract all brands mentioned in responses
+                          // Extract brands mentioned in responses
+                          // Non-admin: only tracked competitor brands
+                          // Admin: all detected brands (competitors + extracted entities)
                           if (!r) return <span className="text-xs text-gray-400 italic">Not run</span>;
 
-                          const allBrands = new Set<string>();
+                          const trackedBrands = new Set<string>();
                           const brandName = selectedClient?.brand_name?.toLowerCase() || '';
                           const competitors = selectedClient?.competitors || [];
 
-                          // Check all model responses for brand mentions
+                          // Check all model responses for tracked brand/competitor mentions
                           r.model_results.forEach(mr => {
                             const response = (mr.raw_response || '').toLowerCase();
-                            // Check for user's brand
                             if (brandName && response.includes(brandName)) {
-                              allBrands.add(selectedClient?.brand_name || '');
+                              trackedBrands.add(selectedClient?.brand_name || '');
                             }
-                            // Check for competitors
                             competitors.forEach(comp => {
                               if (response.includes(comp.toLowerCase())) {
-                                allBrands.add(comp);
+                                trackedBrands.add(comp);
                               }
                             });
                           });
 
-                          const brandsArray = Array.from(allBrands);
+                          // Admin: also include extracted brand entities from DataForSEO
+                          if (isAdmin) {
+                            r.model_results.forEach(mr => {
+                              (mr.extracted_brands || []).forEach(eb => {
+                                if (!eb.is_own_brand) trackedBrands.add(eb.title);
+                              });
+                            });
+                          }
+
+                          // Non-admin: only show competitor brands (exclude own brand)
+                          const brandsArray = isAdmin
+                            ? Array.from(trackedBrands)
+                            : Array.from(trackedBrands).filter(b => competitors.some(c => c.toLowerCase() === b.toLowerCase()));
                           if (brandsArray.length === 0) {
                             return <span className="text-xs text-gray-400 italic">None</span>;
                           }
@@ -1664,6 +2001,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                       if (prompt) {
                         setEditingPromptId(promptId);
                         setEditingPromptText(prompt.prompt_text);
+                        setEditingPromptTopic(prompt.topic || "");
                         setEditPromptOpen(true);
                         setSelectedPromptIds(new Set());
                       }
@@ -1782,6 +2120,154 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     );
   }
 
+  function TopicsTab() {
+    // All hooks (expandedTopic, topicData, unassignedPrompts) are at parent level
+    // to avoid conditional hook calls when tab switches
+    return (
+      <div className="space-y-4 animate-in fade-in">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Topics</h2>
+            <p className="text-sm text-gray-500 mt-0.5">Cumulative metrics for all prompts grouped by topic</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">{topicData.length} topic{topicData.length !== 1 ? 's' : ''}</span>
+            {unassignedPrompts.length > 0 && (
+              <Badge variant="outline" className="text-xs text-amber-600 bg-amber-50 border-amber-200">
+                {unassignedPrompts.length} unassigned
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {topicData.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center shadow-sm">
+            <Layers className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+            <p className="text-gray-600 font-medium">No topics yet</p>
+            <p className="text-sm text-gray-500 mt-1">Assign topics to your prompts using the seed keyword field when adding prompts.</p>
+            <Button onClick={() => { setActiveTab("prompts"); setBulkPromptsOpen(true); }} className="mt-4"><Plus className="h-4 w-4 mr-1" /> Add Prompts with Topic</Button>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            <table className="w-full">
+              <thead className="bg-gray-50/80 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Topic</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Prompts</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Est. Search Vol.</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Avg Position</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Visibility</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Citations</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Brands</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {topicData.map((td) => (
+                  <React.Fragment key={td.topic}>
+                    <tr
+                      className="hover:bg-gray-50 transition-colors cursor-pointer"
+                      onClick={() => setExpandedTopic(expandedTopic === td.topic ? null : td.topic)}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <ChevronRight className={cn("h-4 w-4 text-gray-400 transition-transform", expandedTopic === td.topic && "rotate-90")} />
+                          <Tag className="h-4 w-4 text-violet-500" />
+                          <span className="font-medium text-gray-900">{td.topic}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Badge variant="secondary" className="bg-gray-100 text-gray-700 text-xs">{td.promptCount}</Badge>
+                      </td>
+                      <td className="px-4 py-3 text-center text-sm font-medium text-gray-600">
+                        {td.searchVolume != null ? td.searchVolume.toLocaleString() : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center text-sm font-medium text-gray-600">
+                        {td.avgPosition ? `#${td.avgPosition}` : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={cn("text-sm font-medium", td.visibilityPct > 0 ? "text-gray-900" : "text-gray-400")}>
+                          {td.visibility}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {td.citations > 0 ? (
+                          <Badge variant="secondary" className="bg-blue-50 text-blue-700 border border-blue-200 text-xs">{td.citations}</Badge>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-center gap-1">
+                          {td.brands.slice(0, 4).map((brand, idx) => {
+                            const domain = `${brand.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
+                            const freq = td.brandFrequencies?.[brand] || 0;
+                            return (
+                              <div key={idx} title={`${brand} (${freq}x)`} className="relative h-6 w-6 rounded-md border border-gray-200 bg-white shadow-sm flex items-center justify-center">
+                                <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`} alt={brand} className="h-3.5 w-3.5 rounded-sm"
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerText = brand.charAt(0).toUpperCase(); e.currentTarget.parentElement!.className += " text-[9px] font-bold text-gray-500"; }}
+                                />
+                                {freq > 1 && <span className="absolute -top-1.5 -right-1.5 bg-blue-600 text-white text-[8px] font-bold rounded-full h-3.5 min-w-[14px] flex items-center justify-center px-0.5 leading-none">{freq}</span>}
+                              </div>
+                            );
+                          })}
+                          {td.brands.length > 4 && <span className="text-[10px] font-bold text-gray-500">+{td.brands.length - 4}</span>}
+                          {td.brands.length === 0 && <span className="text-xs text-gray-300">—</span>}
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* Expanded: show individual prompts */}
+                    {expandedTopic === td.topic && td.prompts.map((p) => {
+                      const r = getPromptResult(p.id);
+                      const vis = r ? `${r.model_results.filter(mr => mr.brand_mentioned).length}/${r.model_results.length}` : "—";
+                      let pos = r?.summary?.average_rank;
+                      if (!pos && r?.model_results) {
+                        const ranks = r.model_results.filter(mr => mr.brand_mentioned && mr.brand_rank != null).map(mr => mr.brand_rank as number);
+                        if (ranks.length > 0) pos = Math.round(ranks.reduce((a, b) => a + b, 0) / ranks.length * 10) / 10;
+                      }
+                      const cit = r?.summary.total_citations || 0;
+
+                      return (
+                        <tr key={p.id} className="bg-gray-50/50 hover:bg-gray-100/50 transition-colors">
+                          <td className="px-4 py-2 pl-12">
+                            <span
+                              className="text-sm text-gray-700 cursor-pointer hover:text-blue-600 hover:underline underline-offset-2"
+                              onClick={(e) => { e.stopPropagation(); setSelectedPromptDetail(p.id); }}
+                            >
+                              {p.prompt_text}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-center text-xs text-gray-400">—</td>
+                          <td className="px-4 py-2 text-center text-xs text-gray-500">
+                            {p.estimated_search_volume != null ? p.estimated_search_volume.toLocaleString() : "—"}
+                          </td>
+                          <td className="px-4 py-2 text-center text-xs text-gray-500">{pos ? `#${pos}` : "—"}</td>
+                          <td className="px-4 py-2 text-center text-xs text-gray-500">{vis}</td>
+                          <td className="px-4 py-2 text-center text-xs text-gray-500">{cit > 0 ? cit : "—"}</td>
+                          <td className="px-4 py-2 text-center text-xs text-gray-400">—</td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Unassigned prompts section */}
+        {unassignedPrompts.length > 0 && (
+          <div className="bg-amber-50/50 rounded-xl border border-amber-200 p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              <span className="text-sm font-medium text-amber-800">{unassignedPrompts.length} prompts without a topic</span>
+            </div>
+            <p className="text-xs text-amber-600">These prompts are not grouped into any topic. Edit them to assign a topic for aggregated analytics.</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function SourcesTab() {
 
 
@@ -1790,27 +2276,54 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3"><div className="p-2 bg-blue-100 rounded-lg"><Globe className="h-5 w-5 text-blue-600" /></div><div><h4 className="font-medium text-blue-900">What are Sources?</h4><p className="text-sm text-blue-700 mt-0.5">Sources are the origin websites where AI models pull facts from. These are the domains that the AI references when generating responses - the places where the information comes from.</p></div></div>
         <div className="flex items-center gap-2">
           {sourcesView === "domains" && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                const uncategorized = domainStats
-                  .filter(d => !citationMeta?.[d.domain])
-                  .map(d => d.domain);
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!!categorizationProgress?.running}
+                onClick={async () => {
+                  const uncategorized = domainStats
+                    .filter(d => !citationMeta?.[d.domain])
+                    .map(d => d.domain);
 
-                if (uncategorized.length === 0) {
-                  toast.success("All domains categorized!");
-                  return;
-                }
+                  if (uncategorized.length === 0) {
+                    toast.success("All domains categorized!");
+                    return;
+                  }
 
-                toast.info(`Categorizing ${uncategorized.length} domains...`);
-                categorizeCitations(uncategorized);
-              }}
-              className="hidden md:flex"
-            >
-              <Sparkles className="h-3.5 w-3.5 mr-1 text-purple-600" />
-              Categorize with AI
-            </Button>
+                  setCategorizationProgress({ completed: 0, total: uncategorized.length, currentBatch: 0, totalBatches: Math.ceil(uncategorized.length / 40), running: true });
+
+                  await categorizeCitations(uncategorized, (progress) => {
+                    setCategorizationProgress({ ...progress, running: progress.completed < progress.total });
+                  });
+
+                  setCategorizationProgress(null);
+                }}
+                className="hidden md:flex"
+              >
+                {categorizationProgress?.running ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5 mr-1 text-purple-600" />
+                )}
+                {categorizationProgress?.running
+                  ? `Categorizing... ${Math.round((categorizationProgress.completed / categorizationProgress.total) * 100)}%`
+                  : "Categorize with AI"}
+              </Button>
+              {categorizationProgress?.running && (
+                <div className="flex items-center gap-2 min-w-[200px]">
+                  <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500 ease-out rounded-full"
+                      style={{ width: `${Math.round((categorizationProgress.completed / categorizationProgress.total) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-gray-500 whitespace-nowrap">
+                    {categorizationProgress.completed}/{categorizationProgress.total} · Batch {categorizationProgress.currentBatch}/{categorizationProgress.totalBatches}
+                  </span>
+                </div>
+              )}
+            </>
           )}
           <button onClick={() => setSourcesView("domains")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "domains" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>Domains ({domainStats.length})</button>
           <button onClick={() => setSourcesView("urls")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "urls" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>URLs ({allCitations.length})</button>
@@ -2721,21 +3234,37 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           <DialogHeader>
             <DialogTitle>Edit Prompt</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <Label htmlFor="prompt-text" className="mb-2 block">Prompt Text</Label>
-            <Textarea
-              id="prompt-text"
-              value={editingPromptText}
-              onChange={(e) => setEditingPromptText(e.target.value)}
-              className="min-h-[100px]"
-            />
+          <div className="py-4 space-y-4">
+            <div>
+              <Label htmlFor="prompt-text" className="mb-2 block">Prompt Text</Label>
+              <Textarea
+                id="prompt-text"
+                value={editingPromptText}
+                onChange={(e) => setEditingPromptText(e.target.value)}
+                className="min-h-[100px]"
+              />
+            </div>
+            <div>
+              <Label htmlFor="prompt-topic" className="mb-2 block">Topic</Label>
+              <Input
+                id="prompt-topic"
+                value={editingPromptTopic}
+                onChange={(e) => setEditingPromptTopic(e.target.value)}
+                placeholder="e.g. Dating Apps, Best Mattress..."
+                className="text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">Group prompts by topic for analysis in the Topics tab</p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditPromptOpen(false)}>Cancel</Button>
             <Button onClick={async () => {
               if (editingPromptId && editingPromptText.trim()) {
                 try {
-                  await updatePrompt(editingPromptId, editingPromptText.trim());
+                  await updatePrompt(editingPromptId, {
+                    prompt_text: editingPromptText.trim(),
+                    topic: editingPromptTopic.trim(),
+                  });
                   setEditPromptOpen(false);
                 } catch (err: any) {
                   alert(err.message || "Failed to update prompt");
@@ -2852,6 +3381,12 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           </SelectContent>
         </Select>
         <p className="text-xs text-blue-600 mt-1">AI responses will be personalized for this location</p>
+      </div>
+      {/* Topic / Seed Keyword */}
+      <div>
+        <Label className="text-xs text-gray-500 uppercase tracking-wider flex items-center gap-1"><Tag className="h-3 w-3" /> Topic / Keyword</Label>
+        <Input placeholder="e.g. running shoes, athletic wear..." value={promptTopic} onChange={(e) => setPromptTopic(e.target.value)} className="mt-1.5" />
+        <p className="text-xs text-gray-400 mt-1">Group prompts under a topic for aggregated metrics in the Topics tab</p>
       </div>
       <div><Label>Single Prompt</Label><div className="flex gap-2 mt-1"><Input placeholder="Enter a search prompt..." value={newPrompt} onChange={(e) => setNewPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddPrompt()} /><Button onClick={handleAddPrompt}>Add</Button></div></div>
       <div className="relative"><div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">Or bulk add</span></div></div>
@@ -3501,26 +4036,38 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                             </div>
 
                             {/* Competitor Mentions Block */}
-                            {(topCompetitor || competitorMentions.length > 0) && (
-                              <div className="mt-4 pt-3 border-t border-gray-200">
-                                <div className="flex flex-col gap-3">
-                                  {topCompetitor && (
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-xs text-gray-400 font-medium uppercase">Top mentioned:</span>
-                                      <Badge variant="outline" className="text-yellow-600 bg-yellow-50 border-yellow-200">{topCompetitor.name}</Badge>
-                                    </div>
-                                  )}
-                                  {competitorMentions.length > 0 && (
+                            {(() => {
+                              // For non-admin: only show tracked competitor brands
+                              // For admin: show all detected brands with option to add as competitor
+                              const displayMentions = isAdmin
+                                ? competitorMentions
+                                : competitorMentions.filter(c => selectedClient?.competitors.some(tc => tc.toLowerCase() === c.name.toLowerCase()));
+                              const displayTop = displayMentions[0] || null;
+
+                              if (displayMentions.length === 0) return null;
+
+                              return (
+                                <div className="mt-4 pt-3 border-t border-gray-200">
+                                  <div className="flex flex-col gap-3">
+                                    {displayTop && (
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs text-gray-400 font-medium uppercase">Top mentioned:</span>
+                                        <Badge variant="outline" className="text-yellow-600 bg-yellow-50 border-yellow-200">{displayTop.name}</Badge>
+                                      </div>
+                                    )}
                                     <div className="flex items-center gap-2 flex-wrap">
-                                      <span className="text-xs text-gray-400 font-medium uppercase">Competitors mentioned:</span>
-                                      {competitorMentions.map((comp, k) => {
+                                      <span className="text-xs text-gray-400 font-medium uppercase">
+                                        {isAdmin ? "All brands mentioned:" : "Competitor brands mentioned:"}
+                                      </span>
+                                      {displayMentions.map((comp, k) => {
                                         const isTracked = selectedClient?.competitors.some(c => c.toLowerCase() === comp.name.toLowerCase());
                                         return (
                                           <div key={k} className="flex items-center gap-1">
-                                            <Badge variant="secondary" className="text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-200">
+                                            <Badge variant="secondary" className={cn("text-xs border", isTracked ? "text-gray-600 bg-gray-100 hover:bg-gray-200 border-gray-200" : "text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200")}>
                                               {comp.name} {comp.rank ? <span className="ml-1 font-semibold text-blue-600">#{comp.rank}</span> : <span className="text-gray-400 ml-1">({comp.count}x)</span>}
+                                              {isAdmin && isTracked && <CheckCircle className="h-3 w-3 ml-1 text-green-500 inline" />}
                                             </Badge>
-                                            {!isTracked && (
+                                            {isAdmin && !isTracked && (
                                               <button onClick={() => handleAddCompetitor(comp.name)} className="text-blue-600 hover:bg-blue-50 rounded-full p-0.5 transition-colors" title="Add to competitors">
                                                 <Plus className="h-3 w-3" />
                                               </button>
@@ -3529,10 +4076,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                         );
                                       })}
                                     </div>
-                                  )}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
+                              );
+                            })()}
                           </div>
                         )}
 

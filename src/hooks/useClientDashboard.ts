@@ -242,6 +242,9 @@ export interface Prompt {
   tags?: string[];
   location_code?: number; // Optional location override for this prompt
   location_name?: string; // Display name for the location
+  topic?: string; // Topic/seed keyword grouping
+  estimated_search_volume?: number | null; // AI search volume from DataForSEO
+  search_volume_updated_at?: string | null;
 }
 
 /**
@@ -581,6 +584,9 @@ export function useClientDashboard() {
   }>>(new Map());
   const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+  // Ref to fetchSearchVolumes so audit functions can call it without circular deps
+  const fetchSearchVolumesRef = useRef<(() => Promise<void>) | null>(null);
+
   const setIncludeTavily = useCallback((include: boolean) => {
     setIncludeTavilyState(include);
     saveToStorage(STORAGE_KEYS.INCLUDE_TAVILY, include);
@@ -749,6 +755,9 @@ export function useClientDashboard() {
           category: p.category || "custom", is_custom: p.is_custom, is_active: p.is_active,
           niche_level: p.niche_level, tags: p.tags,
           location_code: p.location_code, location_name: p.location_name,
+          topic: p.topic || undefined,
+          estimated_search_volume: p.estimated_search_volume ?? undefined,
+          search_volume_updated_at: p.search_volume_updated_at || undefined,
         }));
       } else {
         const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
@@ -1092,7 +1101,7 @@ export function useClientDashboard() {
   // PROMPT MANAGEMENT - Supabase Primary
   // ============================================
 
-  const addCustomPrompt = useCallback(async (promptText: string, category?: PromptCategory, locationCode?: number, locationName?: string): Promise<Prompt | null> => {
+  const addCustomPrompt = useCallback(async (promptText: string, category?: PromptCategory, locationCode?: number, locationName?: string, topic?: string): Promise<Prompt | null> => {
     if (!selectedClient) return null;
 
     // Check agency prompt limit (15 prompts per brand)
@@ -1117,6 +1126,7 @@ export function useClientDashboard() {
       id: crypto.randomUUID(), client_id: selectedClient.id, prompt_text: promptText,
       category: detectedCategory, is_custom: true, is_active: true, niche_level: nicheLevel,
       location_code: locationCode, location_name: locationName,
+      topic: topic || undefined,
     };
 
     // Save to Supabase first
@@ -1125,6 +1135,7 @@ export function useClientDashboard() {
         id: newPrompt.id, client_id: newPrompt.client_id, prompt_text: newPrompt.prompt_text,
         category: newPrompt.category, is_custom: newPrompt.is_custom, is_active: newPrompt.is_active,
         location_code: newPrompt.location_code, location_name: newPrompt.location_name,
+        topic: newPrompt.topic || null,
       });
 
       if (insertError) {
@@ -1159,7 +1170,7 @@ export function useClientDashboard() {
     }
   }, [selectedClient, prompts]);
 
-  const addMultiplePrompts = useCallback(async (promptTexts: string[], category?: PromptCategory, locationCode?: number, locationName?: string): Promise<Prompt[]> => {
+  const addMultiplePrompts = useCallback(async (promptTexts: string[], category?: PromptCategory, locationCode?: number, locationName?: string, topic?: string): Promise<Prompt[]> => {
     if (!selectedClient) return [];
 
     // Check agency prompt limit (15 prompts per brand)
@@ -1218,6 +1229,7 @@ export function useClientDashboard() {
         category: category || (nicheLevel === "super_niche" ? "super_niche" : nicheLevel === "niche" ? "niche" : "imported"),
         is_custom: true, is_active: true, niche_level: nicheLevel,
         location_code: locationCode, location_name: locationName,
+        topic: topic || undefined,
       };
     });
 
@@ -1228,6 +1240,7 @@ export function useClientDashboard() {
           id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
           category: p.category, is_custom: p.is_custom, is_active: p.is_active,
           location_code: p.location_code, location_name: p.location_name,
+          topic: p.topic || null,
         }))
       );
 
@@ -1241,6 +1254,7 @@ export function useClientDashboard() {
               id: p.id, client_id: p.client_id, prompt_text: p.prompt_text,
               category: p.category, is_custom: p.is_custom, is_active: p.is_active,
               location_code: p.location_code, location_name: p.location_name,
+              topic: p.topic || null,
             });
             if (!singleError) {
               successfulPrompts.push(p);
@@ -1423,7 +1437,7 @@ export function useClientDashboard() {
     }
   }, [selectedClient, prompts, auditResults]);
 
-  const updatePrompt = useCallback(async (promptId: string, updates: string | { prompt_text?: string, location_code?: number, location_name?: string }) => {
+  const updatePrompt = useCallback(async (promptId: string, updates: string | { prompt_text?: string, location_code?: number, location_name?: string, topic?: string }) => {
     if (!selectedClient) return;
 
     const updateData: any = {};
@@ -1434,6 +1448,7 @@ export function useClientDashboard() {
       if (updates.prompt_text !== undefined) updateData.prompt_text = updates.prompt_text.trim();
       if (updates.location_code !== undefined) updateData.location_code = updates.location_code;
       if (updates.location_name !== undefined) updateData.location_name = updates.location_name;
+      if (updates.topic !== undefined) updateData.topic = updates.topic;
     }
 
     if (Object.keys(updateData).length === 0) return;
@@ -1712,6 +1727,13 @@ export function useClientDashboard() {
       console.warn(`[Audit] Completed with ${failedCount} failed prompt(s).`);
     }
     setLoading(false);
+
+    // Auto-trigger search volume fetch after audit completes
+    try {
+      await fetchSearchVolumesRef.current?.();
+    } catch (err) {
+      console.warn("[SearchVolume] Auto-fetch after audit failed:", err);
+    }
   }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
 
   const runSinglePrompt = useCallback(async (promptOrId: string | Prompt) => {
@@ -1848,6 +1870,13 @@ export function useClientDashboard() {
       setError(err instanceof Error ? err.message : "Audit failed");
     } finally {
       setLoadingPromptIds(prev => { const n = new Set(prev); n.delete(prompt!.id); return n; });
+    }
+
+    // Auto-trigger search volume fetch after single audit completes
+    try {
+      await fetchSearchVolumesRef.current?.();
+    } catch (err) {
+      console.warn("[SearchVolume] Auto-fetch after single audit failed:", err);
     }
   }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
 
@@ -3072,57 +3101,114 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     }
   }, []);
 
-  const categorizeCitations = useCallback(async (domains: string[]) => {
+  const categorizeCitations = useCallback(async (domains: string[], onProgress?: (progress: { completed: number; total: number; currentBatch: number; totalBatches: number }) => void) => {
     if (domains.length === 0) return;
     try {
       // Deduplicate
       const uniqueDomains = Array.from(new Set(domains));
+      const BATCH_SIZE = 40;
+      const batches: string[][] = [];
+      for (let i = 0; i < uniqueDomains.length; i += BATCH_SIZE) {
+        batches.push(uniqueDomains.slice(i, i + BATCH_SIZE));
+      }
 
-      const { data, error } = await supabase.functions.invoke('categorize-citations', {
-        body: {
-          domains: uniqueDomains,
-          brand_name: selectedClient?.brand_name,
-          competitors: selectedClient?.competitors
-        }
-      });
+      const newMeta = { ...citationMeta };
+      const allUpsertData: any[] = [];
+      let completed = 0;
 
-      if (data?.success && data.data) {
-        const upsertData: any[] = [];
-        const newMeta = { ...citationMeta };
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        const batch = batches[batchIdx];
 
-        Object.entries(data.data).forEach(([domain, info]: [string, any]) => {
-          upsertData.push({
-            client_id: selectedClient?.id,
-            domain: domain,
-            url: `https://${domain}`,
-            citation_category: info.category,
-            source_type: info.source_type,
-            authority_tier: info.authority_tier,
-            relationship_type: info.relationship_type,
-            updated_at: new Date().toISOString()
-          });
-
-          newMeta[domain] = {
-            category: info.category,
-            source_type: info.source_type,
-            authority_tier: info.authority_tier,
-            relationship_type: info.relationship_type,
-            is_affiliate: info.source_type === 'affiliate' // simplified inference
-          };
+        onProgress?.({
+          completed,
+          total: uniqueDomains.length,
+          currentBatch: batchIdx + 1,
+          totalBatches: batches.length,
         });
 
-        // Store in DB
-        const { error: dbError } = await supabase
-          .from('citation_intelligence')
-          .upsert(upsertData, { onConflict: 'domain', ignoreDuplicates: false });
+        const { data, error } = await supabase.functions.invoke('categorize-citations', {
+          body: {
+            domains: batch,
+            brand_name: selectedClient?.brand_name,
+            competitors: selectedClient?.competitors
+          }
+        });
 
-        if (dbError) console.error("DB Upsert Error:", dbError);
+        if (data?.success && data.data) {
+          Object.entries(data.data).forEach(([domain, info]: [string, any]) => {
+            allUpsertData.push({
+              client_id: selectedClient?.id,
+              domain: domain,
+              url: `https://${domain}`,
+              citation_category: info.category,
+              source_type: info.source_type,
+              authority_tier: info.authority_tier,
+              relationship_type: info.relationship_type,
+              updated_at: new Date().toISOString()
+            });
 
-        setCitationMeta(newMeta);
-        return newMeta;
-      } else {
-        throw new Error(data?.error || "Edge function failed");
+            newMeta[domain] = {
+              category: info.category,
+              source_type: info.source_type,
+              authority_tier: info.authority_tier,
+              relationship_type: info.relationship_type,
+              is_affiliate: info.source_type === 'affiliate'
+            };
+          });
+        } else {
+          console.warn(`Batch ${batchIdx + 1} failed:`, data?.error || error);
+        }
+
+        completed += batch.length;
       }
+
+      // Final progress update
+      onProgress?.({
+        completed: uniqueDomains.length,
+        total: uniqueDomains.length,
+        currentBatch: batches.length,
+        totalBatches: batches.length,
+      });
+
+      // Store all results in DB (no unique constraint on domain, so check+insert/update)
+      if (allUpsertData.length > 0 && selectedClient) {
+        // Find which domains already exist for this client
+        const { data: existingRows } = await supabase
+          .from('citation_intelligence')
+          .select('id, domain')
+          .eq('client_id', selectedClient.id)
+          .in('domain', allUpsertData.map(d => d.domain));
+
+        const existingDomains = new Set((existingRows || []).map(r => r.domain));
+        const existingMap = new Map((existingRows || []).map(r => [r.domain, r.id]));
+
+        // Update existing records
+        for (const row of allUpsertData.filter(d => existingDomains.has(d.domain))) {
+          const existingId = existingMap.get(row.domain);
+          if (existingId) {
+            await supabase.from('citation_intelligence').update({
+              citation_category: row.citation_category,
+              source_type: row.source_type,
+              authority_tier: row.authority_tier,
+              relationship_type: row.relationship_type,
+              updated_at: row.updated_at,
+            }).eq('id', existingId);
+          }
+        }
+
+        // Insert new records
+        const newRows = allUpsertData.filter(d => !existingDomains.has(d.domain));
+        if (newRows.length > 0) {
+          const { error: insertError } = await supabase
+            .from('citation_intelligence')
+            .insert(newRows);
+          if (insertError) console.error("DB Insert Error:", insertError);
+        }
+      }
+
+      setCitationMeta(newMeta);
+      toast.success(`Categorized ${allUpsertData.length} domains successfully!`);
+      return newMeta;
     } catch (err) {
       console.error("Categorization failed:", err);
       toast.error("AI Categorization failed: " + (err instanceof Error ? err.message : String(err)));
@@ -3131,6 +3217,88 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
   // NOTE: The old useEffect that loaded citation meta on selectedClient change
   // has been REMOVED. Citation meta is now loaded as part of loadClientData().
+
+  // ============================================
+  // AI SEARCH VOLUME (DataForSEO)
+  // ============================================
+
+  const fetchSearchVolumes = useCallback(async (promptsToFetch?: Prompt[]) => {
+    if (!selectedClient) return;
+    const targetPrompts = (promptsToFetch || prompts).filter(p => {
+      if (!p.topic && !p.prompt_text) return false;
+      // Skip if updated within 30 days
+      if (p.search_volume_updated_at) {
+        const updatedAt = new Date(p.search_volume_updated_at).getTime();
+        const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        if (updatedAt > thirtyDaysAgo) return false;
+      }
+      return true;
+    });
+
+    if (targetPrompts.length === 0) return;
+
+    // Use topic as keyword, fallback to first few words of prompt
+    const keywords = [...new Set(targetPrompts.map(p =>
+      (p.topic || p.prompt_text.split(/\s+/).slice(0, 5).join(" ")).toLowerCase()
+    ))];
+
+    try {
+      console.log(`[SearchVolume] Fetching for ${keywords.length} keywords:`, keywords.slice(0, 5));
+      const { data, error } = await supabase.functions.invoke("ai-search-volume", {
+        body: {
+          keywords,
+          location_code: selectedClient.location_code || 2840,
+          language_name: "English",
+        },
+      });
+
+      if (error) {
+        // Check for auth/JWT errors
+        const errMsg = error.message || String(error);
+        if (errMsg.includes("401") || errMsg.includes("non-2xx")) {
+          console.error("[SearchVolume] Auth error — edge function may need --no-verify-jwt flag:", errMsg);
+          toast.error("Search volume API auth error. The edge function needs to be redeployed with --no-verify-jwt.");
+        } else {
+          toast.error("Failed to fetch search volumes: " + errMsg);
+        }
+        return;
+      }
+
+      const results: Array<{ keyword: string; ai_search_volume: number | null }> = data?.results || [];
+      const volumeMap = new Map(results.map(r => [r.keyword.toLowerCase(), r.ai_search_volume]));
+
+      // Update prompts in DB and local state
+      const updates: Prompt[] = [];
+      for (const p of targetPrompts) {
+        const key = (p.topic || p.prompt_text.split(/\s+/).slice(0, 5).join(" ")).toLowerCase();
+        const volume = volumeMap.get(key) ?? null;
+
+        await supabase.from("prompts").update({
+          estimated_search_volume: volume,
+          search_volume_updated_at: new Date().toISOString(),
+        }).eq("id", p.id);
+
+        updates.push({ ...p, estimated_search_volume: volume, search_volume_updated_at: new Date().toISOString() });
+      }
+
+      // Update local state
+      setPrompts(prev => prev.map(p => {
+        const updated = updates.find(u => u.id === p.id);
+        return updated || p;
+      }));
+
+      const volCount = updates.filter(u => u.estimated_search_volume != null).length;
+      if (volCount > 0) {
+        toast.success(`Updated search volumes for ${volCount} prompt${volCount > 1 ? 's' : ''}`);
+      }
+    } catch (err) {
+      console.error("Error fetching AI search volumes:", err);
+      toast.error("Search volume fetch failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }, [selectedClient, prompts]);
+
+  // Keep ref synced so audit functions can call fetchSearchVolumes
+  fetchSearchVolumesRef.current = fetchSearchVolumes;
 
   // ============================================
   // RETURN
@@ -3156,7 +3324,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     exportToCSV, exportPrompts, exportFullReport, importData,
 
     // AI features
-    generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations,
+    generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes,
 
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,
