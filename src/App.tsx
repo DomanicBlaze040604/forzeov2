@@ -196,7 +196,7 @@ function App() {
                 },
               }}
               providers={['google']}
-              redirectTo={window.location.origin}
+              redirectTo="https://app.forzeo.com"
               localization={{
                 variables: {
                   sign_in: {

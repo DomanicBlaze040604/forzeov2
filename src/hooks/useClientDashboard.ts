@@ -208,6 +208,16 @@ export interface CitationMeta {
   authority_tier: number; // 1, 2, 3
   relationship_type: string; // owned, competitor, neutral
   is_affiliate?: boolean;
+  // Verification fields
+  verification_status?: string; // verified, partially_verified, hallucinated, pending, error
+  similarity_score?: number; // 0.0-1.0
+  matched_paragraph?: string; // Matched text excerpt
+  page_fetch_status?: number; // HTTP status code
+  page_content?: string; // Cached page content (first 5000 chars)
+  verified_at?: string; // ISO timestamp
+  // Enhanced categorization
+  intent_tags?: string[]; // pricing, alternatives, comparison, etc.
+  trust_tags?: string[]; // high_authority, ugc_unverified, etc.
 }
 
 // (duplicate CitationMeta removed — see lines 205-211)
@@ -3215,6 +3225,73 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     }
   }, [selectedClient, citationMeta]);
 
+  // Verify citations using semantic similarity engine
+  const verifyCitations = useCallback(async (citations: Array<{ url: string; citation_id: string }>, claim: string, onProgress?: (progress: { completed: number; total: number; currentBatch: number; totalBatches: number }) => void) => {
+    if (citations.length === 0) return;
+    try {
+      const BATCH_SIZE = 10; // Smaller batches for verification (each citation requires fetch + LLM)
+      const batches: typeof citations[] = [];
+      for (let i = 0; i < citations.length; i += BATCH_SIZE) {
+        batches.push(citations.slice(i, i + BATCH_SIZE));
+      }
+
+      let completed = 0;
+      let verified = 0;
+      let partial = 0;
+      let hallucinated = 0;
+
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        const batch = batches[batchIdx];
+
+        onProgress?.({
+          completed,
+          total: citations.length,
+          currentBatch: batchIdx + 1,
+          totalBatches: batches.length,
+        });
+
+        const { data, error } = await supabase.functions.invoke('verify-citations', {
+          body: {
+            citations: batch,
+            claim
+          }
+        });
+
+        if (data?.success && data.results) {
+          data.results.forEach((result: any) => {
+            if (result.status === 'verified') verified++;
+            else if (result.status === 'partially_verified') partial++;
+            else if (result.status === 'hallucinated') hallucinated++;
+          });
+        } else {
+          console.warn(`Batch ${batchIdx + 1} failed:`, data?.error || error);
+        }
+
+        completed += batch.length;
+      }
+
+      // Final progress update
+      onProgress?.({
+        completed: citations.length,
+        total: citations.length,
+        currentBatch: batches.length,
+        totalBatches: batches.length,
+      });
+
+      toast.success(`Verified ${citations.length} citations: ${verified} verified, ${partial} partial, ${hallucinated} hallucinated`);
+
+      // Refresh citation data
+      if (selectedClient) {
+        await loadClientData(selectedClient, true);
+      }
+
+    } catch (err) {
+      console.error("Verification failed:", err);
+      toast.error("Citation verification failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }, [selectedClient, loadClientData]);
+
+
   // NOTE: The old useEffect that loaded citation meta on selectedClient change
   // has been REMOVED. Citation meta is now loaded as part of loadClientData().
 
@@ -3328,7 +3405,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,
-    citationMeta, categorizeCitations,
+    citationMeta, categorizeCitations, verifyCitations,
 
     // Constants
     INDUSTRY_PRESETS, LOCATION_CODES,

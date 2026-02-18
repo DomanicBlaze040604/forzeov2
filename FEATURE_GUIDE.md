@@ -62,7 +62,93 @@ To prevent duplicate data when re-running analysis:
 
 ---
 
-## 3. Campaigns (Massive Scale Audits)
+## 3. Citation Verification Engine (Truth Layer)
+
+The Citation Verification Engine determines whether AI-cited URLs actually support the claims made — detecting hallucinated citations.
+
+### How It Works
+1. **Fetch Page Content**: Uses [Jina Reader](https://r.jina.ai/) to fetch the full text of each cited URL.
+2. **Semantic Similarity**: Sends the fetched content + the original AI prompt to Groq LLM to compute a similarity score (0.0–1.0).
+3. **Status Assignment**:
+   | Score | Status | Meaning |
+   |-------|--------|---------|
+   | > 0.85 + entity match | ✅ `verified` | URL genuinely supports the claim |
+   | 0.50 – 0.84 | ⚠️ `partially_verified` | Loosely related content |
+   | < 0.50 or fetch failure | ❌ `hallucinated` | URL does not support the claim |
+
+### Performance Optimizations
+- **24-Hour Caching**: Results cached per URL in `citation_intelligence` table — no redundant API calls.
+- **Retry Logic**: Exponential backoff on Groq API 429 (rate limit) errors.
+- **Batch Processing**: Citations processed in batches of 10 with progress tracking.
+
+### Database Columns Added
+| Column | Type | Description |
+|--------|------|-------------|
+| `verification_status` | text | `verified`, `partially_verified`, `hallucinated`, `pending`, `error` |
+| `similarity_score` | float | 0.0–1.0 semantic similarity |
+| `matched_paragraph` | text | Excerpt from page that matched the claim |
+| `page_fetch_status` | int | HTTP status code from Jina Reader |
+| `page_content` | text | First 5,000 chars of fetched page (for hover preview) |
+| `verified_at` | timestamp | When verification was last run |
+
+### Edge Function: `verify-citations`
+- **Runtime**: Deno (Supabase Edge Functions)
+- **APIs Used**: Jina Reader (content fetch), Groq LLM (similarity scoring)
+- **Auth**: `verify_jwt = false` (called from frontend with service role)
+
+---
+
+## 4. Citation Categorization Engine
+
+Enhanced AI-powered categorization using Groq's Llama model to classify every citation into one of 12 precise categories.
+
+### Categories
+| Category | Examples |
+|----------|---------|
+| `editorial` | Forbes, TechCrunch, industry blogs |
+| `ugc` | Reddit, Quora, forums |
+| `social` | LinkedIn, Twitter, Facebook |
+| `affiliate` | Review sites with referral links |
+| `competitor` | Competitor brand websites |
+| `owned` | Client's own domain |
+| `wiki` | Wikipedia, Wikia |
+| `press` | PR Newswire, press releases |
+| `app_store` | Google Play, Apple App Store |
+| `academic` | Research papers, .edu domains |
+| `government` | .gov domains |
+| `other` | Everything else |
+
+### Additional Tags
+- **`intent_tags`**: `pricing`, `alternatives`, `comparison`, `review`, `tutorial`, etc.
+- **`trust_tags`**: `high_authority`, `ugc_unverified`, `affiliate_bias`, etc.
+- **Batch Size**: 15 domains per batch (optimized for Groq 6,000 TPM free tier)
+
+---
+
+## 5. Hover Content Preview
+
+The Citations tab features an intelligent hover preview that shows page content without requiring users to visit links.
+
+### Behavior
+- **Trigger**: Hover over any domain or URL row for **500ms** (delay prevents accidental popups during scrolling)
+- **Position**: Preview appears to the left of the table, within viewport bounds
+- **Animation**: Smooth 200ms fade-in
+
+### Preview Contents
+1. **Domain favicon** + domain name + full URL
+2. **Verification status badge** (Verified / Partial / Hallucinated)
+3. **Page content preview** (first 1,500 characters from cached `page_content`)
+4. **Matched evidence** paragraph (highlighted in blue)
+5. **Confidence score** percentage
+6. **"Open full page"** link
+
+### States
+- **Loading**: Spinner while fetching from database
+- **No Content**: Shown when "Verify Citations" hasn't been run yet — prompts user to run verification
+- **Content**: Full preview with all metadata
+
+---
+
 
 Campaigns allow users to batch process hundreds of prompts to get an aggregate view of brand performance.
 
@@ -79,7 +165,7 @@ Campaigns allow users to batch process hundreds of prompts to get an aggregate v
 
 ---
 
-## 4. Citation Intelligence - Advanced UI/UX Features
+## 7. Citation Intelligence - Advanced UI/UX Features
 
 The Citation Intelligence dashboard offers a comprehensive suite of personalization and data management tools.
 
@@ -169,7 +255,7 @@ The Citation Intelligence dashboard offers a comprehensive suite of personalizat
 
 ---
 
-## 5. Signal Detection (Fresh Web Influence)
+## 8. Signal Detection (Fresh Web Influence)
 
 *   **Purpose**: Identify *new* content on the web that hasn't yet been indexed by AI but likely will be.
 *   **Mechanism**: Periodically scans high-authority domains and industry-specific feeds.

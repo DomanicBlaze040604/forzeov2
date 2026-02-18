@@ -92,7 +92,23 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ---
 
-## ✨ Recent Updates (January 2026)
+## ✨ Recent Updates
+
+### v2.8 - Citation Verification Engine & Hover Preview (Feb 18, 2026)
+- **Citation Verification Engine (Truth Layer)**: New `verify-citations` Supabase edge function that verifies whether AI-cited URLs actually support the claims made.
+  - **Semantic Similarity Scoring**: Uses Jina Reader to fetch page content and Groq LLM to compute similarity scores.
+  - **Verification Statuses**: `Verified` (>85% similarity), `Partially Verified` (50–84%), `Hallucinated` (<50% or fetch failure).
+  - **24-Hour Caching**: Results cached per URL to minimize API costs.
+  - **Retry Logic**: Exponential backoff for Groq API rate limits (429 errors).
+- **Citation Categorization Engine**: Enhanced `categorize-citations` function with 12 precise primary categories, `source_type`, `intent_tags`, and `trust_tags`.
+- **Hover Content Preview**: Hovering over any domain or URL in the Citations tab now shows a rich popup with:
+  - Cached page content (first 1,500 characters)
+  - Verification status badge (Verified / Partial / Hallucinated)
+  - Matched evidence paragraph and confidence score
+  - Direct link to the full page
+  - **500ms hover delay** to prevent accidental popups during scrolling
+  - Smooth fade-in animation
+- **Database Schema**: Added `verification_status`, `similarity_score`, `matched_paragraph`, `page_fetch_status`, `page_content`, `verified_at` columns to `citation_intelligence`.
 
 ### v2.7 - AI Location Context (Feb 12, 2026)
 - **Localized AI Prompts**: AI models now receive the user's specific target region (e.g., "India", "UK") in the prompt context.
@@ -379,15 +395,17 @@ npx supabase secrets set DATAFORSEO_PASSWORD=your-password --project-ref pqvyyzi
 │   ├── pages/ClientDashboard.tsx    # Main dashboard UI (v6.0 - sidebar, tabs, dialogs)
 │   ├── hooks/useClientDashboard.ts  # State management & Supabase integration
 │   ├── components/
+│   │   ├── CitationPreview.tsx      # Hover preview popup for citations
 │   │   ├── ModelLogos.tsx           # AI model icons with colors
 │   │   ├── BrandLogo.tsx            # Brand/competitor logo component
 │   │   └── ui/                      # Radix UI components
 │   └── lib/                         # Utilities
-├── backend/
-│   ├── geo-audit/index.ts           # Main audit API (LIVE LLM queries)
-│   └── generate-content/index.ts    # Content generation API
+├── supabase/functions/
+│   ├── geo-audit/                   # Main audit API (LIVE LLM queries)
+│   ├── categorize-citations/        # AI-powered citation categorization
+│   ├── verify-citations/            # Citation verification & truth scoring
+│   └── generate-content/            # Content generation API
 ├── database/                        # SQL schemas & migrations
-├── supabase/functions/              # Edge functions (deployed)
 └── netlify.toml                     # Netlify config
 ```
 

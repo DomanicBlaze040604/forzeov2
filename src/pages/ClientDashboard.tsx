@@ -5,7 +5,7 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles, Tag } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles, Tag, Info, Bell } from 'lucide-react';
 import { SOVLineChart, CLIENT_COLOR, COMPETITOR_COLORS } from "@/components/SOVLineChart";
 import { AgencyOverview } from "@/components/AgencyOverview";
 import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
@@ -30,7 +30,8 @@ import { UniversalImport } from "@/components/UniversalImport";
 // import { CampaignsList } from "@/components/CampaignsList";
 // import { CampaignDetail } from "@/components/CampaignDetail";
 import { SignalsDashboard } from "@/components/SignalsDashboard";
-import CitationIntelligence from "@/components/CitationIntelligence";
+import { CitationPreview } from "@/components/CitationPreview";
+
 import { toast } from "sonner";
 
 const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; dot: string }> = {
@@ -169,14 +170,14 @@ interface ClientDashboardProps {
 }
 
 export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: ClientDashboardProps = {}) {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "intelligence" | "brands">(() => {
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands">(() => {
     // Restore from localStorage on mount
     try {
       const saved = localStorage.getItem('forzeo_activeTab');
-      const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "intelligence", "brands"];
+      const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands"];
       return (saved && validTabs.includes(saved)) ? saved as any : "overview";
     } catch { return "overview"; }
   });
@@ -204,6 +205,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [editingLocationValue, setEditingLocationValue] = useState<string>("");
   const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
   const [categorizationProgress, setCategorizationProgress] = useState<{ completed: number; total: number; currentBatch: number; totalBatches: number; running: boolean } | null>(null);
+  const [verificationProgress, setVerificationProgress] = useState<{ completed: number; total: number; currentBatch: number; totalBatches: number; running: boolean } | null>(null);
+  const [hoveredCitation, setHoveredCitation] = useState<{ domain: string; url: string; mouseX: number; mouseY: number } | null>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [newTag, setNewTag] = useState("");
   const [newCompetitor, setNewCompetitor] = useState("");
   const [bulkPromptsOpen, setBulkPromptsOpen] = useState(false);
@@ -247,6 +251,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [isAutoFinding, setIsAutoFinding] = useState(false);
   const [aiInsights, setAiInsights] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string; keyActions: string[] } | null>(null);
   const [generatingAiInsights, setGeneratingAiInsights] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
+
 
   // Recommendations modal state
   const [recsModalOpen, setRecsModalOpen] = useState(false);
@@ -276,12 +284,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     if (selectedClient?.id !== autoRunClientId) {
       const targetClient = clients.find(c => c.id === autoRunClientId);
       if (targetClient) {
-        console.log('[AutoRun] Switching to new brand:', targetClient.brand_name);
         switchClient(targetClient);
       } else {
         // Client not in list yet — dashboard may still be loading. 
         // Refresh to pick up the new client.
-        console.log('[AutoRun] New client not found yet, refreshing...');
         refreshData();
       }
       return; // Wait for next render when selectedClient matches
@@ -323,6 +329,39 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { if (stats[mr.model]) { stats[mr.model].total++; if (mr.brand_mentioned) stats[mr.model].visible++; stats[mr.model].cost += mr.api_cost; } }); });
     return stats;
   }, [filteredAuditResults]);
+
+  // Fetch notifications for admin users
+  useEffect(() => {
+    if (!user || role !== 'admin') return;
+
+    const fetchNotifications = async () => {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        setNotifications(data);
+        setUnreadCount(data.filter(n => !n.is_read).length);
+      }
+    };
+
+    fetchNotifications();
+  }, [user, role]);
+
+  const markNotificationsAsRead = async () => {
+    if (unreadCount === 0 || !user) return;
+
+    const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
+    await supabase
+      .from('notifications')
+      .update({ is_read: true, read_at: new Date().toISOString() })
+      .in('id', unreadIds);
+
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true, read_at: n.read_at || new Date().toISOString() })));
+    setUnreadCount(0);
+  };
 
   const competitorGap = useMemo(() => {
     if (!selectedClient) return [];
@@ -746,7 +785,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const filteredUrlCitations = useMemo(() => !sourceSearch ? modelFilteredCitations : modelFilteredCitations.filter(c => c.url.toLowerCase().includes(sourceSearch.toLowerCase()) || c.domain.toLowerCase().includes(sourceSearch.toLowerCase()) || c.title?.toLowerCase().includes(sourceSearch.toLowerCase())), [modelFilteredCitations, sourceSearch]);
   const gapDomains = useMemo(() => { if (!selectedClient) return []; const brandDomains = new Set<string>(); const competitorDomains = new Map<string, Set<string>>(); filteredAuditResults.forEach(result => { result.model_results.forEach(mr => { if (sourcesModelFilter.length > 0 && !sourcesModelFilter.includes(mr.model)) return; const response = mr.raw_response?.toLowerCase() || ""; const hasBrand = mr.brand_mentioned; mr.citations.forEach(c => { if (hasBrand) brandDomains.add(c.domain); selectedClient.competitors.forEach(comp => { if (response.includes(comp.toLowerCase())) { if (!competitorDomains.has(c.domain)) competitorDomains.set(c.domain, new Set()); competitorDomains.get(c.domain)!.add(comp); } }); }); }); }); return Array.from(competitorDomains.entries()).filter(([domain]) => !brandDomains.has(domain)).map(([domain, competitors]) => ({ domain, competitors: Array.from(competitors) })).slice(0, 20); }, [selectedClient, filteredAuditResults, sourcesModelFilter]);
   const displayedStats = sourcesGapView === "gap" ? gapDomains.map(g => { const stat = modelFilteredDomainStats.find(s => s.domain === g.domain); return stat ? { ...stat, gapCompetitors: g.competitors } : null; }).filter(Boolean) : filteredDomainStats;
-  const exportSources = () => { if (sourcesView === "domains") { if (domainStats.length === 0) return; const rows = [["Domain", "Type", "Citations", "Prompts", "Avg/Audit"]]; for (const s of domainStats) { rows.push([s.domain, s.type, s.count.toString(), s.promptCount.toString(), s.avg.toString()]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-domains-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } else { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-urls-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } };
+  const exportSources = () => { if (sourcesView === "domains") { if (domainStats.length === 0) return; const rows = [["Domain", "Type", "Citations", "Prompts"]]; for (const s of domainStats) { rows.push([s.domain, s.type, s.count.toString(), s.promptCount.toString()]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-domains-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } else { if (allCitations.length === 0) return; const rows = [["URL", "Title", "Domain", "Type", "Count", "Prompts"]]; for (const c of allCitations) { rows.push([c.url, c.title || "", c.domain, classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name), c.count.toString(), c.prompts.join("; ")]); } const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `sources-urls-${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); } };
 
   // Citations Tab State & Logic (Lifted to fix hooks)
   const [citationSearch, setCitationSearch] = useState("");
@@ -1148,7 +1187,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null },
             { id: "topics", label: "Topics", icon: Layers },
             { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true },
-            { id: "intelligence", label: "Intelligence", icon: Target, betaBadge: true },
+
             { id: "schedules", label: "Schedules", icon: Clock },
             { id: "future-citations", label: "Future Citations", icon: Zap, betaBadge: true },
             { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null },
@@ -1158,10 +1197,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             if (isAdmin) return true;
             // Agency sees specific tabs
             if (isAgency) {
-              return ["overview", "prompts", "topics", "insights", "intelligence", "future-citations", "sources", "content", "brands"].includes(item.id);
+              return ["overview", "prompts", "topics", "insights", "future-citations", "sources", "content", "brands"].includes(item.id);
             }
             // Normal users see limited tabs
-            return !["intelligence", "schedules", "future-citations"].includes(item.id);
+            return !["schedules", "future-citations"].includes(item.id);
           }).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
@@ -1235,10 +1274,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               </div>
             </div>
           )}
-          <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 text-left transition-colors">
-            <HelpCircle className="h-4 w-4 flex-shrink-0 text-gray-400" />
-            <span className="flex-1 truncate">Help & Support</span>
-          </button>
+
           <button onClick={() => supabase.auth.signOut()} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 text-left transition-colors mt-1">
             <LogOut className="h-4 w-4 flex-shrink-0" />
             <span className="flex-1 truncate">Sign Out</span>
@@ -1263,12 +1299,109 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               </button>
               <h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2 truncate">
                 <FileText className="h-5 w-5 text-gray-400 hidden sm:block" />
-                <span className="truncate">{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "future-citations" ? "Future Citations" : activeTab === "topics" ? "Topics" : activeTab === "content" ? "Content Generator" : activeTab === "insights" ? "Insights" : activeTab === "intelligence" ? "Intelligence" : "Citations"}</span>
+                <span className="truncate">{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "future-citations" ? "Future Citations" : activeTab === "topics" ? "Topics" : activeTab === "content" ? "Content Generator" : activeTab === "insights" ? "Insights" : "Citations"}</span>
               </h1>
               {(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs hidden sm:inline-flex">Filtered</Badge>}
             </div>
 
             <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
+              {/* Notifications Bell - Admin Only */}
+              {role === 'admin' && (
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setShowNotifications(!showNotifications);
+                      if (!showNotifications && unreadCount > 0) {
+                        markNotificationsAsRead();
+                      }
+                    }}
+                    className="relative flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+                  >
+                    <Bell className="h-4 w-4" />
+                    {unreadCount > 0 && (
+                      <>
+                        <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex items-center justify-center rounded-full h-4 w-4 bg-red-500 text-white text-[10px] font-bold">{unreadCount}</span>
+                        </span>
+                      </>
+                    )}
+                  </button>
+                  {showNotifications && (
+                    <>
+                      <div className="fixed inset-0 z-[9998] bg-black/20" onClick={() => setShowNotifications(false)} />
+                      <div className="fixed top-16 right-4 w-[450px] bg-white rounded-xl shadow-2xl border-2 border-transparent bg-gradient-to-br from-blue-50 via-white to-purple-50 z-[9999] max-h-[600px] overflow-hidden ring-1 ring-blue-200/50 animate-in slide-in-from-top-4 duration-300">
+                        <div className="p-4 border-b border-blue-100/50 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50">
+                          <h3 className="font-semibold text-base bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Notifications</h3>
+                        </div>
+                        <div className="max-h-[540px] overflow-y-auto bg-white">
+                          {notifications.length === 0 ? (
+                            <div className="p-8 text-center text-sm text-gray-500">
+                              <Bell className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                              <p>No notifications yet</p>
+                            </div>
+                          ) : (
+                            <div className="divide-y divide-gray-100">
+                              {notifications.map(notif => (
+                                <div
+                                  key={notif.id}
+                                  className={cn(
+                                    "p-4 hover:bg-gray-50 transition-colors",
+                                    !notif.is_read && "bg-blue-50/50"
+                                  )}
+                                >
+                                  <div className="space-y-2.5">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <p className="text-sm font-semibold text-gray-900">{notif.title}</p>
+                                      {!notif.is_read && (
+                                        <span className="flex h-2 w-2 mt-1.5">
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-sm text-gray-700">{notif.message}</p>
+                                    {notif.metadata && (
+                                      <div className="mt-3 pt-3 border-t border-gray-200 space-y-2 text-xs bg-gray-50 -mx-4 -mb-4 px-4 py-3">
+                                        {notif.metadata.new_user_name && (
+                                          <div className="flex items-center gap-3">
+                                            <span className="font-semibold text-gray-600 min-w-[70px]">Name:</span>
+                                            <span className="text-gray-900 font-medium">{notif.metadata.new_user_name}</span>
+                                          </div>
+                                        )}
+                                        {notif.metadata.new_user_email && (
+                                          <div className="flex items-center gap-3">
+                                            <span className="font-semibold text-gray-600 min-w-[70px]">Email:</span>
+                                            <span className="text-gray-900">{notif.metadata.new_user_email}</span>
+                                          </div>
+                                        )}
+                                        {notif.metadata.new_user_id && (
+                                          <div className="flex items-center gap-3">
+                                            <span className="font-semibold text-gray-600 min-w-[70px]">User ID:</span>
+                                            <span className="text-gray-600 font-mono text-[10px]">{notif.metadata.new_user_id}</span>
+                                          </div>
+                                        )}
+                                        {notif.metadata.signup_time && (
+                                          <div className="flex items-center gap-3">
+                                            <span className="font-semibold text-gray-600 min-w-[70px]">Signed up:</span>
+                                            <span className="text-gray-700">{new Date(notif.metadata.signup_time).toLocaleString()}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    <p className="text-xs text-gray-400 mt-2">
+                                      {new Date(notif.created_at).toLocaleString()}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               {/* Client Badge - Hidden on small mobile to save space if needed, or kept compact */}
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
 
@@ -1308,13 +1441,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           {activeTab === "sources" && SourcesTab()}
           {activeTab === "content" && ContentTab()}
           {activeTab === "insights" && InsightsTab()}
-          {activeTab === "intelligence" && selectedClient && (
-            <CitationIntelligence
-              clientId={selectedClient.id}
-              brandName={selectedClient.brand_name}
-              competitors={selectedClient.competitors}
-            />
-          )}
+
         </div>
       </main>
       {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{EditPromptDialog()}{EditLocationDialog()}{ImportDialog()}{RunCampaignDialog()}
@@ -2323,6 +2450,57 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   </span>
                 </div>
               )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!!verificationProgress?.running}
+                onClick={async () => {
+                  // Get all citations that need verification
+                  const citationsToVerify = allCitations
+                    .filter(c => citationMeta?.[c.domain]?.verification_status === 'pending' || !citationMeta?.[c.domain]?.verification_status)
+                    .map(c => ({ url: c.url, citation_id: c.url }));
+
+                  if (citationsToVerify.length === 0) {
+                    toast.success("All citations verified!");
+                    return;
+                  }
+
+                  setVerificationProgress({ completed: 0, total: citationsToVerify.length, currentBatch: 0, totalBatches: Math.ceil(citationsToVerify.length / 10), running: true });
+
+                  // Use brand name as the claim for verification
+                  const claim = selectedClient?.brand_name || "brand mention";
+
+                  await verifyCitations(citationsToVerify, claim, (progress) => {
+                    setVerificationProgress({ ...progress, running: progress.completed < progress.total });
+                  });
+
+                  setVerificationProgress(null);
+                }}
+                className="hidden md:flex"
+              >
+                {verificationProgress?.running ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Shield className="h-3.5 w-3.5 mr-1 text-green-600" />
+                )}
+                {verificationProgress?.running
+                  ? `Verifying... ${Math.round((verificationProgress.completed / verificationProgress.total) * 100)}%`
+                  : "Verify Citations"}
+              </Button>
+              {verificationProgress?.running && (
+                <div className="flex items-center gap-2 min-w-[200px]">
+                  <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-500 ease-out rounded-full"
+                      style={{ width: `${Math.round((verificationProgress.completed / verificationProgress.total) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-gray-500 whitespace-nowrap">
+                    {verificationProgress.completed}/{verificationProgress.total} · Batch {verificationProgress.currentBatch}/{verificationProgress.totalBatches}
+                  </span>
+                </div>
+              )}
             </>
           )}
           <button onClick={() => setSourcesView("domains")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "domains" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>Domains ({domainStats.length})</button>
@@ -2425,14 +2603,36 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   <tr>
                     <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-16">#</th>
                     <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
-                      <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Source <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
+                      <div className="flex items-center gap-1.5 cursor-pointer hover:text-gray-900 group" title="The domain where AI models found this information">
+                        <span>Source</span>
+                        <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" />
+                      </div>
                     </th>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Type</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Verified</th>
-                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Citations</th>
-                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Prompts</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
+                      <div className="flex items-center gap-1" title="Category of the source (UGC, Editorial, Wikipedia, etc.)">
+                        <span>Type</span>
+                        <Info className="h-3 w-3 text-gray-400" />
+                      </div>
+                    </th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
+                      <div className="flex items-center justify-center gap-1" title="Basic check for suspicious domains">
+                        <span>Verified</span>
+                        <Info className="h-3 w-3 text-gray-400" />
+                      </div>
+                    </th>
+                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
+                      <div className="flex items-center justify-end gap-1" title="Total number of times this domain was cited across all model responses">
+                        <span>Citations</span>
+                        <Info className="h-3 w-3 text-gray-400" />
+                      </div>
+                    </th>
+                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
+                      <div className="flex items-center justify-end gap-1" title="Number of unique prompts where this domain appeared">
+                        <span>Prompts</span>
+                        <Info className="h-3 w-3 text-gray-400" />
+                      </div>
+                    </th>
                     {sourcesGapView === "gap" && <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Competitors</th>}
-                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Avg/Audit</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -2443,7 +2643,26 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     const domainCitations = allCitations.filter(c => c.domain === s.domain);
                     return (
                       <React.Fragment key={i}>
-                        <tr className={cn("hover:bg-gray-50 cursor-pointer transition-colors group", isExpanded && "bg-blue-50/50")} onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}>
+                        <tr
+                          className={cn("hover:bg-gray-50 cursor-pointer transition-colors group", isExpanded && "bg-blue-50/50")}
+                          onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}
+                          onMouseEnter={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            // Position to the left of the table row, with some padding from left edge
+                            const previewWidth = 480; // Max width of preview
+                            const leftPosition = Math.max(10, rect.left - previewWidth - 20); // 10px min from left edge
+
+                            setHoveredCitation({
+                              domain: s.domain,
+                              url: `https://${s.domain}`,
+                              mouseX: leftPosition,
+                              mouseY: rect.top
+                            });
+                          }}
+                          onMouseLeave={() => {
+                            setHoveredCitation(null);
+                          }}
+                        >
                           <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
@@ -2465,15 +2684,45 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           </td>
                           <td className="px-6 py-4 text-center">
                             {(() => {
-                              // Better verification - check for common hallucination patterns
-                              const d = s.domain.toLowerCase();
-                              const isSuspicious = !d.includes('.') || d.length < 4 || d.includes('example') || d.includes('test') ||
-                                d.includes('localhost') || d.match(/^\d+\.\d+\.\d+\.\d+$/) || d.includes('fake');
-                              return isSuspicious ? (
-                                <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200">Not Verified</Badge>
-                              ) : (
-                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Verified</Badge>
-                              );
+                              const meta = citationMeta?.[s.domain];
+                              const status = meta?.verification_status || 'pending';
+
+                              if (status === 'verified') {
+                                return (
+                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 flex items-center gap-1 w-fit mx-auto">
+                                    <CheckCircle className="h-3 w-3" />
+                                    Verified
+                                  </Badge>
+                                );
+                              } else if (status === 'partially_verified') {
+                                return (
+                                  <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 flex items-center gap-1 w-fit mx-auto">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Partial
+                                  </Badge>
+                                );
+                              } else if (status === 'hallucinated') {
+                                return (
+                                  <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200 flex items-center gap-1 w-fit mx-auto">
+                                    <X className="h-3 w-3" />
+                                    Hallucinated
+                                  </Badge>
+                                );
+                              } else if (status === 'error') {
+                                return (
+                                  <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200 flex items-center gap-1 w-fit mx-auto">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Error
+                                  </Badge>
+                                );
+                              } else {
+                                return (
+                                  <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200 flex items-center gap-1 w-fit mx-auto">
+                                    <Clock className="h-3 w-3" />
+                                    Pending
+                                  </Badge>
+                                );
+                              }
                             })()}
                           </td>
                           <td className="px-6 py-4 text-right text-base font-medium text-gray-700">{s.count}</td>
@@ -2506,7 +2755,6 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                               </div>
                             </td>
                           )}
-                          <td className="px-6 py-4 text-right text-sm text-gray-600 font-mono">{s.avg}</td>
                         </tr>
                         {isExpanded && (
                           <tr className="bg-gray-50/50">
@@ -2589,7 +2837,23 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     const type = classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors);
                     const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
                     return (
-                      <tr key={i} className="hover:bg-gray-50 transition-colors group">
+                      <tr
+                        key={i}
+                        className="hover:bg-gray-50 transition-colors group"
+                        onMouseEnter={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const previewWidth = 480;
+                          const leftPosition = Math.max(10, rect.left - previewWidth - 20);
+
+                          setHoveredCitation({
+                            domain: c.domain,
+                            url: c.url,
+                            mouseX: leftPosition,
+                            mouseY: rect.top
+                          });
+                        }}
+                        onMouseLeave={() => setHoveredCitation(null)}
+                      >
                         <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
@@ -2604,15 +2868,50 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         <td className="px-6 py-4"><span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span></td>
                         <td className="px-6 py-4 text-center">
                           {(() => {
-                            // Better verification - check URL patterns for hallucinations
-                            const d = c.domain.toLowerCase();
-                            const isSuspicious = !d.includes('.') || d.length < 4 || d.includes('example') || d.includes('test') ||
-                              d.includes('localhost') || d.match(/^\d+\.\d+\.\d+\.\d+$/) || d.includes('fake') || !c.url.startsWith('http');
-                            return isSuspicious ? (
-                              <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200">Not Verified</Badge>
-                            ) : (
-                              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Verified</Badge>
-                            );
+                            try {
+                              const domain = new URL(c.url).hostname.replace('www.', '');
+                              const meta = citationMeta?.[domain];
+                              const status = meta?.verification_status || 'pending';
+
+                              if (status === 'verified') {
+                                return (
+                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 flex items-center gap-1 w-fit mx-auto">
+                                    <CheckCircle className="h-3 w-3" />
+                                    Verified
+                                  </Badge>
+                                );
+                              } else if (status === 'partially_verified') {
+                                return (
+                                  <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 flex items-center gap-1 w-fit mx-auto">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Partial
+                                  </Badge>
+                                );
+                              } else if (status === 'hallucinated') {
+                                return (
+                                  <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200 flex items-center gap-1 w-fit mx-auto">
+                                    <X className="h-3 w-3" />
+                                    Hallucinated
+                                  </Badge>
+                                );
+                              } else if (status === 'error') {
+                                return (
+                                  <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200 flex items-center gap-1 w-fit mx-auto">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Error
+                                  </Badge>
+                                );
+                              } else {
+                                return (
+                                  <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200 flex items-center gap-1 w-fit mx-auto">
+                                    <Clock className="h-3 w-3" />
+                                    Pending
+                                  </Badge>
+                                );
+                              }
+                            } catch {
+                              return <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200">Pending</Badge>;
+                            }
                           })()}
                         </td>
                         <td className="px-6 py-4 text-center">
@@ -2634,6 +2933,23 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           {filteredUrlCitations.length === 0 && sourcesView === "urls" && (<div className="p-12 text-center"><Link2 className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No URLs yet. Run audits to collect data.</p></div>)}
           {sourcesView === "urls" && filteredUrlCitations.length > 0 && <div className="p-3 text-center text-sm text-gray-500 border-t bg-gray-50">Showing all {filteredUrlCitations.length} URLs</div>}
           {sourcesView === "domains" && displayedStats.length > 0 && <div className="p-3 text-center text-sm text-gray-500 border-t bg-gray-50">Showing all {displayedStats.length} domains</div>}
+
+          {/* Citation Preview on Hover */}
+          {hoveredCitation && (
+            <div
+              style={{
+                position: 'fixed',
+                left: `${hoveredCitation.mouseX}px`,
+                top: `${hoveredCitation.mouseY}px`,
+                zIndex: 99999
+              }}
+            >
+              <CitationPreview
+                domain={hoveredCitation.domain}
+                url={hoveredCitation.url}
+              />
+            </div>
+          )}
         </div>
       </div>
     );
