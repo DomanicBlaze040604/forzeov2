@@ -569,6 +569,7 @@ export function useClientDashboard() {
   );
   const [tavilyResults, setTavilyResults] = useState<Record<string, unknown>>({});
   const [citationMeta, setCitationMeta] = useState<Record<string, CitationMeta>>({});
+  const [categorizationProgress, setCategorizationProgress] = useState<{ completed: number; total: number; currentBatch: number; totalBatches: number; running: boolean } | null>(null);
 
   // Auto-persist audit results to localStorage whenever they change
   useEffect(() => {
@@ -839,19 +840,23 @@ export function useClientDashboard() {
 
     // --- Load Citation Meta ---
     try {
-      const { data } = await supabase
+      const { data, error: ciError } = await supabase
         .from('citation_intelligence')
-        .select('domain, category, source_type, authority_tier, relationship_type, is_affiliate');
-      if (data) {
+        .select('domain, citation_category, source_type, authority_tier, relationship_type')
+        .eq('client_id', client.id);
+      if (ciError) {
+        console.error("[CitationMeta] Load error:", ciError);
+      } else if (data) {
         const meta: Record<string, CitationMeta> = {};
         data.forEach((row: any) => {
           meta[row.domain] = {
-            category: row.category, source_type: row.source_type,
+            category: row.citation_category, source_type: row.source_type,
             authority_tier: row.authority_tier, relationship_type: row.relationship_type,
-            is_affiliate: row.is_affiliate
+            is_affiliate: row.source_type === 'affiliate'
           };
         });
         loadedCitationMeta = meta;
+        console.log(`[CitationMeta] Loaded ${data.length} rows for client ${client.brand_name}`);
       }
     } catch (err) { console.error("Failed to fetch citation meta:", err); }
 
@@ -1744,6 +1749,9 @@ export function useClientDashboard() {
     } catch (err) {
       console.warn("[SearchVolume] Auto-fetch after audit failed:", err);
     }
+
+    // Auto-categorize any new citation domains (fire-and-forget)
+    autoCategorizeRef.current?.().catch(err => console.warn("[AutoCategorize] Post-audit failed:", err));
   }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
 
   const runSinglePrompt = useCallback(async (promptOrId: string | Prompt) => {
@@ -1888,7 +1896,40 @@ export function useClientDashboard() {
     } catch (err) {
       console.warn("[SearchVolume] Auto-fetch after single audit failed:", err);
     }
+
+    // Auto-categorize any new citation domains (fire-and-forget)
+    autoCategorizeRef.current?.().catch(err => console.warn("[AutoCategorize] Post-single-audit failed:", err));
   }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
+
+  /**
+   * Run multi-account schedule execution
+   * Invokes the multi-account-runner edge function to execute prompts across multiple brands
+   */
+  const runMultiAccountSchedule = useCallback(async (scheduleId: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('multi-account-runner', {
+        body: { schedule_id: scheduleId, force: true }
+      });
+
+      if (error) {
+        console.error('Multi-account run error:', error);
+        toast.error('Failed to start multi-account execution');
+        return null;
+      }
+
+      if (data?.run_id) {
+        toast.success('Multi-account execution started');
+        return data.run_id;
+      }
+
+      toast.warning('Schedule execution was skipped');
+      return null;
+    } catch (err) {
+      console.error('Multi-account run exception:', err);
+      toast.error('Failed to start multi-account execution');
+      return null;
+    }
+  }, []);
 
   const runCampaign = useCallback(async (name: string, promptIds: string[]) => {
     if (!selectedClient || promptIds.length === 0) return;
@@ -3116,7 +3157,8 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     try {
       // Deduplicate
       const uniqueDomains = Array.from(new Set(domains));
-      const BATCH_SIZE = 40;
+      const BATCH_SIZE = 40; // Must match edge function limit (processes max 40 per call)
+      const CONCURRENCY = 2; // Run 2 batches in parallel (3 caused 503s)
       const batches: string[][] = [];
       for (let i = 0; i < uniqueDomains.length; i += BATCH_SIZE) {
         batches.push(uniqueDomains.slice(i, i + BATCH_SIZE));
@@ -3126,50 +3168,89 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
       const allUpsertData: any[] = [];
       let completed = 0;
 
-      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-        const batch = batches[batchIdx];
+      // Helper to invoke edge function with retry
+      const invokeCategorize = async (batch: string[], attempt = 1): Promise<any> => {
+        const result = await supabase.functions.invoke('categorize-citations', {
+          body: {
+            domains: batch,
+            brand_name: selectedClient?.brand_name,
+            brand_domain: selectedClient?.brand_domain,
+            competitors: selectedClient?.competitors
+          }
+        });
+        // Retry on 503/429 (rate limit) — once after delay
+        if (result.error && attempt < 2) {
+          console.warn(`[Categorize] Batch failed (attempt ${attempt}), retrying in 3s...`);
+          await new Promise(r => setTimeout(r, 3000));
+          return invokeCategorize(batch, attempt + 1);
+        }
+        return result;
+      };
+
+      // Process batches with concurrency
+      for (let i = 0; i < batches.length; i += CONCURRENCY) {
+        const chunk = batches.slice(i, i + CONCURRENCY);
 
         onProgress?.({
           completed,
           total: uniqueDomains.length,
-          currentBatch: batchIdx + 1,
+          currentBatch: i + 1,
           totalBatches: batches.length,
         });
 
-        const { data, error } = await supabase.functions.invoke('categorize-citations', {
-          body: {
-            domains: batch,
-            brand_name: selectedClient?.brand_name,
-            competitors: selectedClient?.competitors
-          }
-        });
+        const results = await Promise.allSettled(
+          chunk.map(batch => invokeCategorize(batch))
+        );
 
-        if (data?.success && data.data) {
-          Object.entries(data.data).forEach(([domain, info]: [string, any]) => {
-            allUpsertData.push({
-              client_id: selectedClient?.id,
-              domain: domain,
-              url: `https://${domain}`,
-              citation_category: info.category,
-              source_type: info.source_type,
-              authority_tier: info.authority_tier,
-              relationship_type: info.relationship_type,
-              updated_at: new Date().toISOString()
-            });
-
-            newMeta[domain] = {
-              category: info.category,
-              source_type: info.source_type,
-              authority_tier: info.authority_tier,
-              relationship_type: info.relationship_type,
-              is_affiliate: info.source_type === 'affiliate'
-            };
-          });
-        } else {
-          console.warn(`Batch ${batchIdx + 1} failed:`, data?.error || error);
+        // Small delay between rounds to avoid 503s
+        if (i + CONCURRENCY < batches.length) {
+          await new Promise(r => setTimeout(r, 500));
         }
 
-        completed += batch.length;
+        results.forEach((result, idx) => {
+          const batch = chunk[idx];
+          if (result.status === 'fulfilled' && result.value.data?.success && result.value.data.data) {
+            // Build a lookup of sent domains for normalization (AI may strip www.)
+            const sentDomains = new Set(chunk[idx]);
+            const sentDomainMap = new Map<string, string>();
+            chunk[idx].forEach(d => {
+              sentDomainMap.set(d.toLowerCase(), d);
+              sentDomainMap.set(d.toLowerCase().replace(/^www\./, ''), d);
+              sentDomainMap.set('www.' + d.toLowerCase().replace(/^www\./, ''), d);
+            });
+
+            Object.entries(result.value.data.data).forEach(([aiDomain, info]: [string, any]) => {
+              // Normalize: use original domain name if AI returned a different form
+              const originalDomain = sentDomainMap.get(aiDomain.toLowerCase()) || aiDomain;
+
+              allUpsertData.push({
+                client_id: selectedClient?.id,
+                domain: originalDomain,
+                url: `https://${originalDomain}`,
+                citation_category: info.category,
+                source_type: info.source_type,
+                authority_tier: info.authority_tier,
+                relationship_type: info.relationship_type,
+                updated_at: new Date().toISOString()
+              });
+
+              newMeta[originalDomain] = {
+                category: info.category,
+                source_type: info.source_type,
+                authority_tier: info.authority_tier,
+                relationship_type: info.relationship_type,
+                is_affiliate: info.source_type === 'affiliate'
+              };
+            });
+
+            // Log sample for debugging
+            const sample = Object.entries(result.value.data.data).slice(0, 3);
+            console.log(`[Categorize] Sample results:`, sample.map(([d, v]: [string, any]) => `${d} → ${v.category}`).join(', '));
+          } else {
+            console.warn(`Batch ${i + idx + 1} failed:`, result.status === 'rejected' ? result.reason : result.value.data?.error);
+          }
+          completed += batch.length;
+        });
       }
 
       // Final progress update
@@ -3182,29 +3263,44 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
       // Store all results in DB (no unique constraint on domain, so check+insert/update)
       if (allUpsertData.length > 0 && selectedClient) {
-        // Find which domains already exist for this client
-        const { data: existingRows } = await supabase
-          .from('citation_intelligence')
-          .select('id, domain')
-          .eq('client_id', selectedClient.id)
-          .in('domain', allUpsertData.map(d => d.domain));
+        console.log(`[Categorize] Saving ${allUpsertData.length} results to DB...`);
 
-        const existingDomains = new Set((existingRows || []).map(r => r.domain));
-        const existingMap = new Map((existingRows || []).map(r => [r.domain, r.id]));
+        // Find which domains already exist for this client (batch .in() to avoid limit)
+        const allDomainsToCheck = allUpsertData.map(d => d.domain);
+        const existingRows: any[] = [];
+        const IN_BATCH = 50; // Supabase .in() limit safety
+        for (let b = 0; b < allDomainsToCheck.length; b += IN_BATCH) {
+          const batchDomains = allDomainsToCheck.slice(b, b + IN_BATCH);
+          const { data: rows, error: lookupErr } = await supabase
+            .from('citation_intelligence')
+            .select('id, domain')
+            .eq('client_id', selectedClient.id)
+            .in('domain', batchDomains);
+          if (lookupErr) console.error("[Categorize] Lookup error:", lookupErr);
+          if (rows) existingRows.push(...rows);
+        }
+
+        const existingDomains = new Set(existingRows.map(r => r.domain));
+        const existingMap = new Map(existingRows.map(r => [r.domain, r.id]));
+        console.log(`[Categorize] ${existingDomains.size} existing, ${allUpsertData.length - existingDomains.size} new`);
 
         // Update existing records
+        let updatedCount = 0;
         for (const row of allUpsertData.filter(d => existingDomains.has(d.domain))) {
           const existingId = existingMap.get(row.domain);
           if (existingId) {
-            await supabase.from('citation_intelligence').update({
+            const { error: updateErr } = await supabase.from('citation_intelligence').update({
               citation_category: row.citation_category,
               source_type: row.source_type,
               authority_tier: row.authority_tier,
               relationship_type: row.relationship_type,
               updated_at: row.updated_at,
             }).eq('id', existingId);
+            if (updateErr) console.error(`[Categorize] Update error for ${row.domain}:`, updateErr);
+            else updatedCount++;
           }
         }
+        console.log(`[Categorize] Updated ${updatedCount} existing rows`);
 
         // Insert new records
         const newRows = allUpsertData.filter(d => !existingDomains.has(d.domain));
@@ -3212,7 +3308,8 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
           const { error: insertError } = await supabase
             .from('citation_intelligence')
             .insert(newRows);
-          if (insertError) console.error("DB Insert Error:", insertError);
+          if (insertError) console.error("[Categorize] DB Insert Error:", insertError);
+          else console.log(`[Categorize] Inserted ${newRows.length} new rows`);
         }
       }
 
@@ -3224,6 +3321,56 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
       toast.error("AI Categorization failed: " + (err instanceof Error ? err.message : String(err)));
     }
   }, [selectedClient, citationMeta]);
+
+  // Auto-categorize only NEW uncategorized domains (with progress tracking)
+  const autoCategorizeNewDomains = useCallback(async () => {
+    if (!selectedClient) return;
+    try {
+      // Collect all unique domains from current audit results
+      const allDomains = new Set<string>();
+      auditResults.forEach(ar => {
+        ar.model_results?.forEach(mr => {
+          mr.citations?.forEach(c => {
+            if (c.domain) allDomains.add(c.domain);
+          });
+        });
+      });
+
+      // Filter to only uncategorized domains
+      const uncategorized = Array.from(allDomains).filter(d => !citationMeta?.[d]?.category);
+      if (uncategorized.length === 0) {
+        console.log("[AutoCategorize] All domains already categorized, skipping");
+        return;
+      }
+
+      console.log(`[AutoCategorize] Found ${uncategorized.length} new domains to categorize`);
+      setCategorizationProgress({ completed: 0, total: uncategorized.length, currentBatch: 0, totalBatches: Math.ceil(uncategorized.length / 40), running: true });
+
+      await categorizeCitations(uncategorized, (progress) => {
+        setCategorizationProgress({ ...progress, running: progress.completed < progress.total });
+      });
+
+      setCategorizationProgress(null);
+      console.log(`[AutoCategorize] Done categorizing ${uncategorized.length} domains`);
+    } catch (err) {
+      setCategorizationProgress(null);
+      console.warn("[AutoCategorize] Failed (non-blocking):", err);
+    }
+  }, [selectedClient, auditResults, citationMeta, categorizeCitations]);
+
+  // Ref to allow forward-referencing autoCategorizeNewDomains from earlier-defined callbacks
+  const autoCategorizeRef = useRef(autoCategorizeNewDomains);
+  useEffect(() => { autoCategorizeRef.current = autoCategorizeNewDomains; }, [autoCategorizeNewDomains]);
+
+  // Auto-categorize uncategorized domains on page load (runs once per client session)
+  const autoCategorizeDoneForClient = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedClient || auditResults.length === 0) return;
+    if (autoCategorizeDoneForClient.current === selectedClient.id) return;
+    autoCategorizeDoneForClient.current = selectedClient.id;
+    console.log(`[AutoCategorize] On load: checking for uncategorized domains for ${selectedClient.brand_name}`);
+    autoCategorizeRef.current?.().catch(err => console.warn("[AutoCategorize] On-load failed:", err));
+  }, [selectedClient, auditResults, citationMeta]);
 
   // Verify citations using semantic similarity engine
   const verifyCitations = useCallback(async (citations: Array<{ url: string; citation_id: string }>, claim: string, onProgress?: (progress: { completed: number; total: number; currentBatch: number; totalBatches: number }) => void) => {
@@ -3392,7 +3539,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     updateBrandTags, updateCompetitors, fetchCompetitors,
 
     // Audit
-    runFullAudit, runSinglePrompt, runCampaign, clearResults,
+    runFullAudit, runSinglePrompt, runCampaign, runMultiAccountSchedule, clearResults,
 
     // Prompts
     addCustomPrompt, addMultiplePrompts, generateNichePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt,
@@ -3405,7 +3552,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,
-    citationMeta, categorizeCitations, verifyCitations,
+    citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress,
 
     // Constants
     INDUSTRY_PRESETS, LOCATION_CODES,

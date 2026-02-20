@@ -1,7 +1,7 @@
 # Forzeo Platform - Complete Database Architecture
 
-**Version:** 2.0  
-**Last Updated:** January 2026
+**Version:** 3.0  
+**Last Updated:** February 2026
 
 ---
 
@@ -334,19 +334,36 @@ CREATE TABLE citation_intelligence (
   title TEXT,
   model TEXT,
   
-  -- Verification
+  -- Legacy Verification
   is_reachable BOOLEAN,
   http_status INTEGER,
   last_verified_at TIMESTAMPTZ,
-  
-  -- Hallucination Detection
   is_hallucinated BOOLEAN DEFAULT FALSE,
   hallucination_type TEXT,
   
-  -- Classification
+  -- Classification (AI-powered via Gemini 2.0 Flash)
   citation_category TEXT DEFAULT 'other',
   subcategory TEXT,
   opportunity_level TEXT DEFAULT 'medium',
+  
+  -- Tiered Categorization (added via migration)
+  relationship_type TEXT DEFAULT 'neutral',    -- owned, competitor, neutral, affiliate
+  source_type TEXT DEFAULT 'other',            -- ugc, editorial, review, wiki, social, comparison, local, other
+  authority_tier INTEGER DEFAULT 2,            -- 1=high trust (.gov/.edu/wiki), 2=publishers, 3=forums/UGC
+  is_affiliate BOOLEAN DEFAULT FALSE,
+  affiliate_type TEXT,
+  
+  -- Semantic Verification (via Jina + Groq)
+  verification_status TEXT DEFAULT 'pending',  -- verified, partially_verified, hallucinated, pending, error
+  similarity_score FLOAT,                      -- 0.0–1.0 semantic similarity
+  matched_paragraph TEXT,                      -- excerpt matching the claim
+  page_fetch_status INTEGER,                   -- HTTP status from Jina Reader
+  verified_at TIMESTAMPTZ,                     -- 24h cache TTL
+  page_content TEXT,                           -- cached page content for hover preview
+  
+  -- Enhanced Tags (array-based)
+  intent_tags TEXT[],                          -- pricing, alternatives, comparison, best_of, etc.
+  trust_tags TEXT[],                           -- high_authority, ugc_unverified, sponsored, etc.
   
   -- Brand Analysis
   brand_mentioned_in_source BOOLEAN DEFAULT FALSE,
@@ -357,27 +374,24 @@ CREATE TABLE citation_intelligence (
   ai_analysis JSONB,
   analysis_status TEXT DEFAULT 'pending',
   
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ
 );
 ```
 
-**Citation Categories:**
-- `ugc`: Reddit, Quora, LinkedIn
-- `competitor_blog`: Competitor owned content
-- `press_media`: Forbes, TechCrunch, WSJ
-- `app_store`: Google Play, App Store
-- `wikipedia`: Wikipedia articles
-- `brand_owned`: Client's own domain
+**Citation Categories (via Gemini 2.0 Flash):**
+- `editorial`, `ugc`, `social`, `ecommerce`, `competitor`, `owned`, `reference`, `press`, `institutional`, `review`, `local`, `other`
 
-**Opportunity Levels:**
-- `easy`: Direct action possible (UGC, competitor blogs)
-- `medium`: Requires outreach (press, app stores)
-- `difficult`: High barriers (Wikipedia)
+**Verification Statuses:**
+- `verified` (>0.85 + entity match), `partially_verified` (0.50–0.84), `hallucinated` (<0.50), `pending`, `error`
 
-**Hallucination Detection:**
-1. HTTP HEAD request to verify URL
-2. Check if content matches AI claim
-3. Classify type: `unreachable`, `misattributed`, `contradictory`
+**Key Indexes:**
+```sql
+CREATE INDEX idx_citation_verification_status ON citation_intelligence(verification_status);
+CREATE INDEX idx_citation_verified_at ON citation_intelligence(verified_at);
+CREATE INDEX idx_citation_intent_tags ON citation_intelligence USING GIN (intent_tags);
+CREATE INDEX idx_citation_trust_tags ON citation_intelligence USING GIN (trust_tags);
+```
 
 ---
 
@@ -723,6 +737,76 @@ CREATE TABLE execution_events (
 | **recommendation_sources** | Multi-source recommendations | Confidence scoring & attribution |
 | **domain_authority_history** | Authority trend tracking | Predict domain reputation changes |
 | **execution_events** | Event logging | Debugging & monitoring |
+| **notifications** | Admin notification system | Signup alerts, in-app notifications |
+| **account_groups** | Multi-brand grouping | Quick brand selection for scheduling |
+| **execution_locks** | Concurrent execution prevention | Schedule safety |
+| **schedule_analytics** | Performance tracking | Schedule optimization |
+
+---
+
+## Notifications Schema
+
+### Notifications
+
+```sql
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,            -- 'signup', 'alert', 'warning'
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  metadata JSONB,               -- flexible additional data
+  is_read BOOLEAN DEFAULT FALSE,
+  read_at TIMESTAMPTZ
+);
+```
+
+**RLS:** Admin-only access via `profiles.role = 'admin'` check.
+
+---
+
+## Multi-Account Scheduler Schema
+
+### prompt_schedules (Enhanced)
+
+Added columns for multi-brand scheduling:
+```sql
+ALTER TABLE prompt_schedules
+  ADD COLUMN client_ids UUID[],            -- array of brand IDs
+  ADD COLUMN recurrence_type TEXT,          -- once, daily, weekly, monthly
+  ADD COLUMN timezone TEXT DEFAULT 'UTC',   -- IANA timezone
+  ADD COLUMN models TEXT[];                 -- selected AI models
+
+-- client_id made nullable (multi-account schedules use client_ids instead)
+ALTER TABLE prompt_schedules ALTER COLUMN client_id DROP NOT NULL;
+```
+
+### Supporting Tables
+
+```sql
+-- Named groups of brands for quick selection
+CREATE TABLE account_groups (
+  id UUID PRIMARY KEY, name TEXT, client_ids UUID[], created_by UUID
+);
+
+-- Prevent concurrent execution of the same schedule
+CREATE TABLE execution_locks (
+  id UUID PRIMARY KEY, schedule_id UUID, locked_at TIMESTAMPTZ, locked_by TEXT
+);
+
+-- Performance metrics per schedule
+CREATE TABLE schedule_analytics (
+  id UUID PRIMARY KEY, schedule_id UUID, run_id UUID,
+  duration_ms INTEGER, prompts_executed INTEGER, cost DECIMAL
+);
+
+-- Conditional execution rules
+CREATE TABLE conditional_execution_rules (
+  id UUID PRIMARY KEY, schedule_id UUID,
+  rule_type TEXT, condition JSONB, action TEXT
+);
+```
 
 ---
 

@@ -26,6 +26,7 @@ import { useClientDashboard, AI_MODELS, cleanAndAnalyzeResponse } from "@/hooks/
 import { MODEL_LOGOS } from "@/components/ModelLogos";
 import { ScheduleManager } from "@/components/ScheduleManager";
 import { UniversalImport } from "@/components/UniversalImport";
+import MultiAccountScheduler from "@/components/MultiAccountScheduler";
 // CampaignsList/CampaignDetail replaced by inline TopicsTab
 // import { CampaignsList } from "@/components/CampaignsList";
 // import { CampaignDetail } from "@/components/CampaignDetail";
@@ -45,6 +46,16 @@ const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; d
   social: { label: "Social", color: "text-pink-700", bg: "bg-pink-100", dot: "#ec4899" },
   ecommerce: { label: "E-commerce", color: "text-orange-700", bg: "bg-orange-100", dot: "#f97316" },
   other: { label: "Other", color: "text-gray-700", bg: "bg-gray-100", dot: "#6b7280" },
+};
+
+// Map old/mismatched AI category names to valid DOMAIN_TYPES keys
+const normalizeCitationCategory = (cat?: string): string => {
+  if (!cat) return 'other';
+  const map: Record<string, string> = {
+    review_sites: 'review', comparison_sites: 'review', blogs: 'editorial',
+    marketplaces: 'ecommerce', directories: 'ecommerce', reference_authority: 'reference',
+  };
+  return map[cat] || (DOMAIN_TYPES[cat] ? cat : 'other');
 };
 
 function classifyDomain(domain: string, clientDomain?: string, competitors?: string[], brandName?: string): string {
@@ -170,14 +181,14 @@ interface ClientDashboardProps {
 }
 
 export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: ClientDashboardProps = {}) {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands">(() => {
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler">(() => {
     // Restore from localStorage on mount
     try {
       const saved = localStorage.getItem('forzeo_activeTab');
-      const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands"];
+      const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler"];
       return (saved && validTabs.includes(saved)) ? saved as any : "overview";
     } catch { return "overview"; }
   });
@@ -204,7 +215,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [editingLocationPromptId, setEditingLocationPromptId] = useState<string | null>(null);
   const [editingLocationValue, setEditingLocationValue] = useState<string>("");
   const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
-  const [categorizationProgress, setCategorizationProgress] = useState<{ completed: number; total: number; currentBatch: number; totalBatches: number; running: boolean } | null>(null);
+  // categorizationProgress is now provided by the hook (shared between auto-categorize and manual button)
   const [verificationProgress, setVerificationProgress] = useState<{ completed: number; total: number; currentBatch: number; totalBatches: number; running: boolean } | null>(null);
   const [hoveredCitation, setHoveredCitation] = useState<{ domain: string; url: string; mouseX: number; mouseY: number } | null>(null);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -380,21 +391,35 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     const allBrands = [brandName, ...competitors];
 
     const now = new Date();
+
+    // Use LOCAL date key (not UTC) to avoid timezone shift for IST (+5:30) users
+    const localDateKey = (d: Date): string => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    const localMonthKey = (d: Date): string => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      return `${y}-${m}`;
+    };
+
     let cutoff: Date;
     let bucketFn: (d: Date) => string;
     let labelFn: (k: string) => string;
 
     if (sovTimeRange === "week") {
       cutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-      bucketFn = (d) => d.toISOString().slice(0, 10);
+      bucketFn = localDateKey;
       labelFn = (k) => new Date(k + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
     } else if (sovTimeRange === "month") {
       cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      bucketFn = (d) => d.toISOString().slice(0, 10);
+      bucketFn = localDateKey;
       labelFn = (k) => new Date(k + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
     } else {
       cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-      bucketFn = (d) => d.toISOString().slice(0, 7);
+      bucketFn = localMonthKey;
       labelFn = (k) => { const [y, m] = k.split("-"); return new Date(+y, +m - 1).toLocaleDateString("en-US", { month: "short", year: "2-digit" }); };
     }
 
@@ -429,21 +454,26 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     if (dataKeys.length === 0) return { labels: [] as string[], series: [] as Array<{ name: string; isClient: boolean; domain: string; data: (number | null)[] }> };
 
     const allKeys: string[] = [];
+    const todayKey = localDateKey(now);
+    const currentMonthKey = localMonthKey(now);
+
     if (sovTimeRange === "year") {
-      const first = dataKeys[0], last = dataKeys[dataKeys.length - 1];
+      const first = dataKeys[0];
       const [fy, fm] = first.split("-").map(Number);
-      const [ly, lm] = last.split("-").map(Number);
+      const [cy, cm] = currentMonthKey.split("-").map(Number);
       const cur = new Date(fy, fm - 1, 1);
-      const end = new Date(ly, lm - 1, 1);
+      const end = new Date(cy, cm - 1, 1); // Always end at current month
       while (cur <= end) {
-        allKeys.push(cur.toISOString().slice(0, 7));
+        allKeys.push(localMonthKey(cur));
         cur.setMonth(cur.getMonth() + 1);
       }
     } else {
-      const cur = new Date(dataKeys[0] + "T00:00:00");
-      const end = new Date(dataKeys[dataKeys.length - 1] + "T00:00:00");
+      // Always start from the earliest data point but extend to TODAY (in local time)
+      const startKey = dataKeys[0];
+      const cur = new Date(startKey + "T00:00:00");
+      const end = new Date(todayKey + "T00:00:00"); // Always today, not last data point
       while (cur <= end) {
-        allKeys.push(cur.toISOString().slice(0, 10));
+        allKeys.push(localDateKey(cur));
         cur.setDate(cur.getDate() + 1);
       }
     }
@@ -461,13 +491,21 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       name: brand,
       isClient: brand === brandName,
       domain: brand === brandName ? brandDomain : `${brand.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
-      data: allKeys.map(k => {
-        const bucket = buckets[k];
-        if (!bucket) return null;
-        const total = Object.values(bucket).reduce((a, b) => a + b, 0);
-        return total > 0 ? Math.round(((bucket[brand] || 0) / total) * 100) : null;
-      }),
+      data: (() => {
+        let lastVal: number = 0;
+        return allKeys.map(k => {
+          const bucket = buckets[k];
+          if (bucket) {
+            const total = Object.values(bucket).reduce((a, b) => a + b, 0);
+            if (total > 0) {
+              lastVal = Math.round(((bucket[brand] || 0) / total) * 100);
+            }
+          }
+          return lastVal;
+        });
+      })(),
     }));
+
 
     return { labels, series };
   }, [selectedClient, auditResults, sovTimeRange]);
@@ -725,9 +763,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
         mr.citations.forEach(c => {
           // Use AI category if available, else fallback to static
-          const aiType = citationMeta?.[c.domain]?.category;
+          const aiType = normalizeCitationCategory(citationMeta?.[c.domain]?.category);
           const staticType = classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
-          const finalType = aiType || staticType;
+          const finalType = (aiType && aiType !== 'other') ? aiType : staticType;
 
           if (!stats[c.domain]) stats[c.domain] = { count: 0, type: finalType, avg: 0, models: new Set(), prompts: new Map() };
           stats[c.domain].count++;
@@ -1189,6 +1227,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true },
 
             { id: "schedules", label: "Schedules", icon: Clock },
+            { id: "bulk_scheduler", label: "Bulk Scheduler", icon: Calendar },
             { id: "future-citations", label: "Future Citations", icon: Zap, betaBadge: true },
             { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null },
             { id: "content", label: "Content", icon: FileText }
@@ -1199,8 +1238,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             if (isAgency) {
               return ["overview", "prompts", "topics", "insights", "future-citations", "sources", "content", "brands"].includes(item.id);
             }
-            // Normal users see limited tabs
-            return !["schedules", "future-citations"].includes(item.id);
+            // Normal users see limited tabs (bulk_scheduler is admin-only)
+            return !["schedules", "future-citations", "bulk_scheduler"].includes(item.id);
           }).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
@@ -1299,7 +1338,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               </button>
               <h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2 truncate">
                 <FileText className="h-5 w-5 text-gray-400 hidden sm:block" />
-                <span className="truncate">{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "future-citations" ? "Future Citations" : activeTab === "topics" ? "Topics" : activeTab === "content" ? "Content Generator" : activeTab === "insights" ? "Insights" : "Citations"}</span>
+                <span className="truncate">{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "bulk_scheduler" ? "Bulk Scheduler" : activeTab === "future-citations" ? "Future Citations" : activeTab === "topics" ? "Topics" : activeTab === "content" ? "Content Generator" : activeTab === "insights" ? "Insights" : "Citations"}</span>
               </h1>
               {(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs hidden sm:inline-flex">Filtered</Badge>}
             </div>
@@ -1435,6 +1474,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           {activeTab === "brands" && BrandsTab()}
           {activeTab === "prompts" && PromptsTab()}
           {activeTab === "schedules" && selectedClient && <ScheduleManager clientId={selectedClient.id} prompts={prompts} selectedModels={selectedModels} />}
+          {activeTab === "bulk_scheduler" && isAdmin && <MultiAccountScheduler clients={clients} selectedModels={selectedModels} />}
           {activeTab === "future-citations" && selectedClient && <SignalsDashboard clientId={selectedClient.id} brandName={selectedClient.brand_name} />}
           {activeTab === "topics" && selectedClient && TopicsTab()}
           {activeTab === "citations" && CitationsTab()}
@@ -1578,11 +1618,16 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               <DonutChart value={allCitations.length} size={160} segments={typeSegments} />
               <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 mt-4 text-xs">
                 {(() => {
-                  const displaySegs = typeSegments.slice(0, 6);
-                  const otherCount = typeSegments.slice(6).reduce((sum, s) => sum + s.count, 0);
+                  const otherOverflow = typeSegments.slice(6).reduce((sum, s) => sum + s.count, 0);
+                  // Merge overflow into existing "other" segment if present in top 6
+                  const hasOtherInTop6 = typeSegments.slice(0, 6).some(s => s.type === 'other');
+                  const displaySegs = typeSegments.slice(0, 6).map(s =>
+                    s.type === 'other' ? { ...s, count: s.count + otherOverflow } : s
+                  );
+                  const extraOtherCount = hasOtherInTop6 ? 0 : otherOverflow;
                   const items = [
                     ...displaySegs.map(s => ({ key: s.type, value: s.count })),
-                    ...(otherCount > 0 ? [{ key: "__other__", value: otherCount }] : []),
+                    ...(extraOtherCount > 0 ? [{ key: "__other__", value: extraOtherCount }] : []),
                   ];
                   const pctMap = roundToHundred(items);
                   return (
@@ -1597,7 +1642,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           </div>
                         );
                       })}
-                      {otherCount > 0 && (
+                      {extraOtherCount > 0 && (
                         <div className="flex items-center gap-1.5">
                           <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: "#6b7280" }} />
                           <span className="text-gray-700 font-medium">Other</span>
@@ -2409,18 +2454,16 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 size="sm"
                 disabled={!!categorizationProgress?.running}
                 onClick={async () => {
-                  const uncategorized = domainStats
-                    .filter(d => !citationMeta?.[d.domain])
-                    .map(d => d.domain);
+                  const allDomains = domainStats.map(d => d.domain);
 
-                  if (uncategorized.length === 0) {
-                    toast.success("All domains categorized!");
+                  if (allDomains.length === 0) {
+                    toast.success("No domains to categorize!");
                     return;
                   }
 
-                  setCategorizationProgress({ completed: 0, total: uncategorized.length, currentBatch: 0, totalBatches: Math.ceil(uncategorized.length / 40), running: true });
+                  setCategorizationProgress({ completed: 0, total: allDomains.length, currentBatch: 0, totalBatches: Math.ceil(allDomains.length / 100), running: true });
 
-                  await categorizeCitations(uncategorized, (progress) => {
+                  await categorizeCitations(allDomains, (progress) => {
                     setCategorizationProgress({ ...progress, running: progress.completed < progress.total });
                   });
 
@@ -2636,8 +2679,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {(displayedStats as typeof domainStats).filter(s => sourcesTypeFilter === "all" || classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name) === sourcesTypeFilter).map((s, i) => {
-                    const type = classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
+                  {(displayedStats as typeof domainStats).filter(s => { const nc = normalizeCitationCategory(citationMeta?.[s.domain]?.category); const ft = (nc && nc !== 'other') ? nc : classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name); return sourcesTypeFilter === "all" || ft === sourcesTypeFilter; }).map((s, i) => {
+                    const nc = normalizeCitationCategory(citationMeta?.[s.domain]?.category); const type = (nc && nc !== 'other') ? nc : classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
                     const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
                     const isExpanded = expandedDomain === s.domain;
                     const domainCitations = allCitations.filter(c => c.domain === s.domain);
@@ -2677,7 +2720,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           </td>
                           <td className="px-6 py-4">
                             {(() => {
-                              const type = classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
+                              const nc = normalizeCitationCategory(citationMeta?.[s.domain]?.category); const type = (nc && nc !== 'other') ? nc : classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
                               const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
                               return <span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span>;
                             })()}
@@ -2833,8 +2876,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredUrlCitations.filter(c => sourcesTypeFilter === "all" || classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors) === sourcesTypeFilter).map((c, i) => {
-                    const type = classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors);
+                  {filteredUrlCitations.filter(c => { const nc = normalizeCitationCategory(citationMeta?.[c.domain]?.category); const ft = (nc && nc !== 'other') ? nc : classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors); return sourcesTypeFilter === "all" || ft === sourcesTypeFilter; }).map((c, i) => {
+                    const nc = normalizeCitationCategory(citationMeta?.[c.domain]?.category); const type = (nc && nc !== 'other') ? nc : classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors);
                     const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
                     return (
                       <tr
@@ -2980,7 +3023,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filteredCitations.map((c, i) => {
-                    const t = DOMAIN_TYPES[classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name)] || DOMAIN_TYPES.other;
+                    const nc3 = normalizeCitationCategory(citationMeta?.[c.domain]?.category); const t = DOMAIN_TYPES[(nc3 && nc3 !== 'other') ? nc3 : classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name)] || DOMAIN_TYPES.other;
                     return (
                       <tr key={i} className={cn("hover:bg-gray-50 transition-colors group cursor-pointer border-b border-gray-50 last:border-0", selectedCitation === c.url && "bg-blue-50/50")} onClick={() => setSelectedCitation(c.url)}>
                         <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
@@ -4520,7 +4563,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     </div>
                   ) : (
                     uniqueCitations.map((c, i) => {
-                      const t = DOMAIN_TYPES[classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name)] || DOMAIN_TYPES.other;
+                      const nc4 = normalizeCitationCategory(citationMeta?.[c.domain]?.category); const t = DOMAIN_TYPES[(nc4 && nc4 !== 'other') ? nc4 : classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name)] || DOMAIN_TYPES.other;
                       const modelsUsing = allPromptCitations.filter(x => x.url === c.url).map(x => x.model);
                       return (
                         <div key={i} className="flex items-start gap-4 p-4 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow">

@@ -1,0 +1,13 @@
+
+> forzeo-geo-dashboard@2.0.0 build
+> tsc && vite build
+
+src/components/MultiAccountScheduler.tsx(8,58): error TS2307: Cannot find module '@/components/ui/tabs' or its corresponding type declarations.
+src/components/scheduler/AnalyticsDashboard.tsx(12,8): error TS2307: Cannot find module '@/components/ui/table' or its corresponding type declarations.
+src/components/scheduler/AnalyticsDashboard.tsx(13,26): error TS2307: Cannot find module '@/components/ui/calendar' or its corresponding type declarations.
+src/components/scheduler/AnalyticsDashboard.tsx(18,8): error TS2307: Cannot find module '@/components/ui/popover' or its corresponding type declarations.
+src/components/scheduler/ExecutionMonitor.tsx(4,26): error TS2307: Cannot find module '@/components/ui/progress' or its corresponding type declarations.
+src/components/scheduler/ExecutionMonitor.tsx(11,8): error TS2307: Cannot find module '@/components/ui/collapsible' or its corresponding type declarations.
+src/components/scheduler/ExecutionMonitor.tsx(16,8): error TS2307: Cannot find module '@/components/ui/alert' or its corresponding type declarations.
+src/components/scheduler/PromptSelector.tsx(3,44): error TS2307: Cannot find module '@/components/ui/radio-group' or its corresponding type declarations.
+src/components/scheduler/PromptSelector.tsx(12,8): error TS2307: Cannot find module '@/components/ui/collapsible' or its corresponding type declarations.

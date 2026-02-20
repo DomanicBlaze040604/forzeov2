@@ -1,0 +1,7 @@
+
+> forzeo-geo-dashboard@2.0.0 build
+> tsc && vite build
+
+src/components/ui/calendar.tsx(54,9): error TS2353: Object literal may only specify known properties, and 'IconLeft' does not exist in type 'Partial<CustomComponents>'.
+src/components/ui/calendar.tsx(54,20): error TS6133: 'props' is declared but its value is never read.
+src/components/ui/calendar.tsx(55,21): error TS6133: 'props' is declared but its value is never read.

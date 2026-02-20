@@ -1,16 +1,22 @@
 // @ts-nocheck
 /**
  * ============================================================================
- * SCHEDULER EDGE FUNCTION
+ * ENHANCED SCHEDULER EDGE FUNCTION v2.0
  * ============================================================================
- * 
+ *
  * Background scheduler for auto-running prompts at configured intervals.
- * Checks prompt_schedules table for due runs and executes them.
- * 
+ * Supports both single-account and multi-account schedules.
+ *
+ * NEW FEATURES:
+ * - Multi-account schedule support (delegates to multi-account-runner)
+ * - Execution locks to prevent duplicate runs
+ * - Enhanced recurrence (daily, weekly, monthly)
+ * - Timezone-aware scheduling
+ *
  * This function should be called periodically (e.g., every minute via cron)
  * or can be invoked manually to process pending schedules.
- * 
- * @version 1.0.0
+ *
+ * @version 2.0.0
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -47,7 +53,8 @@ const DATAFORSEO_AUTH = btoa(`${DATAFORSEO_LOGIN}:${DATAFORSEO_PASSWORD}`);
 
 interface Schedule {
     id: string;
-    client_id: string;
+    client_id: string | null;
+    client_ids: string[] | null; // Multi-account support
     prompt_id: string | null;
     name: string;
     interval_value: number;
@@ -58,6 +65,10 @@ interface Schedule {
     last_run_at: string | null;
     next_run_at: string | null;
     total_runs: number;
+    recurrence_type: string; // 'once', 'daily', 'weekly', 'monthly'
+    recurrence_days_of_week: number[] | null;
+    recurrence_day_of_month: number | null;
+    timezone: string | null;
 }
 
 interface Client {
@@ -75,32 +86,132 @@ interface Prompt {
 }
 
 // ============================================
-// HELPER FUNCTIONS
+// EXECUTION LOCK MANAGEMENT
 // ============================================
 
-function calculateNextRun(intervalValue: number, intervalUnit: string): Date {
-    const now = new Date();
-    let ms = 0;
+async function acquireExecutionLock(
+    supabase: ReturnType<typeof createClient>,
+    scheduleId: string
+): Promise<boolean> {
+    try {
+        const expiresAt = new Date(Date.now() + 3600000); // 1 hour from now
+        const lockedBy = `scheduler-${Deno.env.get("DENO_DEPLOYMENT_ID") || "local"}`;
 
-    switch (intervalUnit) {
-        case "seconds":
-            ms = intervalValue * 1000;
-            break;
-        case "minutes":
-            ms = intervalValue * 60 * 1000;
-            break;
-        case "hours":
-            ms = intervalValue * 60 * 60 * 1000;
-            break;
-        case "days":
-            ms = intervalValue * 24 * 60 * 60 * 1000;
-            break;
-        default:
-            ms = intervalValue * 60 * 1000; // Default to minutes
+        const { error } = await supabase
+            .from("execution_locks")
+            .insert({
+                schedule_id: scheduleId,
+                locked_by: lockedBy,
+                expires_at: expiresAt.toISOString(),
+            });
+
+        // If unique constraint violation (error code 23505), lock already exists
+        if (error?.code === "23505") {
+            console.log(`[Scheduler] Schedule ${scheduleId} already locked`);
+            return false;
+        }
+
+        if (error) {
+            console.error("[Scheduler] Failed to acquire lock:", error);
+            return false;
+        }
+
+        console.log(`[Scheduler] Acquired lock for schedule ${scheduleId}`);
+        return true;
+    } catch (err) {
+        console.error("[Scheduler] Lock acquisition error:", err);
+        return false;
+    }
+}
+
+async function releaseExecutionLock(
+    supabase: ReturnType<typeof createClient>,
+    scheduleId: string
+): Promise<void> {
+    try {
+        await supabase
+            .from("execution_locks")
+            .delete()
+            .eq("schedule_id", scheduleId);
+
+        console.log(`[Scheduler] Released lock for schedule ${scheduleId}`);
+    } catch (err) {
+        console.error("[Scheduler] Failed to release lock:", err);
+    }
+}
+
+// ============================================
+// RECURRENCE CALCULATION
+// ============================================
+
+function calculateNextRun(schedule: Schedule): Date {
+    const now = new Date();
+
+    // For legacy schedules with interval_unit
+    if (schedule.interval_unit && !schedule.recurrence_type) {
+        let ms = 0;
+        switch (schedule.interval_unit) {
+            case "seconds":
+                ms = schedule.interval_value * 1000;
+                break;
+            case "minutes":
+                ms = schedule.interval_value * 60 * 1000;
+                break;
+            case "hours":
+                ms = schedule.interval_value * 60 * 60 * 1000;
+                break;
+            case "days":
+                ms = schedule.interval_value * 24 * 60 * 60 * 1000;
+                break;
+            default:
+                ms = schedule.interval_value * 60 * 1000;
+        }
+        return new Date(now.getTime() + ms);
     }
 
-    return new Date(now.getTime() + ms);
+    // For new recurrence-based schedules
+    switch (schedule.recurrence_type) {
+        case "daily":
+            // Add 1 day
+            return new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+        case "weekly": {
+            // Run on specific days of week
+            const daysOfWeek = schedule.recurrence_days_of_week || [now.getDay()];
+            const currentDay = now.getDay(); // 0=Sunday, 6=Saturday
+
+            // Find next matching day
+            let daysUntilNext = 1;
+            for (let i = 1; i <= 7; i++) {
+                const checkDay = (currentDay + i) % 7;
+                if (daysOfWeek.includes(checkDay)) {
+                    daysUntilNext = i;
+                    break;
+                }
+            }
+
+            return new Date(now.getTime() + daysUntilNext * 24 * 60 * 60 * 1000);
+        }
+
+        case "monthly": {
+            // Run on specific day of month
+            const dayOfMonth = schedule.recurrence_day_of_month || 1;
+            const nextMonth = new Date(now);
+            nextMonth.setMonth(nextMonth.getMonth() + 1);
+            nextMonth.setDate(Math.min(dayOfMonth, new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate()));
+            return nextMonth;
+        }
+
+        case "once":
+        default:
+            // For one-time schedules, set far future or null
+            return new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year
+    }
 }
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
 
 function extractDomain(url: string): string {
     try {
@@ -336,10 +447,10 @@ function parseBrandData(
 }
 
 // ============================================
-// PROCESS SCHEDULE
+// PROCESS SINGLE-ACCOUNT SCHEDULE
 // ============================================
 
-async function processSchedule(
+async function processSingleAccountSchedule(
     supabase: ReturnType<typeof createClient>,
     schedule: Schedule,
     client: Client,
@@ -347,7 +458,7 @@ async function processSchedule(
 ): Promise<{ success: boolean; error?: string }> {
     const promptText = prompt?.prompt_text || schedule.name;
 
-    console.log(`[Scheduler] Processing schedule "${schedule.name}" for prompt: "${promptText.substring(0, 50)}..."`);
+    console.log(`[Scheduler] Processing single-account schedule "${schedule.name}" for prompt: "${promptText.substring(0, 50)}..."`);
 
     // Create run record
     const { data: run, error: runError } = await supabase
@@ -451,7 +562,7 @@ async function processSchedule(
             .update({
                 status: "completed",
                 share_of_voice: shareOfVoice,
-                visibility_score: shareOfVoice, // Using SOV as visibility score
+                visibility_score: shareOfVoice,
                 average_rank: averageRank,
                 total_citations: totalCitations,
                 total_cost: totalCost,
@@ -462,22 +573,11 @@ async function processSchedule(
             })
             .eq("id", run.id);
 
-        // Update schedule with next run time
-        const nextRun = calculateNextRun(schedule.interval_value, schedule.interval_unit);
-        await supabase
-            .from("prompt_schedules")
-            .update({
-                last_run_at: new Date().toISOString(),
-                next_run_at: nextRun.toISOString(),
-                total_runs: schedule.total_runs + 1,
-            })
-            .eq("id", schedule.id);
-
-        console.log(`[Scheduler] Completed schedule "${schedule.name}" - SOV: ${shareOfVoice}%, Next run: ${nextRun.toISOString()}`);
+        console.log(`[Scheduler] Completed single-account schedule "${schedule.name}" - SOV: ${shareOfVoice}%`);
         return { success: true };
 
     } catch (err) {
-        console.error("[Scheduler] Error processing schedule:", err);
+        console.error("[Scheduler] Error processing single-account schedule:", err);
 
         // Mark run as failed
         await supabase
@@ -554,37 +654,122 @@ serve(async (req: Request) => {
         const results: Array<{ schedule_id: string; name: string; success: boolean; error?: string }> = [];
 
         for (const schedule of schedules as Schedule[]) {
-            // Get client
-            const { data: client } = await supabase
-                .from("clients")
-                .select("*")
-                .eq("id", schedule.client_id)
-                .single();
+            // Check if this is a multi-account schedule
+            const isMultiAccount = schedule.client_ids && schedule.client_ids.length > 0;
 
-            if (!client) {
-                results.push({ schedule_id: schedule.id, name: schedule.name, success: false, error: "Client not found" });
+            // Acquire execution lock
+            const lockAcquired = await acquireExecutionLock(supabase, schedule.id);
+            if (!lockAcquired) {
+                console.log(`[Scheduler] Skipping schedule ${schedule.id} - already running`);
+                results.push({
+                    schedule_id: schedule.id,
+                    name: schedule.name,
+                    success: false,
+                    error: "Schedule already running (lock held)"
+                });
                 continue;
             }
 
-            // Get prompt if linked
-            let prompt: Prompt | null = null;
-            if (schedule.prompt_id) {
-                const { data: promptData } = await supabase
-                    .from("prompts")
-                    .select("*")
-                    .eq("id", schedule.prompt_id)
-                    .single();
-                prompt = promptData as Prompt | null;
-            }
+            try {
+                if (isMultiAccount) {
+                    // Multi-account schedule: Delegate to multi-account-runner
+                    console.log(`[Scheduler] Delegating multi-account schedule "${schedule.name}" to multi-account-runner`);
 
-            // Process schedule
-            const result = await processSchedule(supabase, schedule, client as Client, prompt);
-            results.push({
-                schedule_id: schedule.id,
-                name: schedule.name,
-                success: result.success,
-                error: result.error,
-            });
+                    const { data, error } = await supabase.functions.invoke('multi-account-runner', {
+                        body: {
+                            schedule: schedule,
+                            force: false // Don't force, respect conditional rules
+                        }
+                    });
+
+                    if (error) {
+                        throw new Error(`Multi-account runner failed: ${error.message}`);
+                    }
+
+                    results.push({
+                        schedule_id: schedule.id,
+                        name: schedule.name,
+                        success: true
+                    });
+                } else {
+                    // Single-account schedule: Process directly
+                    // Get client
+                    const { data: client } = await supabase
+                        .from("clients")
+                        .select("*")
+                        .eq("id", schedule.client_id)
+                        .single();
+
+                    if (!client) {
+                        results.push({
+                            schedule_id: schedule.id,
+                            name: schedule.name,
+                            success: false,
+                            error: "Client not found"
+                        });
+                        continue;
+                    }
+
+                    // Get prompt if linked
+                    let prompt: Prompt | null = null;
+                    if (schedule.prompt_id) {
+                        const { data: promptData } = await supabase
+                            .from("prompts")
+                            .select("*")
+                            .eq("id", schedule.prompt_id)
+                            .single();
+                        prompt = promptData as Prompt | null;
+                    }
+
+                    // Process single-account schedule
+                    const result = await processSingleAccountSchedule(supabase, schedule, client as Client, prompt);
+                    results.push({
+                        schedule_id: schedule.id,
+                        name: schedule.name,
+                        success: result.success,
+                        error: result.error,
+                    });
+                }
+
+                // Update schedule with next run time (for both types)
+                if (schedule.recurrence_type !== "once") {
+                    const nextRun = calculateNextRun(schedule);
+                    await supabase
+                        .from("prompt_schedules")
+                        .update({
+                            last_run_at: new Date().toISOString(),
+                            next_run_at: nextRun.toISOString(),
+                            total_runs: schedule.total_runs + 1,
+                        })
+                        .eq("id", schedule.id);
+
+                    console.log(`[Scheduler] Next run for "${schedule.name}": ${nextRun.toISOString()}`);
+                } else {
+                    // For one-time schedules, deactivate after run
+                    await supabase
+                        .from("prompt_schedules")
+                        .update({
+                            last_run_at: new Date().toISOString(),
+                            is_active: false,
+                            total_runs: schedule.total_runs + 1,
+                        })
+                        .eq("id", schedule.id);
+
+                    console.log(`[Scheduler] One-time schedule "${schedule.name}" completed and deactivated`);
+                }
+
+            } catch (err) {
+                console.error(`[Scheduler] Error processing schedule ${schedule.id}:`, err);
+                results.push({
+                    schedule_id: schedule.id,
+                    name: schedule.name,
+                    success: false,
+                    error: String(err)
+                });
+            } finally {
+                // Always release lock
+                await releaseExecutionLock(supabase, schedule.id);
+            }
         }
 
         const successCount = results.filter(r => r.success).length;

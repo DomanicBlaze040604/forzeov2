@@ -28,22 +28,30 @@ function catmullRomPath(points: { x: number; y: number }[], alpha = 0.5): string
   for (let i = 1; i < pts.length - 2; i++) {
     const p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2];
 
-    const d1 = Math.sqrt(Math.pow(p1.x - p0.x, 2) + Math.pow(p1.y - p0.y, 2));
-    const d2 = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-    const d3 = Math.sqrt(Math.pow(p3.x - p2.x, 2) + Math.pow(p3.y - p2.y, 2));
+    const eps = 1e-6; // Prevent division by zero for flat/identical points
+    const d1 = Math.max(eps, Math.sqrt(Math.pow(p1.x - p0.x, 2) + Math.pow(p1.y - p0.y, 2)));
+    const d2 = Math.max(eps, Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)));
+    const d3 = Math.max(eps, Math.sqrt(Math.pow(p3.x - p2.x, 2) + Math.pow(p3.y - p2.y, 2)));
 
     const d1a = Math.pow(d1, alpha), d2a = Math.pow(d2, alpha), d3a = Math.pow(d3, alpha);
     const d1a2 = Math.pow(d1, 2 * alpha), d2a2 = Math.pow(d2, 2 * alpha), d3a2 = Math.pow(d3, 2 * alpha);
 
-    const b1x = (d1a2 * p2.x - d2a2 * p0.x + (2 * d1a2 + 3 * d1a * d2a + d2a2) * p1.x) / (3 * d1a * (d1a + d2a));
-    const b1y = (d1a2 * p2.y - d2a2 * p0.y + (2 * d1a2 + 3 * d1a * d2a + d2a2) * p1.y) / (3 * d1a * (d1a + d2a));
-    const b2x = (d3a2 * p1.x - d2a2 * p3.x + (2 * d3a2 + 3 * d3a * d2a + d2a2) * p2.x) / (3 * d3a * (d3a + d2a));
-    const b2y = (d3a2 * p1.y - d2a2 * p3.y + (2 * d3a2 + 3 * d3a * d2a + d2a2) * p2.y) / (3 * d3a * (d3a + d2a));
+    const denom1 = 3 * d1a * (d1a + d2a);
+    const denom2 = 3 * d3a * (d3a + d2a);
 
-    if (isNaN(b1x) || isNaN(b1y)) {
+    if (denom1 < eps || denom2 < eps) {
       d += ` L${p2.x},${p2.y}`;
     } else {
-      d += ` C${b1x},${b1y} ${b2x},${b2y} ${p2.x},${p2.y}`;
+      const b1x = (d1a2 * p2.x - d2a2 * p0.x + (2 * d1a2 + 3 * d1a * d2a + d2a2) * p1.x) / denom1;
+      const b1y = (d1a2 * p2.y - d2a2 * p0.y + (2 * d1a2 + 3 * d1a * d2a + d2a2) * p1.y) / denom1;
+      const b2x = (d3a2 * p1.x - d2a2 * p3.x + (2 * d3a2 + 3 * d3a * d2a + d2a2) * p2.x) / denom2;
+      const b2y = (d3a2 * p1.y - d2a2 * p3.y + (2 * d3a2 + 3 * d3a * d2a + d2a2) * p2.y) / denom2;
+
+      if (isNaN(b1x) || isNaN(b1y) || isNaN(b2x) || isNaN(b2y)) {
+        d += ` L${p2.x},${p2.y}`;
+      } else {
+        d += ` C${b1x},${b1y} ${b2x},${b2y} ${p2.x},${p2.y}`;
+      }
     }
   }
   return d;
@@ -66,19 +74,11 @@ export function SOVLineChart({ labels, series, height = 240 }: SOVLineChartProps
     return () => obs.disconnect();
   }, []);
 
-  // Animate on mount
   useEffect(() => {
-    let frame: number;
-    const start = performance.now();
-    const duration = 800;
-    const tick = (now: number) => {
-      const t = Math.min((now - start) / duration, 1);
-      setAnimProgress(t < 1 ? t * t * (3 - 2 * t) : 1); // smoothstep
-      if (t < 1) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [labels.length, series.length]);
+    setAnimProgress(0);
+    const timer = setTimeout(() => setAnimProgress(1), 50); // small delay then fade in
+    return () => clearTimeout(timer);
+  }, [labels.join(','), series.length]);
 
   // Compute average SOV values for summary badges (matches KPI card aggregate)
   const avgValues = useMemo(() => {
@@ -131,10 +131,33 @@ export function SOVLineChart({ labels, series, height = 240 }: SOVLineChartProps
 
   // Collect non-null points into one continuous segment (skip gaps, don't break)
   const buildPathSegments = (data: (number | null)[]) => {
+    // Find all non-null positions
+    const nonNull: { idx: number; val: number }[] = [];
+    data.forEach((v, i) => { if (v !== null) nonNull.push({ idx: i, val: v }); });
+    if (nonNull.length === 0) return [];
+
+    // Build ONE continuous path — interpolate linearly across any null gaps
     const points: { x: number; y: number; idx: number }[] = [];
-    data.forEach((v, i) => {
-      if (v !== null) points.push({ x: getX(i), y: getY(v), idx: i });
-    });
+    const firstIdx = nonNull[0].idx;
+    const lastIdx = nonNull[nonNull.length - 1].idx;
+
+    for (let i = firstIdx; i <= lastIdx; i++) {
+      let val = data[i];
+      if (val === null) {
+        // Interpolate between surrounding non-null values
+        const prev = [...nonNull].reverse().find(p => p.idx <= i);
+        const next = nonNull.find(p => p.idx > i);
+        if (prev && next) {
+          const t = (i - prev.idx) / (next.idx - prev.idx);
+          val = prev.val + t * (next.val - prev.val);
+        } else if (prev) {
+          val = prev.val;
+        } else if (next) {
+          val = next.val;
+        }
+      }
+      if (val !== null) points.push({ x: getX(i), y: getY(val), idx: i });
+    }
     return points.length > 0 ? [points] : [];
   };
 
@@ -255,55 +278,55 @@ export function SOVLineChart({ labels, series, height = 240 }: SOVLineChartProps
             />
           )}
 
-          {/* Area fills with clip for animation */}
-          <clipPath id="sov-anim-clip">
-            <rect x={pad.left} y={pad.top} width={chartW * animProgress} height={chartH + pad.bottom} />
-          </clipPath>
+          {/* Gradient fills - no clip, animate opacity */}
+          {sortedSeries.map(s => {
+            const si = s.origIdx;
+            const segments = buildPathSegments(s.data);
+            return segments.map((seg, segIdx) => {
+              const fillD = buildFillPath(seg);
+              if (!fillD) return null;
+              return (
+                <path
+                  key={`fill-${si}-${segIdx}`}
+                  d={fillD}
+                  fill={`url(#sov-g-${si})`}
+                  style={{ opacity: animProgress, transition: 'opacity 0.8s ease' }}
+                />
+              );
+            });
+          })}
 
-          <g clipPath="url(#sov-anim-clip)">
-            {/* Gradient fills for ALL series */}
-            {sortedSeries.map(s => {
-              const si = s.origIdx;
-              const segments = buildPathSegments(s.data);
-              return segments.map((seg, segIdx) => {
-                const fillD = buildFillPath(seg);
-                if (!fillD) return null;
-                return <path key={`fill-${si}-${segIdx}`} d={fillD} fill={`url(#sov-g-${si})`} />;
-              });
-            })}
-
-            {/* Lines */}
-            {sortedSeries.map(s => {
-              const si = s.origIdx;
-              const color = getColor(s, si);
-              const segments = buildPathSegments(s.data);
-              return segments.map((seg, segIdx) => (
-                <g key={`line-${si}-${segIdx}`}>
-                  {/* Glow shadow for client */}
-                  {s.isClient && (
-                    <path
-                      d={catmullRomPath(seg)}
-                      fill="none"
-                      stroke={color}
-                      strokeWidth={8}
-                      opacity={0.12}
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                    />
-                  )}
+          {/* Lines - no clip, animate opacity */}
+          {sortedSeries.map(s => {
+            const si = s.origIdx;
+            const color = getColor(s, si);
+            const segments = buildPathSegments(s.data);
+            return segments.map((seg, segIdx) => (
+              <g key={`line-${si}-${segIdx}`} style={{ opacity: animProgress, transition: 'opacity 0.8s ease' }}>
+                {/* Glow shadow for client */}
+                {s.isClient && (
                   <path
                     d={catmullRomPath(seg)}
                     fill="none"
                     stroke={color}
-                    strokeWidth={s.isClient ? 3 : 2}
-                    opacity={s.isClient ? 1 : 0.55}
+                    strokeWidth={8}
+                    opacity={0.12}
                     strokeLinejoin="round"
                     strokeLinecap="round"
                   />
-                </g>
-              ));
-            })}
-          </g>
+                )}
+                <path
+                  d={catmullRomPath(seg)}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={s.isClient ? 3 : 2}
+                  opacity={s.isClient ? 1 : 0.55}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </g>
+            ));
+          })}
 
           {/* Data points - only show on hover or for latest/peak */}
           {sortedSeries.map(s => {
@@ -316,7 +339,7 @@ export function SOVLineChart({ labels, series, height = 240 }: SOVLineChartProps
               const isPeak = s.isClient && pi === clientPeakIdx;
               const show = isHov || isLast || isPeak;
               if (!show && animProgress >= 1) return null;
-              const visible = (pi / (labels.length || 1)) <= animProgress;
+              const visible = animProgress > 0.5 || isLast || isPeak;
               if (!visible) return null;
 
               return (

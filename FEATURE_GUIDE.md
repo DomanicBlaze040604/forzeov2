@@ -100,28 +100,56 @@ The Citation Verification Engine determines whether AI-cited URLs actually suppo
 
 ## 4. Citation Categorization Engine
 
-Enhanced AI-powered categorization using Groq's Llama model to classify every citation into one of 12 precise categories.
+Enhanced AI-powered categorization using **Google Gemini 2.0 Flash** (via OpenRouter) to classify every citation domain into one of 12 precise categories, with a post-processing safety net for guaranteed accuracy.
+
+### Model
+- **Provider**: OpenRouter API
+- **Model**: `google/gemini-2.0-flash-001` — fast, cost-effective, native JSON output
+- **Temperature**: 0.0 (deterministic)
+- **Fallback**: `qwen/qwen3.5-397b-a17b`
 
 ### Categories
 | Category | Examples |
 |----------|---------|
 | `editorial` | Forbes, TechCrunch, industry blogs |
 | `ugc` | Reddit, Quora, forums |
-| `social` | LinkedIn, Twitter, Facebook |
-| `affiliate` | Review sites with referral links |
+| `social` | LinkedIn, Twitter, Facebook, YouTube, Instagram |
+| `ecommerce` | Amazon, Flipkart, online retailers |
 | `competitor` | Competitor brand websites |
 | `owned` | Client's own domain |
-| `wiki` | Wikipedia, Wikia |
+| `reference` | Wikipedia, Wikia |
 | `press` | PR Newswire, press releases |
-| `app_store` | Google Play, Apple App Store |
-| `academic` | Research papers, .edu domains |
-| `government` | .gov domains |
+| `institutional` | .gov, .edu, .org domains |
+| `review` | Product review sites |
+| `local` | Google Maps, Yelp, local directories |
 | `other` | Everything else |
 
-### Additional Tags
-- **`intent_tags`**: `pricing`, `alternatives`, `comparison`, `review`, `tutorial`, etc.
-- **`trust_tags`**: `high_authority`, `ugc_unverified`, `affiliate_bias`, etc.
-- **Batch Size**: 15 domains per batch (optimized for Groq 6,000 TPM free tier)
+### Post-Processing Safety Net
+The edge function applies **regex-based enforcement rules** after AI classification to guarantee accuracy:
+- `facebook.com`, `youtube.com`, `instagram.com`, `twitter.com`, `linkedin.com` → **social** (always)
+- `reddit.com`, `quora.com`, `stackoverflow.com` → **ugc** (always)
+- `wikipedia.org` → **reference** (always)
+- Brand's own domain → **owned** (always)
+- Known competitor domains → **competitor** (always)
+
+### Batch Processing
+- **Frontend Batch Size**: 40 domains per edge function call (matches edge function capacity)
+- **Concurrency**: 2 parallel batches
+- **Inter-round Delay**: 500ms between rounds
+- **Retry Logic**: Failed batches retry once after 3s delay (handles 503 rate limiting)
+- **Domain Normalization**: AI-returned domains mapped back to original names (handles `www.` prefix mismatch)
+
+### Auto-Categorization
+- **On Page Load**: Automatically categorizes any uncategorized domains
+- **On Audit Completion**: Fire-and-forget categorization of new domains after each audit
+- **Manual Button**: "Categorize with AI" button re-classifies ALL domains (overwriting previous values)
+- **Progress Bar**: Shared progress tracking for both auto and manual categorization
+
+### Edge Function: `categorize-citations`
+- **Runtime**: Deno (Supabase Edge Functions)
+- **API**: OpenRouter (Gemini 2.0 Flash)
+- **Inputs**: `domains[]`, `brand_name`, `brand_domain`, `competitors[]`
+- **Output**: JSON map of `{ domain: { category, source_type, authority_tier, relationship_type } }`
 
 ---
 
@@ -260,3 +288,63 @@ The Citation Intelligence dashboard offers a comprehensive suite of personalizat
 *   **Purpose**: Identify *new* content on the web that hasn't yet been indexed by AI but likely will be.
 *   **Mechanism**: Periodically scans high-authority domains and industry-specific feeds.
 *   **Actionability**: Alerts users to "Pre-Trend" topics so they can create content *before* the AI models ingest the information, effectively "injecting" their brand into future training data.
+
+---
+
+## 9. Multi-Account Scheduler (Bulk Scheduler)
+
+Admin-only feature for scheduling audits across multiple brands simultaneously with timezone support.
+
+### Components
+- **`MultiAccountScheduler.tsx`**: 4-step wizard (Select Brands → Select Prompts → Set Schedule → Review & Create)
+- **`ScheduleManager.tsx`**: Manages active schedules, execution history, real-time progress monitoring
+- **Scheduler sub-components**: `AccountSelector`, `PromptSelector`, `ExecutionMonitor`, `AnalyticsDashboard`, `ConditionalRulesEditor`
+
+### Architecture
+| Component | Purpose |
+|-----------|---------|
+| **`scheduler`** edge function | Cron-triggered, checks for due schedules, delegates multi-account runs |
+| **`multi-account-runner`** edge function | Orchestrates audit execution across multiple brands in sequence |
+| **`notify-schedule-execution`** edge function | Sends email notifications (via Resend API) on completion |
+
+### Database Tables
+- **`prompt_schedules`**: Enhanced with `client_ids UUID[]`, `recurrence_type`, `timezone`, `models TEXT[]`
+- **`schedule_runs`**: Tracks execution progress with `brands_completed`, `brands_total`, `metadata JSONB`
+- **`account_groups`**: Named groups of brands for quick selection
+- **`execution_locks`**: Prevents concurrent execution of the same schedule
+- **`schedule_analytics`**: Performance metrics per schedule
+- **`conditional_execution_rules`**: Rules for conditional execution (e.g., skip if already ran today)
+
+### Features
+- **Timezone Support**: Full IANA timezone support (default: `Asia/Kolkata`)
+- **Recurrence**: One-time, daily, weekly, monthly
+- **Concurrency**: 3 brands processed in parallel
+- **Progress Tracking**: Real-time progress bar with per-brand status
+- **Email Notifications**: Summary emails on completion with execution metrics
+
+---
+
+## 10. Notifications System
+
+In-app notification system for admin users, currently used for signup alerts.
+
+### Database Table: `notifications`
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Primary key |
+| `user_id` | UUID | Admin user who receives the notification |
+| `type` | text | `signup`, `alert`, `warning` |
+| `title` | text | Notification title |
+| `message` | text | Notification body |
+| `metadata` | JSONB | Additional data (e.g., new user email) |
+| `is_read` | boolean | Read status |
+| `read_at` | timestamp | When marked as read |
+
+### Edge Function: `notify-admin-signup`
+- Triggered on new user signup
+- Creates in-app notification for admin users
+- Sends email notification via Resend API
+
+### RLS Policies
+- Admins can only view/update their own notifications
+- Row-level security enforced via `profiles.role = 'admin'` check

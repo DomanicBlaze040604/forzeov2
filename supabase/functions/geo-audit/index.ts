@@ -562,6 +562,43 @@ const BRAND_STOPLIST = new Set([
   "read more", "learn more", "see more", "view more", "shop now",
   "related articles", "related posts", "further reading",
   "table of contents", "quick navigation",
+  // Product technology terms (not brands)
+  "dna loft", "react foam", "air zoom", "fresh foam", "boost light",
+  "ff blast", "ff blast plus", "pure gel", "puregel", "gel technology",
+  "flyknit", "flywire", "zoom air", "zoom x", "boost foam", "ultra boost",
+  "gore tex", "carbon plate", "carbon fiber", "energy return",
+  // Geographic / neighborhood terms (not brands)
+  "river north", "river east", "river west", "river south",
+  "west loop", "east loop", "south loop", "north loop",
+  "east village", "west village", "north shore", "south shore",
+  "south side", "north side", "east side", "west side",
+  "near west side", "near north side", "near south side", "near east side",
+  "magnificent mile", "gold coast", "old town", "lincoln park",
+  "silicon valley", "wall street", "main street", "high street",
+  "downtown", "midtown", "uptown", "city center", "town center",
+  "bay area", "tri state", "east coast", "west coast",
+  "south beach", "north beach", "central park", "times square",
+  "beverly hills", "palm beach", "santa monica", "lake district",
+  // Award / accolade labels
+  "james beard", "michelin star", "michelin starred", "award winning",
+  "james beard award", "editor choice award", "best in class",
+  // Common descriptive phrases in LLM responses
+  "step up", "stand out", "top tier", "mid range", "high end", "low end",
+  "long run", "short run", "easy run", "tempo run", "speed work",
+  "race day", "rest day", "leg day",
+  "one stop", "all in one", "end to end", "side by side",
+  "hands down", "across the board", "around the clock",
+  // LLM structural headers (commonly bold-formatted, not brands)
+  "enterprise options", "boutique options", "boutique alternatives",
+  "neighborhood guides", "neighborhood guide", "neighborhoods to watch",
+  "luxury sustainable", "fast fashion alternatives",
+  "insurance coverage", "charging infrastructure",
+  "key specs comparison", "key specs", "federal tax credits",
+  "credit card partners", "credit card", "mortgage lenders",
+  "certifications to look for", "certifications", "rankings source",
+  "mental health focused", "mental health", "robo advisors", "robo-advisors",
+  "collaboration add-ons", "add-ons", "add ons",
+  "chicago neighborhoods to watch", "neighborhoods",
 ]);
 
 // Layer 4: Brand Knowledge Graph — product-to-parent mapping
@@ -660,17 +697,29 @@ function isLikelyBrand(candidate: string): boolean {
 
   // Looks like a concatenated domain name: single long word, only first letter caps
   // e.g., "Runningwarehouse", "Dickssportinggoods", "Performancerunning"
-  if (words.length === 1 && lower.length > 10) {
+  // Threshold at 14 chars to avoid rejecting real brands like "Wealthfront" (11), "Reformation" (11)
+  if (words.length === 1 && lower.length > 14) {
     const uppercaseCount = (candidate.match(/[A-Z]/g) || []).length;
     if (uppercaseCount <= 1) return false;
   }
 
   // Single generic word — extremely common nouns/adjectives/adverbs
   if (words.length === 1) {
-    if (/^(very|most|best|top|great|good|new|free|easy|fast|simple|quick|more|less|also|just|well|some|many|other|each|both|such|these|those|this|that|here|there|when|where|how|what|why|which|will|would|could|should|they|their|your|with|from|have|been|were|does|then|than|into|only|over|after|before|about|between|through|during|without|however|therefore|furthermore|additionally|moreover|meanwhile|nevertheless|alternatively|specifically|essentially|particularly|generally|typically|usually|often|always|never|sometimes|perhaps|maybe|likely|unlikely|certainly|probably|possibly|rather|quite|still|already|indeed|overall|primarily|mainly|especially|basically|simply|currently|recently|actually|obviously|clearly|highly|extremely|virtually|nearly|roughly|approximately|finally|ultimately|accordingly|regardless|nonetheless)$/i.test(lower)) return false;
+    if (/^(the|very|most|best|top|great|good|new|free|easy|fast|simple|quick|more|less|also|just|well|some|many|other|each|both|such|these|those|this|that|here|there|when|where|how|what|why|which|will|would|could|should|they|their|your|with|from|have|been|were|does|then|than|into|only|over|after|before|about|between|through|during|without|however|therefore|furthermore|additionally|moreover|meanwhile|nevertheless|alternatively|specifically|essentially|particularly|generally|typically|usually|often|always|never|sometimes|perhaps|maybe|likely|unlikely|certainly|probably|possibly|rather|quite|still|already|indeed|overall|primarily|mainly|especially|basically|simply|currently|recently|actually|obviously|clearly|highly|extremely|virtually|nearly|roughly|approximately|finally|ultimately|accordingly|regardless|nonetheless)$/i.test(lower)) return false;
 
     // Common nouns that get capitalized at sentence start
-    if (/^(shipping|returns|delivery|pricing|prices|budget|premium|standard|selection|collection|collections|catalog|inventory|experience|quality|comfort|support|stability|cushioning|performance|durability|style|design|technology|features|models|options|varieties|sizes|colors|styles|store|stores|shop|outlet|retailers|retailer|location|locations|branch|free|comprehensive|additional|alternative|alternatives|largest|smallest|newest|oldest|fastest|cheapest|specialty|exclusive|limited|popular|recommended|online|website|platform|software|application|service|tool|solution|product|company|business|enterprise|organization|overview|conclusion|summary|introduction|disclaimer|membership|warranty|guarantee|pickup|checkout|wide|narrow|fit|size|weight|cushion|traction|grip|breathable|lightweight|versatile|durable|affordable|available|notable|important|key|main|top|first|second|third|fourth|last|latest|next|previous|certain|multiple|numerous|various|several|different|significant|similar|typical|common|average|standard|basic|advanced|regular|entire|complete|full|total|single|double|major|minor|primary|secondary|special|general|specific|original|traditional|modern|classic|unique|custom|local|global|national|international|personal|professional|official|public|private|natural|physical|digital|virtual|annual|monthly|weekly|daily|type|pros|cons|specifications|specs|verdict|comparison|rating|score|price|value|ride|feel|review|reviews|sources|guide|drop|upper|midsole|outsole|sizing|foam|mesh|rubber|carbon|plate|heel|toe|arch|sole|lace|laces|tongue|collar|insole|footbed|offset|stack|rocker|responsive|plush|firm|soft|snug|tight|loose|true)$/i.test(lower)) return false;
+    if (/^(shipping|returns|delivery|pricing|prices|budget|premium|standard|selection|collection|collections|catalog|inventory|experience|quality|comfort|support|stability|cushioning|performance|durability|style|design|technology|features|models|options|varieties|sizes|colors|styles|store|stores|shop|outlet|retailers|retailer|location|locations|branch|free|comprehensive|additional|alternative|alternatives|largest|smallest|newest|oldest|fastest|cheapest|specialty|exclusive|limited|popular|recommended|online|website|platform|software|application|service|tool|solution|product|company|business|enterprise|organization|overview|conclusion|summary|introduction|disclaimer|membership|warranty|guarantee|pickup|checkout|wide|narrow|fit|size|weight|cushion|traction|grip|breathable|lightweight|versatile|durable|affordable|available|notable|important|key|main|top|first|second|third|fourth|last|latest|next|previous|certain|multiple|numerous|various|several|different|significant|similar|typical|common|average|standard|basic|advanced|regular|entire|complete|full|total|single|double|major|minor|primary|secondary|special|general|specific|original|traditional|modern|classic|unique|custom|local|global|national|international|personal|professional|official|public|private|natural|physical|digital|virtual|annual|monthly|weekly|daily|type|pros|cons|specifications|specs|verdict|comparison|rating|score|price|value|ride|feel|review|reviews|sources|guide|drop|upper|midsole|outsole|sizing|foam|mesh|rubber|carbon|plate|heel|toe|arch|sole|lace|laces|tongue|collar|insole|footbed|offset|stack|rocker|responsive|plush|firm|soft|snug|tight|loose|true|award|winning|starred|mile|downtown|uptown|midtown|district|county|township|boulevard|avenue|highway|plaza|square|beach|lake|mountain|valley|creek|harbor|island|peninsula|heights|estates|terrace|grove)$/i.test(lower)) return false;
+  }
+
+  // Multi-word: reject geographic direction + noun patterns (e.g., "River North", "West Loop")
+  if (words.length >= 2) {
+    const firstWord = words[0];
+    if (/^(north|south|east|west|upper|lower|central|greater|inner|outer|old|new|near|far|mid|lake|river|bay|mount|port|fort|cape|isle|san|santa|saint|los|las|el|la|del)$/i.test(firstWord)) {
+      // Allow known exceptions: "New Balance", known brands starting with these words
+      // But filter generic geographic patterns
+      const isKnownBrandPattern = /^(new balance|old navy|north face|old spice|red bull)$/i.test(lower);
+      if (!isKnownBrandPattern) return false;
+    }
   }
 
   return true;
@@ -767,13 +816,31 @@ function extractBrandCandidatesFromText(
     const allCapsPattern = /\b([A-Z]{3,10})\b/g;
     while ((match = allCapsPattern.exec(sentence)) !== null) {
       const candidate = match[1].trim();
-      if (/^(THE|AND|FOR|BUT|NOT|YOU|URL|FAQ|USA|UPS|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|TOP|NEW|GET|ALL|BIG|SET|RUN|FIT|TRY|SEE|ADD|USE|WAY|DAY|GTS|FREE|BEST|MOST|WIDE|FULL|HIGH|LOW|PRO|GPS|LED|USB|PDF|CSS|API|SQL|ETF|IPO|CEO|CFO|CTO|COO|LLC|INC|LTD|DNA|EVA|TPU|OEM|RSS|CDN|CMS|RAM|ROM|VPN|SSD|HDD|HDR|FPS|RPM|MID|MAX|LOFT|FOAM|MESH|GORE|KNIT|ZOOM|FLEX|AIR|GEL)$/.test(candidate)) continue;
+      if (/^(THE|AND|FOR|BUT|NOT|YOU|URL|FAQ|USA|UPS|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|TOP|NEW|GET|ALL|BIG|SET|RUN|FIT|TRY|SEE|ADD|USE|WAY|DAY|GTS|FREE|BEST|MOST|WIDE|FULL|HIGH|LOW|PRO|GPS|LED|USB|PDF|CSS|API|SQL|ETF|IPO|CEO|CFO|CTO|COO|LLC|INC|LTD|DNA|EVA|TPU|OEM|RSS|CDN|CMS|RAM|ROM|VPN|SSD|HDD|HDR|FPS|RPM|MID|MAX|LOFT|FOAM|MESH|GORE|KNIT|ZOOM|FLEX|AIR|GEL|CMEVA|BLAST|PLUS|PEBA|RMAT|AHAR|PWRRUN|HOVR|NITRO|BOOST|VFLY|DRFT|GTX|SPEC|FAST|LITE|TECH|CORE|DUAL|HYPER|ULTRA|FUEL|GRID|WAVE|PACE|LINK|SYNC|BETA|PURE|NEXT|STEP|DASH|FLOW|SALE|SHIP|CART|RATE|PLAN|TIER|FLAT|SLIM|THIN|HALF|PAIR|FEAT|PICK|LIST|NOTE|GOAL|MILE|CLUB|IRA|SUV|MLS|CFP|EQS|GOTS|OEKO|TEX)$/.test(candidate)) continue;
       if (!isLikelyBrand(candidate)) continue;
       addBrand(candidate.toLowerCase(), candidate, position, true);
     }
   }
 
   return brands;
+}
+
+/** Helper: merge sub-brand j's data into parent brand i */
+function mergeSubBrand(results: ExtractedBrandEntity[], parentIdx: number, childIdx: number): void {
+  const parent = results[parentIdx];
+  const child = results[childIdx];
+  parent.mention_count += child.mention_count;
+  if (child.positions) {
+    for (const pos of child.positions) {
+      if (!parent.positions?.includes(pos)) {
+        parent.positions = parent.positions || [];
+        parent.positions.push(pos);
+      }
+    }
+  }
+  parent.entity_points = Math.round(
+    (parent.positions || []).reduce((sum, pos) => sum + (1 / pos), 0) * 100
+  ) / 100;
 }
 
 /**
@@ -803,11 +870,13 @@ function extractBrandsFromResponse(
 
   // ===== LAYER 4: Brand Knowledge Graph =====
   for (const [product, parentBrand] of Object.entries(PRODUCT_TO_BRAND)) {
-    if (lowerText.includes(product.toLowerCase())) {
+    // Use word-boundary matching to prevent "excel" matching inside "excellent"
+    const productRegex = new RegExp(`\\b${product.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    const productMatch = productRegex.exec(lowerText);
+    if (productMatch) {
       const parentKey = parentBrand.toLowerCase();
       if (!textBrands.has(parentKey)) {
-        const idx = lowerText.indexOf(product.toLowerCase());
-        const textBefore = responseText.substring(0, idx);
+        const textBefore = responseText.substring(0, productMatch.index);
         const sentencePos = (textBefore.match(/[.!?\n]/g) || []).length + 1;
         textBrands.set(parentKey, { count: 1, positions: [sentencePos], title: parentBrand, highConfidence: true });
       }
@@ -895,6 +964,65 @@ function extractBrandsFromResponse(
     if (!a.is_competitor && b.is_competitor) return 1;
     return b.entity_points - a.entity_points;
   });
+
+  // ===== DEDUP PASS 1: Merge sub-brands into parent brands already in results =====
+  // e.g., "Nike Pegasus 41", "Nike Air Zoom" → merged into "Nike"
+  const toRemove = new Set<number>();
+  for (let i = 0; i < results.length; i++) {
+    if (toRemove.has(i)) continue;
+    const parentTitle = results[i].title.toLowerCase();
+    for (let j = 0; j < results.length; j++) {
+      if (i === j || toRemove.has(j)) continue;
+      const childTitle = results[j].title.toLowerCase();
+      if (childTitle.startsWith(parentTitle + " ") ||
+        childTitle.startsWith("the " + parentTitle)) {
+        mergeSubBrand(results, i, j);
+        toRemove.add(j);
+      }
+    }
+  }
+  for (const idx of [...toRemove].sort((a, b) => b - a)) {
+    results.splice(idx, 1);
+  }
+
+  // ===== DEDUP PASS 2: Collapse product models into known brands/competitors =====
+  // e.g., "Saucony Kinvara 15" → renamed to "Saucony" if Saucony is a known competitor
+  // Handles cases where the parent brand wasn't separately detected
+  const allKnownNames = [...allBrandTerms, ...allCompetitorTerms];
+  for (let i = results.length - 1; i >= 0; i--) {
+    const titleLower = results[i].title.toLowerCase();
+    for (const known of allKnownNames) {
+      if (!known || known.length < 2) continue;
+      if (titleLower.startsWith(known + " ") && titleLower !== known) {
+        // Check if parent already exists in results
+        const parentIdx = results.findIndex((r, idx) => idx !== i && r.title.toLowerCase() === known);
+        if (parentIdx !== -1) {
+          // Merge into existing parent
+          mergeSubBrand(results, parentIdx, i);
+          results.splice(i, 1);
+        } else {
+          // Rename to parent brand (capitalize first letter of each word)
+          const properTitle = known.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          results[i].title = properTitle;
+          results[i].is_own_brand = allBrandTerms.includes(known);
+          results[i].is_competitor = allCompetitorTerms.includes(known);
+        }
+        break;
+      }
+    }
+  }
+
+  // ===== DEDUP PASS 3: Final deduplicate by title after renaming =====
+  const seenTitles = new Map<string, number>();
+  for (let i = results.length - 1; i >= 0; i--) {
+    const key = results[i].title.toLowerCase();
+    if (seenTitles.has(key)) {
+      mergeSubBrand(results, seenTitles.get(key)!, i);
+      results.splice(i, 1);
+    } else {
+      seenTitles.set(key, i);
+    }
+  }
 
   console.log(`[BrandDetection] Extracted ${results.length} brands from ${responseText.length} chars`);
   return results;
@@ -1495,6 +1623,12 @@ async function getChatGPTScraperResponse(
     if (task?.status_code && task.status_code !== 20000) {
       lastError = task.status_message || `Task failed with code ${task.status_code}`;
       console.error(`[ChatGPT Scraper] Task error: ${lastError}`);
+
+      // Don't retry on rate limits or service unavailable — fail fast
+      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") || task.status_code === 40000) {
+        console.warn(`[ChatGPT Scraper] Rate limit / unavailable — skipping retries`);
+        return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: Date.now() - startTime, error: lastError };
+      }
       continue;
     }
 
@@ -1598,7 +1732,8 @@ async function getChatGPTScraperResponse(
 async function getLiveLLMResponse(
   prompt: string,
   model: "chatgpt" | "gemini" | "claude" | "perplexity",
-  locationCode?: number
+  locationCode?: number,
+  locationName?: string
 ): Promise<{
   success: boolean;
   response: string;
@@ -1609,20 +1744,24 @@ async function getLiveLLMResponse(
   brand_entities?: DataForSEOBrandEntity[];
   error?: string;
 }> {
-  console.log(`[LIVE LLM/${model}] Querying real-time...`);
+  console.log(`[LIVE LLM/${model}] Querying real-time... [v3-message_chain]`);
   const startTime = Date.now();
 
   // For ChatGPT: Use llm_scraper/live/advanced to get brand_entities natively
   if (model === "chatgpt") {
-    return getChatGPTScraperResponse(prompt, locationCode || 2840);
+    // For ChatGPT scraper, inject location into the keyword/prompt directly
+    const locationContext = locationName
+      ? `[Context: ${locationName} market] `
+      : "";
+    return getChatGPTScraperResponse(`${locationContext}${prompt}`, locationCode || 2840);
   }
 
-  // Map model IDs to DataForSEO endpoints and model names
+  // Map model IDs to DataForSEO endpoints and model names (from docs)
   const modelConfig: Record<string, { endpoint: string; modelName: string }> = {
     chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", modelName: "gpt-4.1-mini" },
     gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", modelName: "gemini-2.5-flash" },
-    claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-sonnet-4-0" },
-    perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", modelName: "sonar-pro" },
+    claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-opus-4-0" },
+    perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", modelName: "sonar" },
   };
 
   const config = modelConfig[model];
@@ -1643,18 +1782,40 @@ async function getLiveLLMResponse(
       await new Promise(resolve => setTimeout(resolve, delay));
     }
 
-    // Use the correct endpoint and parameters
-    // Enhance prompt to get specific recommendations with sources/URLs
-    const enhancedPrompt = `${prompt}
+    // DataForSEO user_prompt must be clean — no instruction prefixes
+    // Use native web_search_country_iso_code for location awareness instead
+    const locationCodeToISO: Record<number, string> = {
+      2356: "IN", 2840: "US", 2826: "GB", 2036: "AU", 2124: "CA",
+      2276: "DE", 2250: "FR", 2392: "JP", 2076: "BR", 2484: "MX",
+      2380: "IT", 2724: "ES", 2410: "KR", 2702: "SG", 2784: "AE",
+      2682: "SA", 2566: "NG", 2710: "ZA", 2360: "ID", 2458: "MY",
+      2608: "PH", 2764: "TH", 2704: "VN", 2158: "TW", 2344: "HK",
+      2528: "NL", 2056: "BE", 2756: "CH", 2040: "AT", 2752: "SE",
+      2578: "NO", 2208: "DK", 2246: "FI", 2616: "PL", 2643: "RU",
+      2792: "TR", 2818: "EG", 2404: "KE", 2800: "UG",
+    };
 
-Important: Please provide specific recommendations with actual business names, websites, or sources. Include URLs where possible. Do not ask clarifying questions - provide direct answers with specific options.`;
+    const isoCode = locationCode ? locationCodeToISO[locationCode] : undefined;
 
-    const result = await callDataForSEO(config.endpoint, [{
-      user_prompt: enhancedPrompt,
+    const payload: Record<string, unknown> = {
+      user_prompt: prompt,
       model_name: config.modelName,
       max_output_tokens: 1000,
       temperature: 0.7,
-    }]);
+    };
+
+    // Gemini does NOT support web_search_country_iso_code
+    // Perplexity and Claude DO — and Claude REQUIRES web_search: true with it
+    if (model === "perplexity" || model === "claude") {
+      payload.web_search = true;
+      if (isoCode) {
+        payload.web_search_country_iso_code = isoCode;
+      }
+    }
+
+    console.log(`[LIVE LLM/${model}] [v10] Prompt: "${prompt.substring(0, 60)}" | ISO: ${isoCode || 'none'}`);
+    const result = await callDataForSEO(config.endpoint, [payload]);
+
 
     const latency = Date.now() - startTime;
 
@@ -1700,7 +1861,14 @@ Important: Please provide specific recommendations with actual business names, w
     // Check task status
     if (task?.status_code && task.status_code !== 20000) {
       lastError = task.status_message || `Task failed with code ${task.status_code}`;
-      console.error(`[LIVE LLM/${model}] Task error: ${lastError}`);
+      console.error(`[LIVE LLM/${model}] Task error (code ${task.status_code}): ${lastError}`);
+      console.error(`[LIVE LLM/${model}] Task data dump: ${JSON.stringify(task).substring(0, 500)}`);
+
+      // Don't retry on rate limits, service unavailable, or field validation errors — fail fast
+      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") || lastError.includes("Invalid Field") || task.status_code === 40000) {
+        console.warn(`[LIVE LLM/${model}] Non-retryable error — skipping retries`);
+        return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: Date.now() - startTime, error: lastError };
+      }
       continue;
     }
 
@@ -1869,7 +2037,8 @@ async function getLiveLLMWithValidation(
   brandTags: string[],
   competitors: string[],
   models: Array<"chatgpt" | "gemini" | "claude" | "perplexity"> = ["chatgpt", "gemini", "claude"],
-  locationCode?: number
+  locationCode?: number,
+  locationName?: string
 ): Promise<{
   success: boolean;
   results: Map<string, {
@@ -1906,16 +2075,15 @@ async function getLiveLLMWithValidation(
   let totalCost = 0;
   const responses: string[] = [];
 
-  // Query models sequentially with longer delays to avoid rate limits
-  for (let i = 0; i < models.length; i++) {
-    const model = models[i];
+  // Query ALL models in PARALLEL — each is a different provider, no shared rate limits
+  console.log(`[LIVE LLM Validation] Firing ${models.length} models in parallel...`);
 
-    // Add longer delay between queries (2.5s)
-    if (i > 0) {
-      await new Promise(resolve => setTimeout(resolve, 2500));
-    }
+  const modelResults = await Promise.all(models.map(async (model) => {
+    const result = await getLiveLLMResponse(prompt, model, locationCode, locationName);
+    return { model, result };
+  }));
 
-    const result = await getLiveLLMResponse(prompt, model, locationCode);
+  for (const { model, result } of modelResults) {
     totalCost += result.cost;
 
     if (result.success) {
@@ -1924,23 +2092,16 @@ async function getLiveLLMWithValidation(
       console.log(`[LIVE LLM/${model}] Response received, length: ${result.response.length}`);
       console.log(`[LIVE LLM/${model}] Brand data: mentioned=${brandData.mentioned}, count=${brandData.count}`);
 
-      // Always extract both URL citations AND implicit citations from brand mentions
       const urlCitations = extractUrlsFromText(result.response);
       console.log(`[LIVE LLM/${model}] URL citations extracted: ${urlCitations.length}`);
 
-      const implicitCitations = extractImplicitCitations(
-        result.response,
-        brandName,
-        brandTags,
-        competitors
-      );
+      const implicitCitations = extractImplicitCitations(result.response, brandName, brandTags, competitors);
       console.log(`[LIVE LLM/${model}] Implicit citations extracted: ${implicitCitations.length}`);
 
       // Merge citations, avoiding duplicates. Priority: annotations > URLs > implicit
       const seenDomains = new Set<string>();
       const extractedCitations: Citation[] = [];
 
-      // Add structured citations from API annotations first (highest priority - Perplexity etc.)
       if (result.citations && result.citations.length > 0) {
         console.log(`[LIVE LLM/${model}] Structured annotation citations: ${result.citations.length}`);
         for (const c of result.citations) {
@@ -1952,7 +2113,6 @@ async function getLiveLLMWithValidation(
         }
       }
 
-      // Add URL citations from response text
       for (const c of urlCitations) {
         const domainLower = c.domain.toLowerCase();
         if (!seenDomains.has(domainLower)) {
@@ -1961,7 +2121,6 @@ async function getLiveLLMWithValidation(
         }
       }
 
-      // Add implicit citations that aren't duplicates
       for (const c of implicitCitations) {
         const domainLower = c.domain.toLowerCase();
         if (!seenDomains.has(domainLower)) {
@@ -1986,6 +2145,7 @@ async function getLiveLLMWithValidation(
       responses.push(result.response);
     }
   }
+
 
   // Check agreement between models
   let agreement: "high" | "medium" | "low" = "low";
@@ -2612,7 +2772,8 @@ serve(async (req: Request) => {
             sanitizedBrandTags,
             sanitizedCompetitors,
             liveModels,
-            location_code
+            location_code,
+            location_name
           );
 
           totalCost += liveResult.totalCost;

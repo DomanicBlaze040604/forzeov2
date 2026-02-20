@@ -413,6 +413,30 @@ ClientDashboard.tsx
 | `MODEL_LOGOS` | AI model icons with brand colors (ChatGPT green, Claude orange, etc.) |
 | `BrandLogo` | Brand/competitor logo component with fallback initials |
 | `useClientDashboard` | Central state management hook with Supabase integration |
+| `MultiAccountScheduler` | 4-step wizard for scheduling audits across multiple brands (admin-only) |
+| `ScheduleManager` | Manages active schedules, execution history, progress monitoring |
+| `CitationPreview` | Hover preview for citations with page content and verification status |
+| `CitationIntelligence` | Full citation intelligence dashboard with filtering and categorization |
+| `SignalsDashboard` | Signal detection UI with RSS feed monitoring |
+| `VisibilityGraphs` | SOV line charts and visibility trend visualizations |
+| `OnboardingWizard` | Multi-step new user onboarding flow |
+
+### Edge Functions (12 Total)
+
+| Function | Purpose | API |
+|----------|---------|-----|
+| `geo-audit` | Core audit engine — live LLM inference | DataForSEO |
+| `categorize-citations` | AI domain categorization with safety net | OpenRouter (Gemini 2.0 Flash) |
+| `verify-citations` | Semantic similarity verification | Jina Reader + Groq |
+| `citation-analyzer` | Deep analysis of citation sources | Groq |
+| `tavily-search` | Discovery engine for web analysis | Tavily |
+| `scheduler` | Cron-triggered scheduler with multi-account delegation | Supabase |
+| `multi-account-runner` | Multi-brand audit orchestration | Supabase |
+| `notify-schedule-execution` | Email notifications on schedule completion | Resend |
+| `notify-admin-signup` | New user signup notifications | Resend |
+| `signal-scorer` | Signal detection and scoring | Groq |
+| `rss-ingestor` | RSS feed ingestion for signals | Native |
+| `ai-search-volume` | AI-powered search volume estimation | Groq |
 
 ### State Management
 
