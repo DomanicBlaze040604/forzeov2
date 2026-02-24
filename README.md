@@ -94,6 +94,17 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates
 
+### v2.9 - AI Visibility Strategist Insights (Feb 24, 2026)
+- **AI Visibility Strategist (Prompt-Level Insights)**: Completely rebuilt the Insights tab with a two-step AI analysis engine:
+  - **Step 1 — Citation Gap Analysis**: LLM audits each AI platform's presence/rank for the target brand, identifies which competitor content types are driving citations, and pinpoints specific content/claim gaps.
+  - **Step 2 — 6 Precision Recommendations**: Generates exactly 6 recommendations (2-3 High Impact Strategic + 3-4 Quick Tactical Wins), each with `contentFormat`, `targetUrl`, `wordCount`, `keyClaims[]`, `executionSteps[]`, `timeline`, and `successMetric`.
+  - **Critical Rules enforced**: Never recommends existing pages, avoids generic advice ("create quality content"), requires editorially-relevant domain targets, and always includes a platform-specific recommendation.
+  - **New types**: `PromptInsightResult` and `PromptInsightRecommendation` exported from `useClientDashboard`.
+  - **Model**: `llama-3.3-70b-versatile` via Groq API (`max_tokens: 4096`, JSON mode).
+  - **Tavily enrichment**: Cited source snippets, brand existing-content check, and competitor web presence passed as context to the LLM.
+- **Hover Tooltip Debounce**: Citation and Sources tab hover previews now use a **400ms debounce** before showing the popup (prevents accidental flashes while scrolling). Also clamps popup vertical position to stay within the viewport.
+- **`PromptInsightRecommendation[]` in Quick Recommendations Modal**: The PromptsTab "Recommendations" button modal updated to render the new type (shows `whyThisWorks` + `type` badge + `timeline`).
+
 ### v2.8 - Citation Verification Engine & Hover Preview (Feb 18, 2026)
 - **Citation Verification Engine (Truth Layer)**: New `verify-citations` Supabase edge function that verifies whether AI-cited URLs actually support the claims made.
   - **Semantic Similarity Scoring**: Uses Jina Reader to fetch page content and Groq LLM to compute similarity scores.

@@ -15,6 +15,7 @@ import PromptSelector from './scheduler/PromptSelector';
 import ExecutionMonitor from './scheduler/ExecutionMonitor';
 import ConditionalRulesEditor, { ConditionalRule } from './scheduler/ConditionalRulesEditor';
 import AnalyticsDashboard from './scheduler/AnalyticsDashboard';
+import { localTimeToUTC, utcToLocalTime, formatInTimezone } from '@/utils/timezone';
 
 interface Client {
   id: string;
@@ -198,32 +199,12 @@ export default function MultiAccountScheduler({
       const interval = intervalMapping[form.recurrence];
 
       // Convert scheduled time from selected timezone to UTC for storage
-      // Timezone offsets from UTC (in minutes)
-      const timezoneOffsets: Record<string, number> = {
-        'Asia/Kolkata': 330,          // UTC+5:30
-        'UTC': 0,                      // UTC+0
-        'America/New_York': -300,      // UTC-5 (EST) / UTC-4 (EDT) - using EST
-        'America/Chicago': -360,       // UTC-6 (CST) / UTC-5 (CDT) - using CST
-        'America/Denver': -420,        // UTC-7 (MST) / UTC-6 (MDT) - using MST
-        'America/Los_Angeles': -480,   // UTC-8 (PST) / UTC-7 (PDT) - using PST
-        'Europe/London': 0,            // UTC+0 (GMT) / UTC+1 (BST) - using GMT
-        'Europe/Paris': 60,            // UTC+1 (CET) / UTC+2 (CEST) - using CET
-        'Asia/Dubai': 240,             // UTC+4
-        'Asia/Singapore': 480,         // UTC+8
-        'Asia/Tokyo': 540,             // UTC+9
-        'Australia/Sydney': 600,       // UTC+10 (AEST) / UTC+11 (AEDT) - using AEST
-      };
-
-      // Parse the local datetime and convert to UTC
-      const offsetMinutes = timezoneOffsets[form.timezone] || 0;
-      const localDate = new Date(`${form.scheduledDate}T${form.scheduledTime}:00`);
-      const utcDate = new Date(localDate.getTime() - (offsetMinutes * 60 * 1000));
-      const next_run_at = utcDate.toISOString();
+      // Use Intl API for DST-aware timezone conversion
+      const next_run_at = localTimeToUTC(form.scheduledDate, form.scheduledTime, form.timezone);
 
       console.log('[MultiAccountScheduler] Timezone conversion:', {
         selected_timezone: form.timezone,
         local_time: `${form.scheduledDate} ${form.scheduledTime}`,
-        offset_minutes: offsetMinutes,
         utc_time: next_run_at,
       });
 
@@ -360,26 +341,12 @@ export default function MultiAccountScheduler({
 
   const editSchedule = async (schedule: Schedule) => {
     try {
-      // Convert UTC time back to local time for display
-      const utcDate = new Date(schedule.next_run_at || '');
-      const timezoneOffsets: Record<string, number> = {
-        'Asia/Kolkata': 330,
-        'UTC': 0,
-        'America/New_York': -300,
-        'America/Chicago': -360,
-        'America/Denver': -420,
-        'America/Los_Angeles': -480,
-        'Europe/London': 0,
-        'Europe/Paris': 60,
-        'Asia/Dubai': 240,
-        'Asia/Singapore': 480,
-        'Asia/Tokyo': 540,
-        'Australia/Sydney': 600,
-      };
-
       const timezone = (schedule as any).timezone || 'Asia/Kolkata';
-      const offsetMinutes = timezoneOffsets[timezone] || 0;
-      const localDate = new Date(utcDate.getTime() + (offsetMinutes * 60 * 1000));
+
+      // Convert UTC time back to local time for display using DST-aware conversion
+      const localTime = schedule.next_run_at
+        ? utcToLocalTime(schedule.next_run_at, timezone)
+        : { date: new Date().toISOString().split('T')[0], time: '09:00' };
 
       setForm({
         name: schedule.name,
@@ -387,8 +354,8 @@ export default function MultiAccountScheduler({
         promptSelectionType: schedule.prompt_selection_type as any,
         selectedCategories: schedule.selected_categories || [],
         selectedPromptIds: [],
-        scheduledDate: localDate.toISOString().split('T')[0],
-        scheduledTime: localDate.toISOString().split('T')[1].substring(0, 5),
+        scheduledDate: localTime.date,
+        scheduledTime: localTime.time,
         timezone: timezone,
         recurrence: schedule.recurrence_type as any,
         models: schedule.models,
@@ -790,7 +757,7 @@ export default function MultiAccountScheduler({
                           {schedule.prompt_selection_type} prompts •{' '}
                           {schedule.recurrence_type}
                           {schedule.next_run_at && (
-                            <span> • Next run: {new Date(schedule.next_run_at).toLocaleString()}</span>
+                            <span> • Next run: {formatInTimezone(schedule.next_run_at, (schedule as any).timezone || 'Asia/Kolkata')}</span>
                           )}
                         </div>
                       </div>

@@ -29,8 +29,8 @@ import { toast } from 'sonner';
 
 // Performance constant based on measured data
 const AVERAGE_SECONDS_PER_PROMPT = 37; // 121 prompts = 70-77 min
-const STALL_WARNING_THRESHOLD = 300; // 5 minutes without update = warning
-const STALL_CRITICAL_THRESHOLD = 600; // 10 minutes without update = critical
+const STALL_WARNING_THRESHOLD = 300_000; // 5 minutes (ms) without update = warning
+const STALL_CRITICAL_THRESHOLD = 600_000; // 10 minutes (ms) without update = critical
 
 interface ExecutionProgress {
   completedBrands: number;

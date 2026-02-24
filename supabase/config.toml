@@ -29,5 +29,11 @@ verify_jwt = false
 [functions.notify-admin-signup]
 verify_jwt = false
 
+[functions.notify-schedule-execution]
+verify_jwt = false
+
+[functions.multi-account-runner]
+verify_jwt = false
+
 [functions.verify-citations]
 verify_jwt = false

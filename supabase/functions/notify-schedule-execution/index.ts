@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!
+const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "Forzeo Alerts <alerts@forzeo.com>"
 const ADMIN_EMAILS = ["ammar@forzeo.com", "sachinjain@forzeo.com"]
 
 const corsHeaders = {
@@ -32,10 +33,10 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Fetch run details from database
+    // Fetch run details from database (include schedule's notify_on_completion flag)
     const { data: run, error: runError } = await supabase
       .from('schedule_runs')
-      .select('*, prompt_schedules(name)')
+      .select('*, prompt_schedules(name, notify_on_completion)')
       .eq('id', run_id)
       .single()
 
@@ -44,6 +45,15 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: "Run not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      )
+    }
+
+    // Check if notifications are enabled for this schedule
+    if (run.prompt_schedules?.notify_on_completion === false) {
+      console.log("[Notification] Notifications disabled for this schedule, skipping")
+      return new Response(
+        JSON.stringify({ success: true, message: "Notifications disabled for this schedule" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }
 
@@ -93,7 +103,9 @@ serve(async (req) => {
     // ========================================================================
 
     // Always send email for failures, conditional for success
-    if (run.status.includes('error') || isExceptionalFailure || run.status === 'completed') {
+    if (!RESEND_API_KEY) {
+      console.error("[Notification] RESEND_API_KEY not set, skipping email")
+    } else if (run.status.includes('error') || isExceptionalFailure || run.status === 'completed') {
       try {
         const emailSubject = isExceptionalFailure
           ? `⚠️ EXCEPTIONAL FAILURE: ${summary.scheduleName}`
@@ -230,7 +242,7 @@ serve(async (req) => {
             "Authorization": `Bearer ${RESEND_API_KEY}`,
           },
           body: JSON.stringify({
-            from: "Forzeo Alerts <onboarding@resend.dev>",
+            from: RESEND_FROM_EMAIL,
             to: ADMIN_EMAILS,
             subject: emailSubject,
             html: emailHtml,
@@ -239,9 +251,11 @@ serve(async (req) => {
 
         if (!emailRes.ok) {
           const err = await emailRes.text()
-          console.error("[Notification] Resend error:", err)
+          console.error(`[Notification] Resend error (${emailRes.status}):`, err)
+          console.error(`[Notification] From: ${RESEND_FROM_EMAIL}, To: ${ADMIN_EMAILS.join(', ')}`)
         } else {
-          console.log("[Notification] Email sent successfully to:", ADMIN_EMAILS.join(', '))
+          const emailData = await emailRes.json()
+          console.log(`[Notification] Email sent successfully (id: ${emailData.id}) to: ${ADMIN_EMAILS.join(', ')}`)
         }
       } catch (emailError) {
         console.error("[Notification] Failed to send email:", emailError)

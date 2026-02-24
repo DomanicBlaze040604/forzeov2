@@ -146,6 +146,9 @@ async function releaseExecutionLock(
 
 function calculateNextRun(schedule: Schedule): Date {
     const now = new Date();
+    // Use the stored next_run_at as the base time to prevent drift.
+    // If not available, fall back to now.
+    const baseTime = schedule.next_run_at ? new Date(schedule.next_run_at) : now;
 
     // For legacy schedules with interval_unit
     if (schedule.interval_unit && !schedule.recurrence_type) {
@@ -166,46 +169,73 @@ function calculateNextRun(schedule: Schedule): Date {
             default:
                 ms = schedule.interval_value * 60 * 1000;
         }
-        return new Date(now.getTime() + ms);
+        // Advance from baseTime, skip past now if needed
+        let next = new Date(baseTime.getTime() + ms);
+        while (next <= now) {
+            next = new Date(next.getTime() + ms);
+        }
+        return next;
     }
 
-    // For new recurrence-based schedules
+    // For new recurrence-based schedules, preserve the original time-of-day
     switch (schedule.recurrence_type) {
-        case "daily":
-            // Add 1 day
-            return new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        case "daily": {
+            // Add 1 day from baseTime, skip past now if needed
+            let next = new Date(baseTime.getTime() + 24 * 60 * 60 * 1000);
+            while (next <= now) {
+                next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
+            }
+            return next;
+        }
 
         case "weekly": {
-            // Run on specific days of week
-            const daysOfWeek = schedule.recurrence_days_of_week || [now.getDay()];
-            const currentDay = now.getDay(); // 0=Sunday, 6=Saturday
+            // Run on specific days of week, preserving time-of-day from baseTime
+            const daysOfWeek = schedule.recurrence_days_of_week || [baseTime.getUTCDay()];
+            const currentDay = now.getUTCDay(); // 0=Sunday, 6=Saturday
 
-            // Find next matching day
-            let daysUntilNext = 1;
-            for (let i = 1; i <= 7; i++) {
+            // Find next matching day after now
+            for (let i = 0; i <= 7; i++) {
                 const checkDay = (currentDay + i) % 7;
                 if (daysOfWeek.includes(checkDay)) {
-                    daysUntilNext = i;
-                    break;
+                    const candidate = new Date(now);
+                    candidate.setUTCDate(candidate.getUTCDate() + i);
+                    // Preserve the original time-of-day from baseTime
+                    candidate.setUTCHours(baseTime.getUTCHours(), baseTime.getUTCMinutes(), 0, 0);
+                    if (candidate > now) {
+                        return candidate;
+                    }
                 }
             }
-
-            return new Date(now.getTime() + daysUntilNext * 24 * 60 * 60 * 1000);
+            // Fallback: 7 days from now with original time
+            const fallback = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+            fallback.setUTCHours(baseTime.getUTCHours(), baseTime.getUTCMinutes(), 0, 0);
+            return fallback;
         }
 
         case "monthly": {
-            // Run on specific day of month
-            const dayOfMonth = schedule.recurrence_day_of_month || 1;
-            const nextMonth = new Date(now);
-            nextMonth.setMonth(nextMonth.getMonth() + 1);
-            nextMonth.setDate(Math.min(dayOfMonth, new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate()));
+            // Run on specific day of month, preserving time-of-day from baseTime
+            const dayOfMonth = schedule.recurrence_day_of_month || baseTime.getUTCDate();
+            // Set day to 1 first to prevent month overflow (e.g., March 31 + 1 month → May 1)
+            const nextMonth = new Date(baseTime);
+            nextMonth.setUTCDate(1);
+            nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+            const maxDay = new Date(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth() + 1, 0).getDate();
+            nextMonth.setUTCDate(Math.min(dayOfMonth, maxDay));
+            nextMonth.setUTCHours(baseTime.getUTCHours(), baseTime.getUTCMinutes(), 0, 0);
+            // If still in the past, advance another month
+            if (nextMonth <= now) {
+                nextMonth.setUTCDate(1);
+                nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+                const maxDay2 = new Date(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth() + 1, 0).getDate();
+                nextMonth.setUTCDate(Math.min(dayOfMonth, maxDay2));
+            }
             return nextMonth;
         }
 
         case "once":
         default:
-            // For one-time schedules, set far future or null
-            return new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year
+            // For one-time schedules, set far future
+            return new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
     }
 }
 
@@ -288,11 +318,11 @@ async function queryLLM(
         return { success: false, response: "", citations: [], cost: 0, error: "DataForSEO not configured" };
     }
 
-    const modelConfig: Record<string, { endpoint: string; internal_model: string }> = {
-        chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", internal_model: "gpt-4.1-mini" },
-        gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", internal_model: "gemini-2.5-flash" },
-        claude: { endpoint: "/ai_optimization/claude/llm_responses/live", internal_model: "claude-sonnet-4-0" },
-        perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", internal_model: "sonar-pro" },
+    const modelConfig: Record<string, { endpoint: string; model_name: string }> = {
+        chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", model_name: "gpt-5-nano" },
+        gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", model_name: "gemini-2.5-flash" },
+        claude: { endpoint: "/ai_optimization/claude/llm_responses/live", model_name: "claude-haiku-4-5" },
+        perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", model_name: "sonar" },
     };
 
     const config = modelConfig[model];
@@ -352,18 +382,26 @@ async function queryLLM(
     }
 
     try {
+        const payload: Record<string, any> = {
+            prompt,
+            model_name: config.model_name,
+            location_code: locationCode,
+            language_code: "en",
+        };
+
+        // GPT-5 Nano is extremely sensitive — do NOT send temperature or max_output_tokens
+        if (config.model_name !== "gpt-5-nano") {
+            payload.max_output_tokens = 1000;
+            payload.temperature = 0.7;
+        }
+
         const response = await fetch(`${DATAFORSEO_API}${config.endpoint}`, {
             method: "POST",
             headers: {
                 "Authorization": `Basic ${DATAFORSEO_AUTH}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify([{
-                prompt,
-                internal_model: config.internal_model,
-                location_code: locationCode,
-                language_code: "en",
-            }]),
+            body: JSON.stringify([payload]),
         });
 
         if (!response.ok) {
@@ -613,7 +651,15 @@ serve(async (req: Request) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
     try {
-        const body = req.method === "POST" ? await req.json() : {};
+        let body: Record<string, any> = {};
+        try {
+            if (req.method === "POST") {
+                body = await req.json();
+            }
+        } catch {
+            // Body may be empty or malformed (e.g., from pg_cron) - continue with defaults
+            body = {};
+        }
         const scheduleId = body.schedule_id; // Optional: run specific schedule
         const forceRun = body.force === true; // Force run even if not due
 

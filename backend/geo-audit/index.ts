@@ -85,8 +85,8 @@ const corsHeaders = {
 
 // DataForSEO API (primary for LLM Mentions + AI Overview + LIVE LLM)
 const DATAFORSEO_API = "https://api.dataforseo.com/v3";
-const DATAFORSEO_LOGIN = Deno.env.get("DATAFORSEO_LOGIN") || "contact@forzeo.com";
-const DATAFORSEO_PASSWORD = Deno.env.get("DATAFORSEO_PASSWORD") || "b00e21651e5fab03";
+const DATAFORSEO_LOGIN = Deno.env.get("DATAFORSEO_LOGIN") || "";
+const DATAFORSEO_PASSWORD = Deno.env.get("DATAFORSEO_PASSWORD") || "";
 const DATAFORSEO_AUTH = btoa(`${DATAFORSEO_LOGIN}:${DATAFORSEO_PASSWORD}`);
 
 // Serper API (alternative/backup for SERP)

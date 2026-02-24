@@ -22,7 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useClientDashboard, AI_MODELS, cleanAndAnalyzeResponse } from "@/hooks/useClientDashboard";
+import { useClientDashboard, AI_MODELS, cleanAndAnalyzeResponse, PromptInsightResult } from "@/hooks/useClientDashboard";
 import { MODEL_LOGOS } from "@/components/ModelLogos";
 import { ScheduleManager } from "@/components/ScheduleManager";
 import { UniversalImport } from "@/components/UniversalImport";
@@ -181,7 +181,7 @@ interface ClientDashboardProps {
 }
 
 export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: ClientDashboardProps = {}) {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress, getAIOpportunity } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler">(() => {
@@ -271,7 +271,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [recsModalOpen, setRecsModalOpen] = useState(false);
   const [recsModalPromptId, setRecsModalPromptId] = useState<string | null>(null);
   const [recsModalLoading, setRecsModalLoading] = useState(false);
-  const [recsModalData, setRecsModalData] = useState<{ title: string; description: string }[] | null>(null);
+  const [recsModalData, setRecsModalData] = useState<import('@/hooks/useClientDashboard').PromptInsightRecommendation[] | null>(null);
 
   const [isCreatingClient, setIsCreatingClient] = useState(false);
 
@@ -279,6 +279,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [promptsFilterModel, setPromptsFilterModel] = useState<string>("all");
   const [promptsFilterVisibility, setPromptsFilterVisibility] = useState<"all" | "visible" | "not_visible">("all");
   const [promptsFilterCompetitor, setPromptsFilterCompetitor] = useState<string>("all");
+  const [promptSortField, setPromptSortField] = useState<string | null>(null);
 
   // Prompt multi-select for bulk actions
   const [selectedPromptIds, setSelectedPromptIds] = useState<Set<string>>(new Set());
@@ -643,8 +644,13 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       });
     }
 
+    // Apply AI Opportunity sorting if active
+    if (promptSortField === 'ai_opportunity') {
+      result = [...result].sort((a, b) => getAIOpportunity(b.id).score - getAIOpportunity(a.id).score);
+    }
+
     return result;
-  }, [filteredPromptsByTab, searchQuery, promptsFilterModel, promptsFilterVisibility, promptsFilterCompetitor, auditResults]);
+  }, [filteredPromptsByTab, searchQuery, promptsFilterModel, promptsFilterVisibility, promptsFilterCompetitor, auditResults, promptSortField, getAIOpportunity]);
   const pendingPrompts = prompts.filter(p => p.is_active !== false && !auditResults.find(r => r.prompt_id === p.id)).length;
 
   const getPromptResult = (promptId: string) => filteredAuditResults.find(r => r.prompt_id === promptId);
@@ -690,6 +696,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       const avgPosition = allPositions.length > 0
         ? Math.round(allPositions.reduce((a, b) => a + b, 0) / allPositions.length * 10) / 10 : null;
 
+      // Compute best AI Opportunity tier for this topic group
+      const topicOpScores = topicPrompts.map(p => getAIOpportunity(p.id));
+      const bestOpScore = topicOpScores.length > 0 ? Math.max(...topicOpScores.map(o => o.score)) : 0;
+      const bestOp = topicOpScores.find(o => o.score === bestOpScore) || { score: 0, tier: 'Minimal', color: '#9ca3af' };
+
       return {
         topic, promptCount: topicPrompts.length, prompts: topicPrompts,
         visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "—",
@@ -698,6 +709,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         brands: Array.from(brandFreqMap.keys()),
         brandFrequencies: Object.fromEntries(brandFreqMap),
         searchVolume: hasSearchVolume ? totalSearchVolume : null,
+        aiOpportunity: bestOp,
       };
     }).sort((a, b) => b.promptCount - a.promptCount);
 
@@ -737,6 +749,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       const avgPosition = allPositions.length > 0
         ? Math.round(allPositions.reduce((a, b) => a + b, 0) / allPositions.length * 10) / 10 : null;
 
+      const othersOpScores = othersPrompts.map(p => getAIOpportunity(p.id));
+      const othersBestScore = othersOpScores.length > 0 ? Math.max(...othersOpScores.map(o => o.score)) : 0;
+      const othersBestOp = othersOpScores.find(o => o.score === othersBestScore) || { score: 0, tier: 'Minimal', color: '#9ca3af' };
+
       sorted.push({
         topic: "Others", promptCount: othersPrompts.length, prompts: othersPrompts,
         visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "—",
@@ -745,6 +761,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         brands: Array.from(brandFreqMap.keys()),
         brandFrequencies: Object.fromEntries(brandFreqMap),
         searchVolume: hasSearchVolume ? totalSearchVolume : null,
+        aiOpportunity: othersBestOp,
       });
     }
 
@@ -1801,7 +1818,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Prompt <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32" title="Topic / seed keyword this prompt belongs to">Topic</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="Estimated AI search volume from DataForSEO">Est. Search Vol.</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28 cursor-pointer hover:text-gray-900 group" title="AI Opportunity reflects the relative strategic upside of improving visibility for this prompt in AI-generated answers. Calculated using demand strength, AI answer depth, and intent signals." onClick={() => { setPromptSortField(prev => prev === 'ai_opportunity' ? null : 'ai_opportunity'); }}><div className="flex items-center justify-center gap-1">AI Opportunity <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div></th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24" title="How many AI models mentioned your brand vs total models tested">Visibility</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20" title="Your brand's average position in AI-generated ranked lists (#1 is best)">Position</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="Other brands that AI mentioned alongside or instead of yours">Brands</th>
@@ -1915,8 +1932,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-center text-sm font-medium text-gray-600">
-                      {p.estimated_search_volume != null ? p.estimated_search_volume.toLocaleString() : <span className="text-gray-300">—</span>}
+                    <td className="px-4 py-2.5 text-center">
+                      {(() => {
+                        const op = getAIOpportunity(p.id);
+                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: op.color + '18', color: op.color, border: `1px solid ${op.color}40` }}>{op.tier}</span>;
+                      })()}
                     </td>
                     <td className="px-4 py-2.5 text-center">
                       <span className={cn("text-sm font-medium", visibleCount > 0 ? "text-gray-900" : "text-gray-400")}>
@@ -2271,8 +2291,12 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                       {idx + 1}
                     </div>
                     <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900 mb-1">{rec.title}</h4>
-                      <p className="text-sm text-gray-600">{rec.description}</p>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-semibold text-gray-900">{rec.title}</h4>
+                        <Badge className={cn('text-xs', rec.type === 'High Impact' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-teal-100 text-teal-700 border-teal-200')}>{rec.type}</Badge>
+                      </div>
+                      <p className="text-sm text-gray-600">{rec.whyThisWorks}</p>
+                      {rec.timeline && <p className="text-xs text-gray-400 mt-1">⏱ {rec.timeline}</p>}
                     </div>
                   </div>
                 ))
@@ -2327,7 +2351,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Topic</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Prompts</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Est. Search Vol.</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="AI Opportunity reflects the relative strategic upside of improving visibility for this prompt in AI-generated answers.">AI Opportunity</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Avg Position</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Visibility</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Citations</th>
@@ -2351,8 +2375,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                       <td className="px-4 py-3 text-center">
                         <Badge variant="secondary" className="bg-gray-100 text-gray-700 text-xs">{td.promptCount}</Badge>
                       </td>
-                      <td className="px-4 py-3 text-center text-sm font-medium text-gray-600">
-                        {td.searchVolume != null ? td.searchVolume.toLocaleString() : <span className="text-gray-300">—</span>}
+                      <td className="px-4 py-3 text-center">
+                        {(() => {
+                          const op = (td as any).aiOpportunity || { tier: 'Minimal', color: '#9ca3af' };
+                          return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: op.color + '18', color: op.color, border: `1px solid ${op.color}40` }}>{op.tier}</span>;
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-center text-sm font-medium text-gray-600">
                         {td.avgPosition ? `#${td.avgPosition}` : "—"}
@@ -2409,8 +2436,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                             </span>
                           </td>
                           <td className="px-4 py-2 text-center text-xs text-gray-400">—</td>
-                          <td className="px-4 py-2 text-center text-xs text-gray-500">
-                            {p.estimated_search_volume != null ? p.estimated_search_volume.toLocaleString() : "—"}
+                          <td className="px-4 py-2 text-center">
+                            {(() => {
+                              const op = getAIOpportunity(p.id);
+                              return <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold" style={{ backgroundColor: op.color + '18', color: op.color, border: `1px solid ${op.color}40` }}>{op.tier}</span>;
+                            })()}
                           </td>
                           <td className="px-4 py-2 text-center text-xs text-gray-500">{pos ? `#${pos}` : "—"}</td>
                           <td className="px-4 py-2 text-center text-xs text-gray-500">{vis}</td>
@@ -2690,19 +2720,22 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           className={cn("hover:bg-gray-50 cursor-pointer transition-colors group", isExpanded && "bg-blue-50/50")}
                           onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}
                           onMouseEnter={(e) => {
+                            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
                             const rect = e.currentTarget.getBoundingClientRect();
-                            // Position to the left of the table row, with some padding from left edge
-                            const previewWidth = 480; // Max width of preview
-                            const leftPosition = Math.max(10, rect.left - previewWidth - 20); // 10px min from left edge
-
-                            setHoveredCitation({
-                              domain: s.domain,
-                              url: `https://${s.domain}`,
-                              mouseX: leftPosition,
-                              mouseY: rect.top
-                            });
+                            const previewWidth = 480;
+                            const leftPosition = Math.max(10, rect.left - previewWidth - 16);
+                            const topPosition = Math.min(rect.top, window.innerHeight - 250);
+                            hoverTimeoutRef.current = setTimeout(() => {
+                              setHoveredCitation({
+                                domain: s.domain,
+                                url: `https://${s.domain}`,
+                                mouseX: leftPosition,
+                                mouseY: topPosition
+                              });
+                            }, 400);
                           }}
                           onMouseLeave={() => {
+                            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
                             setHoveredCitation(null);
                           }}
                         >
@@ -2884,18 +2917,24 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         key={i}
                         className="hover:bg-gray-50 transition-colors group"
                         onMouseEnter={(e) => {
+                          if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
                           const rect = e.currentTarget.getBoundingClientRect();
                           const previewWidth = 480;
-                          const leftPosition = Math.max(10, rect.left - previewWidth - 20);
-
-                          setHoveredCitation({
-                            domain: c.domain,
-                            url: c.url,
-                            mouseX: leftPosition,
-                            mouseY: rect.top
-                          });
+                          const leftPosition = Math.max(10, rect.left - previewWidth - 16);
+                          const topPosition = Math.min(rect.top, window.innerHeight - 250);
+                          hoverTimeoutRef.current = setTimeout(() => {
+                            setHoveredCitation({
+                              domain: c.domain,
+                              url: c.url,
+                              mouseX: leftPosition,
+                              mouseY: topPosition
+                            });
+                          }, 400);
                         }}
-                        onMouseLeave={() => setHoveredCitation(null)}
+                        onMouseLeave={() => {
+                          if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                          setHoveredCitation(null);
+                        }}
                       >
                         <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
                         <td className="px-6 py-4">
@@ -4089,7 +4128,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     const [pastResponsesCitationFilter, setPastResponsesCitationFilter] = useState<"all" | "new" | "common" | "unused">("all");
     const [generatedVisibilityContent, setGeneratedVisibilityContent] = useState<string | null>(null);
     const [generatingVisibilityContent, setGeneratingVisibilityContent] = useState(false);
-    const [recommendations, setRecommendations] = useState<{ recommendations: { title: string; description: string }[]; priority: 'high' | 'medium' | 'low'; summary: string } | null>(null);
+    const [recommendations, setRecommendations] = useState<PromptInsightResult | null>(null);
     const [generatingRecommendations, setGeneratingRecommendations] = useState(false);
 
     // Date toggle for viewing past responses inline
@@ -5018,95 +5057,272 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 </div>
               )}
 
-              {/* AI Insights/Recommendations Tab */}
+              {/* AI Insights/Recommendations Tab — AI Visibility Strategist */}
               {detailTab === "insights" && (
                 <div className="space-y-4">
                   {recommendations ? (
-                    <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-                      <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-amber-50 via-yellow-50 to-orange-50 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                    <div className="space-y-4">
+                      {/* Header with priority + refresh */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
                           <div className={cn(
-                            "p-2 rounded-xl shadow-lg",
-                            recommendations.priority === 'high' ? "bg-gradient-to-br from-red-500 to-rose-600 shadow-red-200" :
-                              recommendations.priority === 'medium' ? "bg-gradient-to-br from-amber-500 to-orange-600 shadow-amber-200" :
-                                "bg-gradient-to-br from-green-500 to-emerald-600 shadow-green-200"
+                            "p-1.5 rounded-lg",
+                            recommendations.priority === 'high' ? "bg-red-100" : recommendations.priority === 'medium' ? "bg-amber-100" : "bg-green-100"
                           )}>
-                            <Lightbulb className="h-5 w-5 text-white" />
+                            <Target className={cn("h-4 w-4", recommendations.priority === 'high' ? "text-red-600" : recommendations.priority === 'medium' ? "text-amber-600" : "text-green-600")} />
                           </div>
-                          <div>
-                            <span className="font-semibold text-gray-900">AI Visibility Insights</span>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              Priority: <span className={cn(
-                                "font-medium",
-                                recommendations.priority === 'high' ? "text-red-600" :
-                                  recommendations.priority === 'medium' ? "text-amber-600" :
-                                    "text-green-600"
-                              )}>{recommendations.priority.toUpperCase()}</span>
-                            </p>
-                          </div>
+                          <span className="font-semibold text-gray-900 text-sm">AI Visibility Strategist</span>
+                          <Badge className={cn("text-xs", recommendations.priority === 'high' ? "bg-red-100 text-red-700 border-red-200" : recommendations.priority === 'medium' ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-green-100 text-green-700 border-green-200")}>{recommendations.priority.toUpperCase()} PRIORITY</Badge>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleGenerateRecommendations}
-                          disabled={generatingRecommendations}
-                          className="text-amber-600 border-amber-200 hover:bg-amber-50"
-                        >
-                          {generatingRecommendations ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
-                          Refresh
+                        <Button variant="outline" size="sm" onClick={handleGenerateRecommendations} disabled={generatingRecommendations} className="text-xs h-7">
+                          {generatingRecommendations ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}Refresh
                         </Button>
                       </div>
 
-                      {/* Summary */}
-                      <div className="p-4 bg-gray-50 border-b border-gray-100">
-                        <p className="text-sm text-gray-700 leading-relaxed">{recommendations.summary}</p>
+                      {/* Citation Gap Summary */}
+                      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Zap className="h-4 w-4 text-indigo-600" />
+                          <h4 className="text-sm font-semibold text-indigo-900">Citation Gap Analysis</h4>
+                        </div>
+                        <p className="text-sm text-indigo-800 leading-relaxed">{recommendations.citationGapSummary}</p>
                       </div>
 
-                      {/* Recommendations List */}
-                      <div className="p-5">
-                        <h4 className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-4">Actionable Recommendations</h4>
-                        <div className="space-y-3">
-                          {recommendations.recommendations.map((rec, idx) => (
-                            <div key={idx} className="flex items-start gap-3 p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-100 hover:border-amber-200 transition-colors">
-                              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-sm font-bold shadow-sm">
-                                {idx + 1}
+                      {/* Platform Presence Table */}
+                      {recommendations.platformPresence && recommendations.platformPresence.length > 0 && (
+                        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+                            <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Platform Presence</h4>
+                          </div>
+                          <div className="divide-y divide-gray-50">
+                            {recommendations.platformPresence.map((p, idx) => (
+                              <div key={idx} className="flex items-center justify-between px-4 py-2.5">
+                                <span className="text-sm font-medium text-gray-700">{p.platform}</span>
+                                <div className="flex items-center gap-2">
+                                  {p.present ? (
+                                    <>
+                                      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                                        <CheckCircle className="h-3 w-3" />Present
+                                      </span>
+                                      {p.rank && <span className="text-xs text-gray-500">Rank #{p.rank}</span>}
+                                    </>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                                      <X className="h-3 w-3" />Absent
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="flex-1">
-                                <h5 className="text-sm font-semibold text-gray-900 mb-1">{typeof rec === 'object' ? rec.title : 'Recommendation'}</h5>
-                                <p className="text-sm text-gray-700 leading-relaxed">{typeof rec === 'object' ? rec.description : rec}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* High Impact Recommendations */}
+                      {recommendations.recommendations.filter(r => r.type === 'High Impact').length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-shrink-0 h-5 w-5 rounded bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center">
+                              <Sparkles className="h-3 w-3 text-white" />
+                            </div>
+                            <h4 className="text-sm font-bold text-gray-900">High Impact Strategic Actions</h4>
+                          </div>
+                          {recommendations.recommendations.filter(r => r.type === 'High Impact').map((rec, idx) => (
+                            <div key={idx} className="bg-white border border-purple-100 rounded-xl overflow-hidden shadow-sm">
+                              <div className="bg-gradient-to-r from-purple-50 to-indigo-50 px-4 py-3 border-b border-purple-100">
+                                <div className="flex items-start justify-between gap-2">
+                                  <h5 className="text-sm font-semibold text-gray-900">{rec.title}</h5>
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <Badge className="text-xs bg-purple-100 text-purple-700 border-purple-200">High Impact</Badge>
+                                    <Badge className={cn('text-xs', rec.priority === 'High' ? 'bg-red-100 text-red-700 border-red-200' : rec.priority === 'Medium' ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-green-100 text-green-700 border-green-200')}>{rec.priority}</Badge>
+                                  </div>
+                                </div>
+                                {rec.targetPlatforms && (
+                                  <p className="text-xs text-purple-600 mt-1">🎯 {rec.targetPlatforms}</p>
+                                )}
+                              </div>
+                              <div className="p-4 space-y-3">
+                                {rec.whyThisWorks && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Why This Works</p>
+                                    <p className="text-sm text-gray-700 leading-relaxed">{rec.whyThisWorks}</p>
+                                  </div>
+                                )}
+                                {rec.exactAction && (
+                                  <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                                    <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Exact Action</p>
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                      {rec.exactAction.contentFormat && <div><span className="text-gray-500">Format:</span> <span className="font-medium text-gray-700">{rec.exactAction.contentFormat}</span></div>}
+                                      {rec.exactAction.wordCount && <div><span className="text-gray-500">Length:</span> <span className="font-medium text-gray-700">{rec.exactAction.wordCount}</span></div>}
+                                      {rec.exactAction.targetUrl && <div className="col-span-2"><span className="text-gray-500">URL:</span> <span className="font-medium text-indigo-600 break-all">{rec.exactAction.targetUrl}</span></div>}
+                                    </div>
+                                    {rec.exactAction.keyClaims && rec.exactAction.keyClaims.length > 0 && (
+                                      <div>
+                                        <p className="text-xs text-gray-500 mb-1">Key claims to include:</p>
+                                        <ul className="space-y-0.5">
+                                          {rec.exactAction.keyClaims.map((claim, ci) => (
+                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-indigo-400 mt-0.5">•</span>{claim}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                    {rec.exactAction.existingPageNote && (
+                                      <div className="flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded p-2">
+                                        <Info className="h-3.5 w-3.5 text-amber-600 mt-0.5 flex-shrink-0" />
+                                        <p className="text-xs text-amber-700">{rec.exactAction.existingPageNote}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {rec.executionSteps && rec.executionSteps.length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Execution Steps</p>
+                                    <ol className="space-y-1">
+                                      {rec.executionSteps.map((step, si) => (
+                                        <li key={si} className="text-xs text-gray-700 flex items-start gap-2">
+                                          <span className="flex-shrink-0 w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">{si + 1}</span>
+                                          {step}
+                                        </li>
+                                      ))}
+                                    </ol>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-4 pt-1 border-t border-gray-100">
+                                  {rec.timeline && (
+                                    <div className="flex items-center gap-1 text-xs text-gray-600">
+                                      <Clock className="h-3 w-3 text-gray-400" />
+                                      <span className="font-medium">{rec.timeline}</span>
+                                    </div>
+                                  )}
+                                  {rec.successMetric && (
+                                    <div className="flex items-center gap-1 text-xs text-emerald-700">
+                                      <CheckCircle className="h-3 w-3 text-emerald-500" />
+                                      <span>{rec.successMetric}</span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           ))}
                         </div>
-                      </div>
+                      )}
+
+                      {/* Quick Win Recommendations */}
+                      {recommendations.recommendations.filter(r => r.type === 'Quick Win').length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-shrink-0 h-5 w-5 rounded bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center">
+                              <Zap className="h-3 w-3 text-white" />
+                            </div>
+                            <h4 className="text-sm font-bold text-gray-900">Quick Tactical Wins</h4>
+                          </div>
+                          {recommendations.recommendations.filter(r => r.type === 'Quick Win').map((rec, idx) => (
+                            <div key={idx} className="bg-white border border-teal-100 rounded-xl overflow-hidden shadow-sm">
+                              <div className="bg-gradient-to-r from-teal-50 to-green-50 px-4 py-3 border-b border-teal-100">
+                                <div className="flex items-start justify-between gap-2">
+                                  <h5 className="text-sm font-semibold text-gray-900">{rec.title}</h5>
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <Badge className="text-xs bg-teal-100 text-teal-700 border-teal-200">Quick Win</Badge>
+                                    <Badge className={cn('text-xs', rec.priority === 'High' ? 'bg-red-100 text-red-700 border-red-200' : rec.priority === 'Medium' ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-green-100 text-green-700 border-green-200')}>{rec.priority}</Badge>
+                                  </div>
+                                </div>
+                                {rec.targetPlatforms && (
+                                  <p className="text-xs text-teal-600 mt-1">🎯 {rec.targetPlatforms}</p>
+                                )}
+                              </div>
+                              <div className="p-4 space-y-3">
+                                {rec.whyThisWorks && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Why This Works</p>
+                                    <p className="text-sm text-gray-700 leading-relaxed">{rec.whyThisWorks}</p>
+                                  </div>
+                                )}
+                                {rec.exactAction && (
+                                  <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                                    <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Exact Action</p>
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                      {rec.exactAction.contentFormat && <div><span className="text-gray-500">Format:</span> <span className="font-medium text-gray-700">{rec.exactAction.contentFormat}</span></div>}
+                                      {rec.exactAction.wordCount && <div><span className="text-gray-500">Length:</span> <span className="font-medium text-gray-700">{rec.exactAction.wordCount}</span></div>}
+                                      {rec.exactAction.targetUrl && <div className="col-span-2"><span className="text-gray-500">URL:</span> <span className="font-medium text-teal-600 break-all">{rec.exactAction.targetUrl}</span></div>}
+                                    </div>
+                                    {rec.exactAction.keyClaims && rec.exactAction.keyClaims.length > 0 && (
+                                      <div>
+                                        <p className="text-xs text-gray-500 mb-1">Key claims to include:</p>
+                                        <ul className="space-y-0.5">
+                                          {rec.exactAction.keyClaims.map((claim, ci) => (
+                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-teal-400 mt-0.5">•</span>{claim}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                    {rec.exactAction.existingPageNote && (
+                                      <div className="flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded p-2">
+                                        <Info className="h-3.5 w-3.5 text-amber-600 mt-0.5 flex-shrink-0" />
+                                        <p className="text-xs text-amber-700">{rec.exactAction.existingPageNote}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {rec.executionSteps && rec.executionSteps.length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Execution Steps</p>
+                                    <ol className="space-y-1">
+                                      {rec.executionSteps.map((step, si) => (
+                                        <li key={si} className="text-xs text-gray-700 flex items-start gap-2">
+                                          <span className="flex-shrink-0 w-4 h-4 rounded-full bg-teal-100 text-teal-700 font-bold flex items-center justify-center text-xs">{si + 1}</span>
+                                          {step}
+                                        </li>
+                                      ))}
+                                    </ol>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-4 pt-1 border-t border-gray-100">
+                                  {rec.timeline && (
+                                    <div className="flex items-center gap-1 text-xs text-gray-600">
+                                      <Clock className="h-3 w-3 text-gray-400" />
+                                      <span className="font-medium">{rec.timeline}</span>
+                                    </div>
+                                  )}
+                                  {rec.successMetric && (
+                                    <div className="flex items-center gap-1 text-xs text-emerald-700">
+                                      <CheckCircle className="h-3 w-3 text-emerald-500" />
+                                      <span>{rec.successMetric}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Footer */}
-                      <div className="p-4 border-t border-gray-100 bg-gradient-to-r from-amber-50 to-orange-50">
+                      <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl">
                         <div className="flex items-start gap-3">
-                          <div className="p-2 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex-shrink-0 shadow-sm">
-                            <Lightbulb className="h-4 w-4 text-white" />
+                          <div className="p-2 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex-shrink-0 shadow-sm">
+                            <Sparkles className="h-4 w-4 text-white" />
                           </div>
                           <div>
-                            <p className="text-sm font-semibold text-gray-800">Powered by AI Analysis</p>
-                            <p className="text-xs text-gray-600 mt-1 leading-relaxed">These insights are generated based on your audit results, Tavily web analysis, and competitor data. Implement these recommendations to improve your brand's visibility in AI-generated responses.</p>
+                            <p className="text-sm font-semibold text-gray-800">AI Visibility Strategist</p>
+                            <p className="text-xs text-gray-600 mt-1 leading-relaxed">Insights generated from per-platform AI response analysis, citation source data, and competitor gap analysis. Recommendations target specific citation patterns to improve your brand's presence in AI-generated responses.</p>
                           </div>
                         </div>
                       </div>
                     </div>
                   ) : (
-                    <div className="text-center py-16 bg-gradient-to-br from-amber-50 via-white to-orange-50 rounded-2xl border border-gray-200 shadow-sm">
-                      <div className="bg-gradient-to-br from-amber-100 to-orange-100 h-20 w-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
-                        <Lightbulb className="h-10 w-10 text-amber-500" />
+                    <div className="text-center py-16 bg-gradient-to-br from-indigo-50 via-white to-purple-50 rounded-2xl border border-gray-200 shadow-sm">
+                      <div className="bg-gradient-to-br from-indigo-100 to-purple-100 h-20 w-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                        <Target className="h-10 w-10 text-indigo-500" />
                       </div>
-                      <p className="text-gray-800 font-semibold text-lg mb-2">Get AI-Powered Insights</p>
-                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Generate actionable recommendations based on your audit results, Tavily analysis, and competitor data to improve AI visibility.</p>
-                      <Button onClick={handleGenerateRecommendations} disabled={generatingRecommendations} size="lg" className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-lg shadow-amber-200 transition-all">
-                        {generatingRecommendations ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Analyzing...</> : <><Lightbulb className="h-4 w-4 mr-2" />Generate Insights</>}
+                      <p className="text-gray-800 font-semibold text-lg mb-2">AI Visibility Strategist</p>
+                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Analyze why competitors get cited in AI responses for this query, and get 6 precise, actionable recommendations to close the gap — split into High Impact strategies and Quick Wins.</p>
+                      <Button onClick={handleGenerateRecommendations} disabled={generatingRecommendations} size="lg" className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-lg shadow-indigo-200 transition-all">
+                        {generatingRecommendations ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Analyzing Citation Gaps...</> : <><Zap className="h-4 w-4 mr-2" />Generate Visibility Strategy</>}
                       </Button>
                       <div className="flex items-center justify-center gap-4 mt-6 text-xs text-gray-400">
-                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Audit-based</span>
-                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Tavily data</span>
-                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Competitor analysis</span>
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Citation gap analysis</span>
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Per-platform insights</span>
+                        <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> 6 structured actions</span>
                       </div>
                     </div>
                   )}

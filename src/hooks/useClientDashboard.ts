@@ -331,6 +331,32 @@ export interface CompetitorGapItem { name: string; mentions: number; percentage:
 export interface SourceItem { domain: string; count: number; prompts: string[]; type: string; promptCount: number; avg: number; }
 export interface Insights { status: "high" | "medium" | "low"; statusText: string; recommendations: string[]; }
 
+// Prompt-level AI Visibility Strategist types
+export interface PromptInsightRecommendation {
+  title: string;
+  type: 'High Impact' | 'Quick Win';
+  targetPlatforms: string;
+  priority: 'High' | 'Medium' | 'Low';
+  whyThisWorks: string;
+  exactAction: {
+    contentFormat: string;
+    targetUrl: string;
+    wordCount: string;
+    keyClaims: string[];
+    existingPageNote?: string;
+  };
+  executionSteps: string[];
+  timeline: string;
+  successMetric: string;
+}
+
+export interface PromptInsightResult {
+  citationGapSummary: string;
+  platformPresence: { platform: string; present: boolean; rank: number | null }[];
+  recommendations: PromptInsightRecommendation[];
+  priority: 'high' | 'medium' | 'low';
+}
+
 // Industry presets
 export const INDUSTRY_PRESETS: Record<string, {
   competitors: string[]; prompts: string[]; nichePrompts: string[]; superNichePrompts: string[];
@@ -842,7 +868,7 @@ export function useClientDashboard() {
     try {
       const { data, error: ciError } = await supabase
         .from('citation_intelligence')
-        .select('domain, citation_category, source_type, authority_tier, relationship_type')
+        .select('domain, citation_category, source_type, authority_tier, relationship_type, verification_status, similarity_score, matched_paragraph, page_fetch_status')
         .eq('client_id', client.id);
       if (ciError) {
         console.error("[CitationMeta] Load error:", ciError);
@@ -852,7 +878,11 @@ export function useClientDashboard() {
           meta[row.domain] = {
             category: row.citation_category, source_type: row.source_type,
             authority_tier: row.authority_tier, relationship_type: row.relationship_type,
-            is_affiliate: row.source_type === 'affiliate'
+            is_affiliate: row.source_type === 'affiliate',
+            verification_status: row.verification_status,
+            similarity_score: row.similarity_score,
+            matched_paragraph: row.matched_paragraph,
+            page_fetch_status: row.page_fetch_status
           };
         });
         loadedCitationMeta = meta;
@@ -2766,15 +2796,17 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
     return [];
   }, []);
 
+
   /**
-   * Generate AI-powered recommendations for a specific prompt based on audit and Tavily data
-   * Uses Groq API to analyze visibility gaps and provide actionable insights
+   * Generate AI Visibility Strategist insights for a specific prompt
+   * Uses Groq API with full Citation Gap Analysis and structured recommendations
    */
   const generateRecommendations = useCallback(async (
     promptText: string,
     auditResult: AuditResult | null,
-    tavilyData: any
-  ): Promise<{ recommendations: { title: string; description: string }[]; priority: 'high' | 'medium' | 'low'; summary: string } | null> => {
+    tavilyData: any,
+    completedRecommendations: string[] = []
+  ): Promise<PromptInsightResult | null> => {
     if (!selectedClient) return null;
 
     const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
@@ -2783,19 +2815,68 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
       return null;
     }
 
-    // Build context from audit
+    // Build context from audit - per-platform response text
     const sov = auditResult?.summary?.share_of_voice || 0;
     const rank = auditResult?.summary?.average_rank || 'Not ranked';
-    const modelSummary = auditResult?.model_results
-      .map(mr => `${mr.model_name}: ${mr.brand_mentioned ? 'Mentioned' : 'Not mentioned'}${mr.brand_rank ? `, Rank #${mr.brand_rank}` : ''}`)
-      .join('\n') || 'No model data';
 
-    const topCitations = auditResult?.model_results
-      .flatMap(mr => mr.citations)
-      .slice(0, 5)
-      .map(c => `${c.domain}`)
-      .join(', ') || 'None';
+    // Map model IDs to AI platform names for the prompt
+    const platformNameMap: Record<string, string> = {
+      chatgpt: 'ChatGPT',
+      perplexity: 'Perplexity',
+      gemini: 'Gemini',
+      google_serp: 'Google AI Overview',
+      claude: 'Claude'
+    };
 
+    // Build per-platform response text
+    const perPlatformResponses = (auditResult?.model_results || []).map(mr => {
+      const platformName = platformNameMap[mr.model] || mr.model_name;
+      const brandPresent = mr.brand_mentioned ? 'Present' : 'Absent';
+      const rankInfo = mr.brand_rank ? `Rank: #${mr.brand_rank}` : 'Not ranked';
+
+      // Get brand entities / extracted brands info for richer context
+      const extractedBrands = (mr.extracted_brands || [])
+        .filter(b => !b.is_own_brand)
+        .slice(0, 10)
+        .map(b => `${b.title} (position: ${b.position}, mentions: ${b.mention_count})`)
+        .join('; ');
+
+      return `**${platformName} Response:**
+Brand Status: ${brandPresent}, ${rankInfo}
+Competitors Found: ${extractedBrands || 'None extracted'}
+Citations: ${mr.citations.map(c => c.domain).join(', ') || 'None'}
+Response Text (truncated): ${(mr.raw_response || '').substring(0, 1500)}`;
+    }).join('\n\n---\n\n');
+
+    // Build cited source URLs with snippets
+    const allCitations = (auditResult?.model_results || []).flatMap(mr =>
+      mr.citations.map(c => ({
+        url: c.url,
+        domain: c.domain,
+        title: c.title || '',
+        model: platformNameMap[mr.model] || mr.model_name
+      }))
+    );
+    const uniqueCitedUrls = Array.from(new Map(allCitations.map(c => [c.url, c])).values());
+
+    // Add Tavily-scraped content for cited URLs if available
+    const citedSourceContent = uniqueCitedUrls.slice(0, 10).map(c => {
+      // Check if Tavily results have content for this URL
+      const tavilyMatch = tavilyData?.results?.find((r: any) =>
+        r.url === c.url || r.url?.includes(c.domain)
+      );
+      const snippet = tavilyMatch?.content || tavilyMatch?.snippet || 'Snippet not available';
+      return `- ${c.domain} (cited by ${c.model}): ${c.title}
+  URL: ${c.url}
+  Content: ${snippet.substring(0, 500)}`;
+    }).join('\n');
+
+    // Build existing brand content check from Tavily
+    const brandContentCheck = tavilyData?.results?.filter((r: any) =>
+      r.url?.includes(selectedClient.brand_domain || '___none___')
+    ).map((r: any) => `- ${r.url}: ${r.title || 'No title'}`).join('\n') || 'Not verified. For any page creation recommendation, include the instruction: Check if this page exists before building — search site:' + (selectedClient.brand_domain || selectedClient.brand_name.toLowerCase().replace(/\s+/g, '')) + ' [keyword] in Google first.';
+
+    // Competitor analysis
     const competitorsInResponse = auditResult?.model_results
       .flatMap(mr => {
         const response = mr.raw_response?.toLowerCase() || '';
@@ -2803,79 +2884,130 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
       })
       .filter((v, i, a) => a.indexOf(v) === i) || [];
 
-    // Build Tavily context
+    // Tavily additional context
     const tavilyContext = tavilyData ? `
-Tavily Web Analysis:
-- Brand Found in Web Sources: ${tavilyData.analysis?.brand_mentioned ? 'Yes' : 'No'} (${tavilyData.analysis?.brand_mention_count || 0} times)
-- Competitor Web Presence: ${JSON.stringify(tavilyData.analysis?.competitor_mentions || {})}
-- Top Authoritative Domains: ${(tavilyData.analysis?.top_domains || []).slice(0, 5).map((d: any) => d.domain).join(', ') || 'None'}
-- Dominant Source Types: ${JSON.stringify(tavilyData.analysis?.source_types || {})}
-- Tavily Insights: ${(tavilyData.analysis?.insights || []).join('; ') || 'None'}` : '';
+Web Source Analysis (Tavily):
+- Brand Found: ${tavilyData.analysis?.brand_mentioned ? 'Yes' : 'No'} (${tavilyData.analysis?.brand_mention_count || 0} mentions)
+- Competitor Mentions: ${JSON.stringify(tavilyData.analysis?.competitor_mentions || {})}
+- Top Domains: ${(tavilyData.analysis?.top_domains || []).slice(0, 5).map((d: any) => d.domain).join(', ')}
+- Source Types: ${JSON.stringify(tavilyData.analysis?.source_types || {})}
+- AI Insights: ${(tavilyData.analysis?.insights || []).join('; ')}` : 'No Tavily data available';
 
-    const systemPrompt = `You are an AI Visibility Strategy Expert. Analyze the provided data and generate HIGHLY SPECIFIC, IMMEDIATELY ACTIONABLE recommendations.
+    const systemPrompt = `You are an AI Visibility Strategist helping a brand improve how often and how prominently it appears in AI-generated responses (ChatGPT, Perplexity, Google AI Overview, Gemini, Claude).
 
-CRITICAL ANTI-GENERIC RULES - NEVER USE THESE PHRASES:
-- "study their content strategy" 
-- "build relationships with..."
-- "create quality content"
-- "focus on improving..."
-- "analyze competitor..."
-- "engage authentically"
+Your job is to analyze why competitor brands are being cited in AI responses for a specific query, and generate precise, actionable recommendations to close that citation gap for the target brand.
 
-REQUIRED SPECIFICITY - EVERY recommendation MUST include:
-1. EXACT target (domain name, competitor name, content URL)
-2. SPECIFIC action (word count, format, platform)
-3. TIMELINE (this week, within 2 weeks, this month)
-4. SUCCESS METRIC (how to measure if it worked)
+## STEP 1 — CITATION GAP ANALYSIS (Internal Reasoning)
 
-EXAMPLE GOOD RECOMMENDATIONS:
-Title: Create Comparison Page
-Description: Create 2000-word comparison page at yourbrand.com/vs/CompetitorX covering: pricing table, feature matrix, 5 user testimonials. Publish within 2 weeks. Track: organic traffic to page + AI model citations.
+Before generating any recommendations, reason through the following. Do not skip this step.
 
-Title: Quora Answer Strategy
-Description: Post answer on Quora to 'Best [industry] tools 2024' (URL: quora.com/xxx). 250-400 words. Include personal experience with BrandName. Post this week. Track: answer impressions + upvotes.
+1. **Platform Presence Audit:** For each AI platform, state whether the target brand is present or absent, and its position rank if present.
 
-Title: Press Pitch
-Description: Pitch TechCrunch contributor Sarah Smith (sarah@tc.com) with exclusive data: 'X% of users prefer Y'. Angle: industry trend piece. Send pitch Monday. Track: coverage + backlink.
+2. **Competitor Citation Analysis:** For each competitor appearing in AI responses, identify:
+   - The content TYPE driving their citation (health editorial / product listing / Q&A answer / news article / clinical reference / expert quote)
+   - The specific CLAIM or benefit being cited
+   - The DOMAIN TYPE of the source (health publication / e-commerce / forum / brand site)
+
+3. **Content Gap Identification:** What specific claims, benefits, or content formats is the target brand missing from the citation ecosystem? Be specific.
+
+4. **Platform-Specific Patterns:** Note if certain platforms cite specific content types (e.g., Perplexity cites clinical health articles, Google AI Overview cites structured product pages, ChatGPT cites listicles and e-commerce descriptions).
+
+## STEP 2 — RECOMMENDATION GENERATION
+
+Generate exactly 6 recommendations: 2-3 HIGH IMPACT STRATEGIC and 3-4 QUICK TACTICAL WINS.
+
+## CRITICAL RULES
+
+**Never recommend:**
+- Creating a page that already exists (check existing content input first)
+- Guest posting on domains not relevant to the brand's industry
+- Reddit or forum posts as a primary brand strategy
+- Generic backlink building without a specific domain target
+- Never use the phrases "create quality content", "study their content strategy", or "analyze competitor"
+
+**Always ensure:**
+- Every cited domain target is editorially relevant to the query topic
+- Every content recommendation includes specific claims or facts driving competitor citations
+- At least one recommendation is platform-specific (targeting a single LLM's citation behavior)
+- If the brand has no presence on a high-value platform, one recommendation must address that gap
 
 Output EXACTLY this JSON format:
 {
   "priority": "high|medium|low",
-  "summary": "One sentence with SPECIFIC metrics (e.g., 'Visibility at 23%, CompetitorX leads with 67%')",
+  "citationGapSummary": "4-6 sentences in plain English summarizing the citation gap, suitable for a marketing professional.",
+  "platformPresence": [
+    { "platform": "ChatGPT", "present": true/false, "rank": number_or_null },
+    { "platform": "Perplexity", "present": true/false, "rank": number_or_null },
+    { "platform": "Gemini", "present": true/false, "rank": number_or_null },
+    { "platform": "Google AI Overview", "present": true/false, "rank": number_or_null },
+    { "platform": "Claude", "present": true/false, "rank": number_or_null }
+  ],
   "recommendations": [
-    { "title": "Actionable Title", "description": "Specific action with exact target, format, timeline, metric" },
-    { "title": "Actionable Title 2", "description": "Specific action..." },
-    { "title": "Actionable Title 3", "description": "Specific action..." },
-    { "title": "Actionable Title 4", "description": "Specific action..." },
-    { "title": "Actionable Title 5", "description": "Specific action..." }
+    {
+      "title": "Recommendation Title",
+      "type": "High Impact",
+      "targetPlatforms": "Specific LLM(s) or All Platforms",
+      "priority": "High",
+      "whyThisWorks": "2-3 sentences explaining specifically why this will improve AI citation — reference the gap or competitor pattern.",
+      "exactAction": {
+        "contentFormat": "article / FAQ page / comparison page / Quora answer / structured data markup / etc.",
+        "targetUrl": "Exact domain or recommended URL slug for new page",
+        "wordCount": "Specific number",
+        "keyClaims": ["Claim 1 from gap analysis", "Claim 2", "Claim 3"],
+        "existingPageNote": "Optimize existing page at [URL] — only if existing page found"
+      },
+      "executionSteps": ["Step 1", "Step 2", "Step 3"],
+      "timeline": "This week / Within 2 weeks / Within 1 month",
+      "successMetric": "One specific, measurable outcome"
+    }
   ]
 }`;
 
-    const userPrompt = `Analyze this brand's AI visibility and provide recommendations:
+    const userPrompt = `Analyze this brand's AI visibility and provide Citation Gap Analysis + 6 Recommendations:
 
-QUERY: "${promptText}"
+**Query:** "${promptText}"
+**Target Brand:** ${selectedClient.brand_name}
+**Target Brand Website:** ${selectedClient.brand_domain || 'Not specified'}
+**Industry:** ${selectedClient.industry}
+**Region:** ${selectedClient.target_region}
+**Competitors:** ${selectedClient.competitors.join(', ')}
 
-BRAND: ${selectedClient.brand_name}
-INDUSTRY: ${selectedClient.industry}
-REGION: ${selectedClient.target_region}
-WEBSITE: ${selectedClient.brand_domain || 'Not specified'}
-COMPETITORS: ${selectedClient.competitors.join(', ')}
+---
+
+**AI Platform Responses:**
+${perPlatformResponses || 'No per-platform data available. Generate platform-agnostic recommendations.'}
+
+---
+
+**Cited Source URLs with Content:**
+${citedSourceContent || 'No cited URLs available.'}
+${!citedSourceContent ? '\nNote: Only snippet-level content is available for cited URLs. Reason from the language, claims, and terminology visible in snippets to identify citation patterns.' : ''}
+
+---
+
+**Target Brand Existing Content Check:**
+${brandContentCheck}
+
+---
+
+${tavilyContext}
+
+---
+
+**Completed Recommendations (Do Not Repeat):**
+${completedRecommendations.length > 0 ? completedRecommendations.join('\n') : 'None — this is the first analysis.'}
+
+---
 
 CURRENT VISIBILITY STATUS:
 - Share of Voice: ${sov}%
 - Average Rank: ${rank}
-- Competitors appearing in AI responses: ${competitorsInResponse.join(', ') || 'None'}
+- Competitors appearing: ${competitorsInResponse.join(', ') || 'None'}
 
-AI MODEL BREAKDOWN:
-${modelSummary}
-
-TOP CITED DOMAINS: ${topCitations}
-${tavilyContext}
-
-Generate 5 specific, actionable recommendations to improve this brand's visibility for this query:`;
+Generate the Citation Gap Analysis and exactly 6 Recommendations (2-3 High Impact + 3-4 Quick Wins) as JSON:`;
 
     try {
-      console.log('[Groq] Generating recommendations for:', promptText.substring(0, 40));
+      console.log('[Groq] Generating AI Visibility Strategist insights for:', promptText.substring(0, 40));
       const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -2889,7 +3021,7 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
             { role: "user", content: userPrompt }
           ],
           temperature: 0.5,
-          max_tokens: 1024,
+          max_tokens: 4096,
           response_format: { type: "json_object" }
         }),
       });
@@ -2897,70 +3029,103 @@ Generate 5 specific, actionable recommendations to improve this brand's visibili
       if (response.ok) {
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content || '';
-        console.log('[Groq] Recommendations response:', content.substring(0, 100));
+        console.log('[Groq] AI Visibility Strategist response:', content.substring(0, 150));
 
         try {
-          // Parse JSON response
           const jsonMatch = content.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
             return {
               priority: parsed.priority || 'medium',
-              summary: parsed.summary || 'Analysis complete',
+              citationGapSummary: parsed.citationGapSummary || 'Analysis complete.',
+              platformPresence: Array.isArray(parsed.platformPresence) ? parsed.platformPresence.map((p: any) => ({
+                platform: p.platform || 'Unknown',
+                present: !!p.present,
+                rank: p.rank ?? null
+              })) : [],
               recommendations: Array.isArray(parsed.recommendations)
                 ? parsed.recommendations.map((r: any) => ({
-                  title: r.title || "Recommendation",
-                  description: r.description || (typeof r === 'string' ? r : JSON.stringify(r))
+                  title: r.title || 'Recommendation',
+                  type: r.type === 'Quick Win' ? 'Quick Win' as const : 'High Impact' as const,
+                  targetPlatforms: r.targetPlatforms || 'All Platforms',
+                  priority: r.priority || 'Medium',
+                  whyThisWorks: r.whyThisWorks || '',
+                  exactAction: {
+                    contentFormat: r.exactAction?.contentFormat || '',
+                    targetUrl: r.exactAction?.targetUrl || '',
+                    wordCount: r.exactAction?.wordCount || '',
+                    keyClaims: Array.isArray(r.exactAction?.keyClaims) ? r.exactAction.keyClaims : [],
+                    existingPageNote: r.exactAction?.existingPageNote || undefined
+                  },
+                  executionSteps: Array.isArray(r.executionSteps) ? r.executionSteps : [],
+                  timeline: r.timeline || '',
+                  successMetric: r.successMetric || ''
                 }))
                 : []
             };
           }
         } catch (parseErr) {
-          console.error('[Groq] Failed to parse recommendations JSON:', parseErr);
+          console.error('[Groq] Failed to parse AI Visibility Strategist JSON:', parseErr);
         }
       } else {
-        console.error('[Groq] Recommendations API error:', response.status);
+        console.error('[Groq] AI Visibility Strategist API error:', response.status);
       }
     } catch (err) {
-      console.error('[Groq] Recommendations exception:', err);
+      console.error('[Groq] AI Visibility Strategist exception:', err);
     }
 
-    // Return fallback recommendations based on data
-    const fallbackRecs: { title: string; description: string }[] = [];
+    // Return fallback based on data
+    const fallbackPlatformPresence = (auditResult?.model_results || []).map(mr => ({
+      platform: platformNameMap[mr.model] || mr.model_name,
+      present: mr.brand_mentioned,
+      rank: mr.brand_rank ?? null
+    }));
+
+    const fallbackRecs: PromptInsightRecommendation[] = [];
     if (sov < 50) {
       fallbackRecs.push({
-        title: "Improve Visibility",
-        description: `Currently only appearing in ${sov}% of AI responses. Focus on creating authoritative content.`
+        title: 'Improve Overall AI Visibility',
+        type: 'High Impact',
+        targetPlatforms: 'All Platforms',
+        priority: 'High',
+        whyThisWorks: `Currently only appearing in ${sov}% of AI responses. Competitors are dominating the citation space for this query.`,
+        exactAction: { contentFormat: 'Authority article', targetUrl: `${selectedClient.brand_domain || 'yourbrand.com'}/blog/${promptText.toLowerCase().replace(/\s+/g, '-').substring(0, 40)}`, wordCount: '2000-2500 words', keyClaims: ['Address the core query comprehensively', 'Include specific data points and statistics', 'Reference authoritative sources'] },
+        executionSteps: ['Research the top-ranking content for this query', 'Draft a comprehensive article addressing all angles', 'Include brand-specific data and case studies', 'Publish and submit to Google Search Console'],
+        timeline: 'Within 2 weeks',
+        successMetric: `Brand mentioned in at least 2 additional AI platform responses within 60 days`
       });
     }
     if (competitorsInResponse.length > 0) {
       fallbackRecs.push({
-        title: "Target Competitor Gap",
-        description: `${competitorsInResponse[0]} is appearing where you're not. Analyze their citations.`
+        title: `Close Gap Against ${competitorsInResponse[0]}`,
+        type: 'High Impact',
+        targetPlatforms: 'All Platforms',
+        priority: 'High',
+        whyThisWorks: `${competitorsInResponse[0]} is appearing in AI responses where ${selectedClient.brand_name} is absent. Direct comparison content can shift citations.`,
+        exactAction: { contentFormat: 'Comparison page', targetUrl: `${selectedClient.brand_domain || 'yourbrand.com'}/vs/${competitorsInResponse[0].toLowerCase().replace(/\s+/g, '-')}`, wordCount: '1500-2000 words', keyClaims: ['Feature-by-feature comparison', 'Pricing transparency', 'User testimonials'] },
+        executionSteps: ['Audit competitor content for the claims driving their citations', 'Create a structured comparison page with tables and data', 'Include genuine user reviews and testimonials'],
+        timeline: 'Within 2 weeks',
+        successMetric: `Brand appears alongside ${competitorsInResponse[0]} in AI comparison responses`
       });
     }
-    if (tavilyData?.analysis?.insights?.length > 0) {
+    if (fallbackRecs.length < 6) {
       fallbackRecs.push({
-        title: "Web Analysis Insight",
-        description: tavilyData.analysis.insights[0]
-      });
-    }
-    if (topCitations) {
-      fallbackRecs.push({
-        title: "Build Relationships",
-        description: `Your competitors are cited on: ${topCitations}. Target these domains.`
-      });
-    }
-    if (fallbackRecs.length === 0) {
-      fallbackRecs.push({
-        title: "Run More Audits",
-        description: "Insufficient data to generate specific recommendations. Run more audits to gather insights."
+        title: 'Run Audit for Complete Analysis',
+        type: 'Quick Win',
+        targetPlatforms: 'All Platforms',
+        priority: 'Medium',
+        whyThisWorks: 'More audit data enables the AI Visibility Strategist to generate precise, citation-gap-driven recommendations.',
+        exactAction: { contentFormat: 'Audit', targetUrl: '', wordCount: 'N/A', keyClaims: ['Gather per-platform response data', 'Identify citation sources'] },
+        executionSteps: ['Run a full audit on this prompt', 'Enable Tavily for web source analysis', 'Re-generate insights with the additional data'],
+        timeline: 'This week',
+        successMetric: 'Complete audit data available for AI analysis'
       });
     }
 
     return {
       priority: sov < 30 ? 'high' : sov < 60 ? 'medium' : 'low',
-      summary: `Share of Voice: ${sov}%`,
+      citationGapSummary: `Share of Voice is ${sov}%. ${competitorsInResponse.length > 0 ? `Competitors ${competitorsInResponse.join(', ')} are appearing in AI responses. ` : ''}Run the AI analysis to get detailed citation gap insights.`,
+      platformPresence: fallbackPlatformPresence,
       recommendations: fallbackRecs
     };
   }, [selectedClient]);
@@ -3016,20 +3181,20 @@ EXAMPLE BAD (FORBIDDEN):
 
 Output EXACTLY this JSON:
 {
-  "priority": "high|medium|low",
-  "summary": "Specific executive summary with numbers (e.g., 'Visibility 34%, [Competitor] dominates at 78%')",
-  "recommendations": [
-    "Strategic recommendation with specific action, target, and metric",
-    "Strategic recommendation 2...",
-    "Strategic recommendation 3...",
-    "Strategic recommendation 4...",
-    "Strategic recommendation 5..."
-  ],
-  "keyActions": [
-    "IMMEDIATE (this week): Specific action with target and deliverable",
-    "SHORT-TERM (this month): Specific action with timeline and metric",
-    "LONG-TERM (this quarter): Specific campaign with measurable goal"
-  ]
+"priority": "high|medium|low",
+"summary": "Specific executive summary with numbers (e.g., 'Visibility 34%, [Competitor] dominates at 78%')",
+"recommendations": [
+  "Strategic recommendation with specific action, target, and metric",
+  "Strategic recommendation 2...",
+  "Strategic recommendation 3...",
+  "Strategic recommendation 4...",
+  "Strategic recommendation 5..."
+],
+"keyActions": [
+  "IMMEDIATE (this week): Specific action with target and deliverable",
+  "SHORT-TERM (this month): Specific action with timeline and metric",
+  "LONG-TERM (this quarter): Specific campaign with measurable goal"
+]
 }`;
 
     const userPrompt = `Analyze this brand's OVERALL AI visibility performance and provide strategic recommendations:
@@ -3129,20 +3294,26 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
   // ============================================
 
   const fetchCitationMeta = useCallback(async () => {
+    if (!selectedClient) return;
     try {
       const { data, error } = await supabase
         .from('citation_intelligence')
-        .select('domain, category, source_type, authority_tier, relationship_type, is_affiliate');
+        .select('domain, citation_category, source_type, authority_tier, relationship_type, verification_status, similarity_score, matched_paragraph, page_fetch_status')
+        .eq('client_id', selectedClient.id);
 
       if (data) {
         const meta: Record<string, CitationMeta> = {};
         data.forEach((row: any) => {
           meta[row.domain] = {
-            category: row.category, // Map DB column to interface
+            category: row.citation_category,
             source_type: row.source_type,
             authority_tier: row.authority_tier,
             relationship_type: row.relationship_type,
-            is_affiliate: row.is_affiliate
+            is_affiliate: row.source_type === 'affiliate',
+            verification_status: row.verification_status,
+            similarity_score: row.similarity_score,
+            matched_paragraph: row.matched_paragraph,
+            page_fetch_status: row.page_fetch_status
           };
         });
         setCitationMeta(meta);
@@ -3150,7 +3321,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     } catch (err) {
       console.error("Failed to fetch citation meta:", err);
     }
-  }, []);
+  }, [selectedClient]);
 
   const categorizeCitations = useCallback(async (domains: string[], onProgress?: (progress: { completed: number; total: number; currentBatch: number; totalBatches: number }) => void) => {
     if (domains.length === 0) return;
@@ -3352,6 +3523,11 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
       setCategorizationProgress(null);
       console.log(`[AutoCategorize] Done categorizing ${uncategorized.length} domains`);
+
+      // Auto-verify newly categorized citations (fire-and-forget)
+      autoVerifyPendingRef.current?.().catch(err =>
+        console.warn("[AutoVerify] Post-categorize failed (non-blocking):", err)
+      );
     } catch (err) {
       setCategorizationProgress(null);
       console.warn("[AutoCategorize] Failed (non-blocking):", err);
@@ -3361,6 +3537,50 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
   // Ref to allow forward-referencing autoCategorizeNewDomains from earlier-defined callbacks
   const autoCategorizeRef = useRef(autoCategorizeNewDomains);
   useEffect(() => { autoCategorizeRef.current = autoCategorizeNewDomains; }, [autoCategorizeNewDomains]);
+
+  // Ref to allow autoVerifyPending to call verifyCitations (declared below) without forward-ref error
+  const verifyCitationsRef = useRef<typeof verifyCitations | null>(null);
+
+  // Auto-verify pending citations after categorization completes
+  const autoVerifyPending = useCallback(async () => {
+    if (!selectedClient) return;
+    try {
+      // Collect citations that need verification
+      const pendingUrls = new Set<string>();
+      auditResults.forEach(ar => {
+        ar.model_results?.forEach(mr => {
+          mr.citations?.forEach(c => {
+            if (c.url && c.domain) {
+              const meta = citationMeta?.[c.domain];
+              if (!meta?.verification_status || meta.verification_status === 'pending') {
+                pendingUrls.add(c.url);
+              }
+            }
+          });
+        });
+      });
+
+      const pendingCitations = Array.from(pendingUrls).slice(0, 30).map(url => ({
+        url,
+        citation_id: url
+      }));
+
+      if (pendingCitations.length === 0) {
+        console.log("[AutoVerify] No pending citations to verify");
+        return;
+      }
+
+      console.log(`[AutoVerify] Verifying ${pendingCitations.length} pending citations (of ${pendingUrls.size} total)`);
+      const claim = selectedClient.brand_name || "brand mention";
+      await verifyCitationsRef.current?.(pendingCitations, claim);
+      console.log(`[AutoVerify] Completed auto-verification`);
+    } catch (err) {
+      console.warn("[AutoVerify] Failed (non-blocking):", err);
+    }
+  }, [selectedClient, auditResults, citationMeta]);
+
+  const autoVerifyPendingRef = useRef(autoVerifyPending);
+  useEffect(() => { autoVerifyPendingRef.current = autoVerifyPending; }, [autoVerifyPending]);
 
   // Auto-categorize uncategorized domains on page load (runs once per client session)
   const autoCategorizeDoneForClient = useRef<string | null>(null);
@@ -3376,7 +3596,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
   const verifyCitations = useCallback(async (citations: Array<{ url: string; citation_id: string }>, claim: string, onProgress?: (progress: { completed: number; total: number; currentBatch: number; totalBatches: number }) => void) => {
     if (citations.length === 0) return;
     try {
-      const BATCH_SIZE = 10; // Smaller batches for verification (each citation requires fetch + LLM)
+      const BATCH_SIZE = 10;
       const batches: typeof citations[] = [];
       for (let i = 0; i < citations.length; i += BATCH_SIZE) {
         batches.push(citations.slice(i, i + BATCH_SIZE));
@@ -3405,11 +3625,34 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
         });
 
         if (data?.success && data.results) {
+          // Update local citationMeta immediately with batch results
+          const updatedMeta = { ...citationMeta };
           data.results.forEach((result: any) => {
             if (result.status === 'verified') verified++;
             else if (result.status === 'partially_verified') partial++;
             else if (result.status === 'hallucinated') hallucinated++;
+
+            // Extract domain from URL and update citationMeta for instant UI feedback
+            try {
+              const domain = new URL(result.url).hostname.replace('www.', '');
+              if (updatedMeta[domain]) {
+                updatedMeta[domain] = {
+                  ...updatedMeta[domain],
+                  verification_status: result.status,
+                  similarity_score: result.score,
+                  matched_paragraph: result.matched_text,
+                };
+              } else {
+                updatedMeta[domain] = {
+                  category: 'other', source_type: 'other', authority_tier: 3, relationship_type: 'neutral',
+                  verification_status: result.status,
+                  similarity_score: result.score,
+                  matched_paragraph: result.matched_text,
+                };
+              }
+            } catch { }
           });
+          setCitationMeta(updatedMeta);
         } else {
           console.warn(`Batch ${batchIdx + 1} failed:`, data?.error || error);
         }
@@ -3427,16 +3670,19 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
       toast.success(`Verified ${citations.length} citations: ${verified} verified, ${partial} partial, ${hallucinated} hallucinated`);
 
-      // Refresh citation data
+      // Full refresh to sync DB state (also updates cache)
       if (selectedClient) {
-        await loadClientData(selectedClient, true);
+        await fetchCitationMeta();
       }
 
     } catch (err) {
       console.error("Verification failed:", err);
       toast.error("Citation verification failed: " + (err instanceof Error ? err.message : String(err)));
     }
-  }, [selectedClient, loadClientData]);
+  }, [selectedClient, citationMeta, fetchCitationMeta]);
+
+  // Keep ref synced so autoVerifyPending (declared before verifyCitations) can call it
+  useEffect(() => { verifyCitationsRef.current = verifyCitations; }, [verifyCitations]);
 
 
   // NOTE: The old useEffect that loaded citation meta on selectedClient change
@@ -3525,6 +3771,83 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
   fetchSearchVolumesRef.current = fetchSearchVolumes;
 
   // ============================================
+  // AI OPPORTUNITY SCORING
+  // ============================================
+
+  const getAIOpportunity = useCallback((promptId: string): { score: number; tier: string; color: string } => {
+    const DEFAULT = { score: 0, tier: 'Minimal', color: '#9ca3af' };
+    const prompt = prompts.find(p => p.id === promptId);
+    if (!prompt) return DEFAULT;
+
+    // --- 1. Demand Strength (40%) — percentile rank of search volume ---
+    const allVolumes = prompts
+      .map(p => p.estimated_search_volume ?? null)
+      .filter((v): v is number => v !== null)
+      .sort((a, b) => a - b);
+
+    let demandScore = 20; // default if no search volume data
+    if (prompt.estimated_search_volume != null && allVolumes.length > 0) {
+      const rank = allVolumes.filter(v => v <= prompt.estimated_search_volume!).length;
+      const percentile = (rank / allVolumes.length) * 100;
+      if (percentile >= 90) demandScore = 92;
+      else if (percentile >= 70) demandScore = 74;
+      else if (percentile >= 30) demandScore = 49;
+      else demandScore = 17;
+    }
+
+    // --- 2. AI Answer Depth (40%) — from latest audit result ---
+    let depthScore = 30; // default for un-audited prompts
+    const result = auditResults
+      .filter(r => r.prompt_id === promptId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+    if (result) {
+      const models = result.model_results || [];
+      const totalModels = models.length;
+      const visibleCount = models.filter(m => m.brand_mentioned).length;
+      const totalCitations = result.summary?.total_citations || 0;
+      const avgResponseLength = models.reduce((sum, m) => sum + (m.raw_response?.length || 0), 0) / (totalModels || 1);
+
+      // Visibility component (0-50): how many models generated a substantive answer
+      const visibilityPart = totalModels > 0 ? (totalModels / 6) * 50 : 0; // 6 models = max
+      // Citation richness (0-30): more citations = richer ecosystem
+      const citationPart = Math.min(totalCitations, 15) * 2;
+      // Response depth (0-20): longer responses = more structured answers
+      const depthPart = Math.min(avgResponseLength / 2000, 1) * 20;
+
+      depthScore = Math.min(Math.round(visibilityPart + citationPart + depthPart), 100);
+    }
+
+    // --- 3. Intent Value (20%) — rule-based from prompt text ---
+    const text = prompt.prompt_text.toLowerCase();
+    let intentScore = 20; // generic default
+
+    const transactional = /\b(buy|price|cost|order|purchase|shop|deal|discount|coupon|offer|cheapest|affordable)\b/;
+    const commercial = /\b(best|top|review|compare|vs|versus|rated|recommended|ranking|leading|popular|alternative)\b/;
+    const investigational = /\b(how to|guide|tutorial|steps|process|setup|install|configure|implement|way to|method)\b/;
+    const informational = /\b(what is|what are|define|meaning|explain|overview|introduction|difference between|why)\b/;
+
+    if (transactional.test(text)) intentScore = 100;
+    else if (commercial.test(text)) intentScore = 80;
+    else if (investigational.test(text)) intentScore = 60;
+    else if (informational.test(text)) intentScore = 40;
+
+    // --- Final weighted score ---
+    const finalScore = Math.round(demandScore * 0.4 + depthScore * 0.4 + intentScore * 0.2);
+
+    // --- Tier mapping ---
+    let tier: string;
+    let color: string;
+    if (finalScore >= 80) { tier = 'Very High'; color = '#16a34a'; }
+    else if (finalScore >= 60) { tier = 'High'; color = '#22c55e'; }
+    else if (finalScore >= 40) { tier = 'Medium'; color = '#eab308'; }
+    else if (finalScore >= 20) { tier = 'Low'; color = '#f97316'; }
+    else { tier = 'Minimal'; color = '#9ca3af'; }
+
+    return { score: finalScore, tier, color };
+  }, [prompts, auditResults]);
+
+  // ============================================
   // RETURN
   // ============================================
 
@@ -3553,6 +3876,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,
     citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress,
+    getAIOpportunity,
 
     // Constants
     INDUSTRY_PRESETS, LOCATION_CODES,

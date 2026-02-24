@@ -72,7 +72,7 @@ service_role key: eyJhbGciOiJIUzI1NiIs... (keep secret!)
 
 | Name | Value | Description |
 |------|-------|-------------|
-| `DATAFORSEO_LOGIN` | contact@forzeo.com | DataForSEO account email |
+| `DATAFORSEO_LOGIN` | your-email@example.com | DataForSEO account email |
 | `DATAFORSEO_PASSWORD` | your-api-password | DataForSEO API password |
 | `GROQ_API_KEY` | gsk_xxxxx | Groq API key (content generation) |
 | `SERPER_API_KEY` | xxxxx | (Optional) Serper.dev API key |

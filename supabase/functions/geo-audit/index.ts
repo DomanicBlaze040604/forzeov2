@@ -85,8 +85,8 @@ const corsHeaders = {
 
 // DataForSEO API (primary for LLM Mentions + AI Overview + LIVE LLM)
 const DATAFORSEO_API = "https://api.dataforseo.com/v3";
-const DATAFORSEO_LOGIN = Deno.env.get("DATAFORSEO_LOGIN") || "contact@forzeo.com";
-const DATAFORSEO_PASSWORD = Deno.env.get("DATAFORSEO_PASSWORD") || "b00e21651e5fab03";
+const DATAFORSEO_LOGIN = Deno.env.get("DATAFORSEO_LOGIN") || "";
+const DATAFORSEO_PASSWORD = Deno.env.get("DATAFORSEO_PASSWORD") || "";
 const DATAFORSEO_AUTH = btoa(`${DATAFORSEO_LOGIN}:${DATAFORSEO_PASSWORD}`);
 
 // Serper API (alternative/backup for SERP)
@@ -652,6 +652,8 @@ function stripUrlsForNER(text: string): string {
     .replace(/\[\d+\]/g, '')
     // Clean up leftover parentheses with only whitespace
     .replace(/\(\s*\)/g, '')
+    // Clean up empty bold markers (e.g., **** left after stripping **Better.com**)
+    .replace(/\*{3,}/g, '')
     // Clean up extra whitespace
     .replace(/\s+/g, ' ')
     .trim();
@@ -911,7 +913,9 @@ function extractBrandsFromResponse(
   const results: ExtractedBrandEntity[] = [];
 
   for (const [key, data] of textBrands.entries()) {
-    if (!isLikelyBrand(key)) continue;
+    // Use data.title (preserves original casing) for isLikelyBrand so uppercase-count
+    // domain filter works correctly (key is all-lowercase)
+    if (!isLikelyBrand(data.title)) continue;
 
     // CONFIDENCE GATE: Skip low-confidence brands that were only found once
     // Include if: high confidence, OR mentioned in 2+ different sentences, OR known brand/competitor
@@ -1546,6 +1550,34 @@ async function getLLMMentions(
  * Uses /ai_optimization/chat_gpt/llm_scraper/live/advanced
  * Returns: markdown response, sources (citations), brand_entities
  */
+/**
+ * Maps any location code to its parent country code supported by ChatGPT Scraper
+ */
+function matchCountryCode(locationCode: number): number {
+  // If it's already a known country code, return as is
+  const knownCountries = [
+    2356, 2840, 2826, 2036, 2124, 2276, 2250, 2392, 2076, 2484,
+    2380, 2724, 2410, 2702, 2784, 2682, 2566, 2710, 2360, 2458,
+    2608, 2764, 2704, 2158, 2344, 2528, 2056, 2756, 2040, 2752,
+    2578, 2208, 2246, 2616, 2643, 2792, 2818, 2404, 2800,
+  ];
+  if (knownCountries.includes(locationCode)) return locationCode;
+
+  // City-to-Country Mapping (Common fallback for user regions)
+  // Bangalore (1027351) -> India (2356)
+  if (locationCode === 1027351) return 2356;
+
+  // Default fallback: If code looks like a city (> 100k) and not in our list, 
+  // we might need a more complex lookup, but for now we'll return a default (USA) or the code itself
+  // and hope for the best, or log a warning.
+  if (locationCode > 1000000) {
+    console.warn(`[LocationMap] Unknown city code ${locationCode}, falling back to India (2356) for this project's typical usage`);
+    return 2356;
+  }
+
+  return locationCode;
+}
+
 async function getChatGPTScraperResponse(
   keyword: string,
   locationCode: number
@@ -1559,7 +1591,8 @@ async function getChatGPTScraperResponse(
   brand_entities?: DataForSEOBrandEntity[];
   error?: string;
 }> {
-  console.log(`[ChatGPT Scraper] Querying: "${keyword.substring(0, 60)}..." | Location: ${locationCode}`);
+  const countryCode = matchCountryCode(locationCode);
+  console.log(`[ChatGPT Scraper] Querying: "${keyword.substring(0, 60)}..." | Location: ${locationCode} -> ${countryCode}`);
   const startTime = Date.now();
 
   const maxRetries = 3;
@@ -1575,7 +1608,7 @@ async function getChatGPTScraperResponse(
 
     const result = await callDataForSEO("/ai_optimization/chat_gpt/llm_scraper/live/advanced", [{
       keyword: keyword,
-      location_code: locationCode,
+      location_code: countryCode,
       language_code: "en",
       force_web_search: true,
     }]);
@@ -1758,9 +1791,9 @@ async function getLiveLLMResponse(
 
   // Map model IDs to DataForSEO endpoints and model names (from docs)
   const modelConfig: Record<string, { endpoint: string; modelName: string }> = {
-    chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", modelName: "gpt-4.1-mini" },
+    chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", modelName: "gpt-5-nano" },
     gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", modelName: "gemini-2.5-flash" },
-    claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-opus-4-0" },
+    claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-haiku-4-5" },
     perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", modelName: "sonar" },
   };
 
@@ -1800,9 +1833,13 @@ async function getLiveLLMResponse(
     const payload: Record<string, unknown> = {
       user_prompt: prompt,
       model_name: config.modelName,
-      max_output_tokens: 1000,
-      temperature: 0.7,
     };
+
+    // GPT-5 Nano is extremely sensitive — do NOT send temperature or max_output_tokens
+    if (config.modelName !== "gpt-5-nano") {
+      payload.max_output_tokens = 1000;
+      payload.temperature = 0.7;
+    }
 
     // Gemini does NOT support web_search_country_iso_code
     // Perplexity and Claude DO — and Claude REQUIRES web_search: true with it

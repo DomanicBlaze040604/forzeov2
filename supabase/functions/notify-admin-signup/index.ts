@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!
+const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "Forzeo Alerts <alerts@forzeo.com>"
 const ADMIN_EMAILS = ["ammar@forzeo.com", "sachinjain@forzeo.com"]
 
 serve(async (req) => {
@@ -35,7 +36,7 @@ serve(async (req) => {
                     "Authorization": `Bearer ${RESEND_API_KEY}`,
                 },
                 body: JSON.stringify({
-                    from: "Forzeo Alerts <onboarding@resend.dev>",
+                    from: RESEND_FROM_EMAIL,
                     to: ADMIN_EMAILS,
                     subject: `🎉 New User Signup: ${newUserEmail}`,
                     html: `

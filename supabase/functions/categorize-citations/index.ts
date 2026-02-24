@@ -9,7 +9,7 @@ const corsHeaders = {
 // OpenRouter API
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") || "";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "google/gemini-2.0-flash-001"; // Fast, accurate, no thinking overhead
+const OPENROUTER_MODEL = "google/gemini-2.0-flash-001"; // Fast, reliable JSON, great domain knowledge
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {

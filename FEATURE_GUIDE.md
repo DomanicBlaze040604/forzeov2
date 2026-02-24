@@ -158,7 +158,7 @@ The edge function applies **regex-based enforcement rules** after AI classificat
 The Citations tab features an intelligent hover preview that shows page content without requiring users to visit links.
 
 ### Behavior
-- **Trigger**: Hover over any domain or URL row for **500ms** (delay prevents accidental popups during scrolling)
+- **Trigger**: Hover over any domain or URL row for **400ms** (delay prevents accidental popups during scrolling)
 - **Position**: Preview appears to the left of the table, within viewport bounds
 - **Animation**: Smooth 200ms fade-in
 
@@ -348,3 +348,95 @@ In-app notification system for admin users, currently used for signup alerts.
 ### RLS Policies
 - Admins can only view/update their own notifications
 - Row-level security enforced via `profiles.role = 'admin'` check
+
+---
+
+## 11. AI Visibility Strategist (Prompt-Level Insights)
+
+The most advanced insight layer in Forzeo — a two-step AI analysis that tells a brand *exactly* why it is absent from AI responses for a given query, and what to **specifically** build or publish to get cited.
+
+### How It Works
+
+Invoked from the **Insights tab** inside the Prompt Detail Dialog.
+
+1. **Context Assembly** (frontend, in `generateRecommendations`):
+   - Per-platform raw response text (ChatGPT, Perplexity, Gemini, Google AI Overview, Claude)
+   - Cited source URLs with up to 500 chars of Tavily-scraped content per URL
+   - Brand's existing web content (filtered from Tavily results by brand domain)
+   - Competitor analysis from raw AI responses
+   - Tavily web analysis: brand mentions, competitor mentions, top domains, source types
+
+2. **LLM Call** (Groq `llama-3.3-70b-versatile`, JSON mode, `max_tokens: 4096`):
+
+   **Step 1 — Citation Gap Analysis (internal reasoning):**
+   - Platform Presence Audit: for each AI platform, is the brand present and at what rank?
+   - Competitor Citation Analysis: what content TYPE and CLAIM is driving each competitor's citation?
+   - Content Gap Identification: which specific claims/benefits/formats is the target brand missing?
+   - Platform-Specific Patterns: which platforms prefer which content types?
+
+   **Step 2 — Recommendation Generation:**
+   - Outputs exactly **6 recommendations**: 2-3 High Impact Strategic + 3-4 Quick Tactical Wins
+
+3. **Critical Output Rules**:
+   - Never recommends creating a page that already exists (checks existing content input)
+   - No generic backlink building without specific domain targets
+   - No vague phrases ("create quality content", "study their strategy")
+   - At least 1 recommendation must be platform-specific (targeting a single LLM)
+   - At least 1 recommendation must address the highest-gap AI platform
+
+### Output Structure (`PromptInsightResult`)
+
+```typescript
+interface PromptInsightResult {
+  priority: 'high' | 'medium' | 'low';
+  citationGapSummary: string;       // 4-6 sentence plain-English summary
+  platformPresence: {
+    platform: string;               // ChatGPT / Perplexity / Gemini / Google AI Overview / Claude
+    present: boolean;
+    rank: number | null;
+  }[];
+  recommendations: PromptInsightRecommendation[];
+}
+
+interface PromptInsightRecommendation {
+  title: string;
+  type: 'High Impact' | 'Quick Win';
+  targetPlatforms: string;
+  priority: string;
+  whyThisWorks: string;             // 2-3 sentences referencing specific gap/competitor pattern
+  exactAction: {
+    contentFormat: string;          // article / FAQ / comparison page / structured data / etc.
+    targetUrl: string;              // exact domain or recommended URL slug
+    wordCount: string;
+    keyClaims: string[];            // specific claims from gap analysis
+    existingPageNote?: string;      // populated only if an existing page was found
+  };
+  executionSteps: string[];
+  timeline: string;                 // This week / Within 2 weeks / Within 1 month
+  successMetric: string;
+}
+```
+
+### UI Display
+| Section | Display |
+|---------|---------|
+| **Citation Gap Summary** | Indigo gradient card, plain-English paragraph |
+| **Platform Presence** | Table with Present/Absent badge + rank per platform |
+| **High Impact Strategic Actions** | Purple cards with Sparkles icon, full detail per rec |
+| **Quick Tactical Wins** | Teal cards with Zap icon, full detail per rec |
+
+### Fallback Behavior
+If Groq is unavailable or JSON parsing fails, the function returns a `PromptInsightResult` built from local audit data:
+- `citationGapSummary`: constructed from SOV, competitor list, and average rank
+- `platformPresence`: derived from `model_results` in the audit
+- `recommendations`: 2 basic recommendations based on SOV and competitor presence
+
+### API Details
+| Setting | Value |
+|---------|-------|
+| **Provider** | Groq |
+| **Model** | `llama-3.3-70b-versatile` |
+| **Max Tokens** | 4096 |
+| **Temperature** | 0.5 |
+| **Response Format** | JSON object |
+| **Env Var** | `VITE_GROQ_API_KEY` |

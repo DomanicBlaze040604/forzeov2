@@ -11,6 +11,7 @@ const AVERAGE_SECONDS_PER_PROMPT = 37
 const EDGE_FUNCTION_TIMEOUT = 150 // seconds
 const SAFE_EXECUTION_WINDOW = 120 // seconds (buffer for safety)
 const CHUNK_SIZE_PROMPTS = 3 // Max prompts to process in one invocation
+const PER_PROMPT_TIMEOUT = 60_000 // 60 seconds max per geo-audit call
 
 // ============================================================================
 // TYPES
@@ -233,6 +234,7 @@ async function runMultiAccountSchedule(
         total_prompts: clientPromptMap[client.id]?.length || 0,
         completed_prompts: 0,
         failed_prompts: 0,
+        total_cost: 0,
         status: 'pending',
         prompts: []
       }
@@ -352,6 +354,16 @@ async function executeSynchronous(
     })
     .eq('id', runId)
 
+  // Calculate total cost from all geo-audit responses
+  const totalCost = Object.values(executionProgress).reduce((sum: number, p: any) => sum + (p.total_cost || 0), 0)
+  console.log(`[Multi-Account Runner] Total API cost for this run: $${totalCost.toFixed(4)}`)
+
+  // Update schedule_runs with cost
+  await supabase
+    .from('schedule_runs')
+    .update({ total_cost: totalCost })
+    .eq('id', runId)
+
   // Update analytics
   await updateScheduleAnalytics(supabase, schedule.id, {
     totalRuns: 1,
@@ -359,7 +371,7 @@ async function executeSynchronous(
     failedRuns: failedBrands > 0 ? 1 : 0,
     executionTimeSeconds: executionTimeSeconds,
     totalPromptsExecuted: Object.values(executionProgress).reduce((sum: number, p: any) => sum + p.completed_prompts, 0),
-    totalCost: 0
+    totalCost
   })
 
   // Trigger notification dispatcher
@@ -460,6 +472,16 @@ async function executeChunked(
     })
     .eq('id', runId)
 
+  // Calculate total cost from all geo-audit responses
+  const chunkedTotalCost = Object.values(executionProgress).reduce((sum: number, p: any) => sum + (p.total_cost || 0), 0)
+  console.log(`[Multi-Account Runner] Chunked total API cost: $${chunkedTotalCost.toFixed(4)}`)
+
+  // Update schedule_runs with cost
+  await supabase
+    .from('schedule_runs')
+    .update({ total_cost: chunkedTotalCost })
+    .eq('id', runId)
+
   // Update analytics
   await updateScheduleAnalytics(supabase, schedule.id, {
     totalRuns: 1,
@@ -467,7 +489,7 @@ async function executeChunked(
     failedRuns: failedBrands > 0 ? 1 : 0,
     executionTimeSeconds: Math.floor((Date.now() - chunkStartTime) / 1000),
     totalPromptsExecuted: Object.values(executionProgress).reduce((sum: number, p: any) => sum + p.completed_prompts, 0),
-    totalCost: 0
+    totalCost: chunkedTotalCost
   })
 
   // Trigger notification
@@ -623,8 +645,8 @@ async function runClientPrompts(
       try {
         console.log(`[Multi-Account Runner] Running prompt: ${prompt.prompt_text.substring(0, 50)}... (attempt ${attempt + 1})`)
 
-        // Call geo-audit edge function
-        const { data, error } = await supabase.functions.invoke('geo-audit', {
+        // Call geo-audit edge function with timeout protection
+        const geoAuditPromise = supabase.functions.invoke('geo-audit', {
           body: {
             client_id: client.id,
             prompt_id: prompt.id,
@@ -640,8 +662,18 @@ async function runClientPrompts(
           }
         })
 
+        // Race against timeout to prevent hanging
+        const timeoutPromise = new Promise<{ data: null, error: { message: string } }>((_, reject) =>
+          setTimeout(() => reject(new Error(`geo-audit timed out after ${PER_PROMPT_TIMEOUT / 1000}s`)), PER_PROMPT_TIMEOUT)
+        )
+
+        const { data, error } = await Promise.race([geoAuditPromise, timeoutPromise])
+
         if (!error && data?.success) {
           executionProgress[client.id].completed_prompts++
+          // Track cost from geo-audit response
+          const promptCost = data?.data?.summary?.total_cost || 0
+          executionProgress[client.id].total_cost = (executionProgress[client.id].total_cost || 0) + promptCost
           executionProgress[client.id].prompts.push({
             id: prompt.id,
             prompt_text: prompt.prompt_text,
@@ -694,6 +726,127 @@ async function runClientPrompts(
   }
 
   executionProgress[client.id].status = 'completed'
+
+  // Post-audit: categorize new citation domains so the verification cron picks them up
+  try {
+    await categorizeClientCitations(supabase, client)
+  } catch (catErr) {
+    console.warn(`[Multi-Account Runner] Citation categorization failed for ${client.brand_name} (non-blocking):`, catErr)
+  }
+}
+
+/**
+ * Post-audit: Categorize new citation domains and store in citation_intelligence.
+ * Creates rows with verification_status='pending' so the background verification
+ * cron job picks them up automatically.
+ */
+async function categorizeClientCitations(
+  supabase: SupabaseClient,
+  client: Client
+): Promise<void> {
+  // 1. Get unique domains from this client's recent audit results
+  const { data: recentResults } = await supabase
+    .from('audit_results')
+    .select('model_results')
+    .eq('client_id', client.id)
+    .order('created_at', { ascending: false })
+    .limit(20)
+
+  if (!recentResults || recentResults.length === 0) return
+
+  const allDomains = new Set<string>()
+  for (const result of recentResults) {
+    const modelResults = (result as any).model_results || []
+    for (const mr of modelResults) {
+      for (const citation of (mr.citations || [])) {
+        if (citation.domain) allDomains.add(citation.domain)
+      }
+    }
+  }
+
+  if (allDomains.size === 0) return
+
+  // 2. Find which domains already have citation_intelligence rows
+  const domainArray = Array.from(allDomains)
+  const existingRows: any[] = []
+  const IN_BATCH = 50
+  for (let b = 0; b < domainArray.length; b += IN_BATCH) {
+    const batch = domainArray.slice(b, b + IN_BATCH)
+    const { data: rows } = await supabase
+      .from('citation_intelligence')
+      .select('domain')
+      .eq('client_id', client.id)
+      .in('domain', batch)
+    if (rows) existingRows.push(...rows)
+  }
+
+  const existingDomains = new Set(existingRows.map((r: any) => r.domain))
+  const newDomains = domainArray.filter(d => !existingDomains.has(d))
+
+  if (newDomains.length === 0) {
+    console.log(`[Multi-Account Runner] All ${domainArray.length} domains already categorized for ${client.brand_name}`)
+    return
+  }
+
+  console.log(`[Multi-Account Runner] Categorizing ${newDomains.length} new domains for ${client.brand_name}`)
+
+  // 3. Call categorize-citations in batches of 40
+  const BATCH_SIZE = 40
+  const allInsertData: any[] = []
+
+  for (let i = 0; i < newDomains.length; i += BATCH_SIZE) {
+    const batch = newDomains.slice(i, i + BATCH_SIZE)
+
+    try {
+      const { data, error } = await supabase.functions.invoke('categorize-citations', {
+        body: {
+          domains: batch,
+          brand_name: client.brand_name,
+          brand_domain: null,
+          competitors: client.competitors || []
+        }
+      })
+
+      if (error || !data?.success || !data?.data) {
+        console.warn(`[Multi-Account Runner] Categorization batch failed:`, error || data?.error)
+        continue
+      }
+
+      // Build insert data from classification results
+      for (const [domain, info] of Object.entries(data.data) as [string, any][]) {
+        allInsertData.push({
+          client_id: client.id,
+          domain: domain,
+          url: `https://${domain}`,
+          citation_category: info.category || 'other',
+          source_type: info.source_type || 'other',
+          authority_tier: info.authority_tier || 2,
+          relationship_type: info.relationship_type || 'neutral',
+          verification_status: 'pending',
+        })
+      }
+
+      // Rate limit delay between batches
+      if (i + BATCH_SIZE < newDomains.length) {
+        await new Promise(r => setTimeout(r, 500))
+      }
+    } catch (err) {
+      console.warn(`[Multi-Account Runner] Categorization batch error:`, err)
+    }
+  }
+
+  // 4. Insert into citation_intelligence
+  if (allInsertData.length > 0) {
+    const { error: insertError } = await supabase
+      .from('citation_intelligence')
+      .insert(allInsertData)
+
+    if (insertError) {
+      console.error(`[Multi-Account Runner] citation_intelligence insert error:`, insertError)
+    } else {
+      console.log(`[Multi-Account Runner] Inserted ${allInsertData.length} citation_intelligence rows for ${client.brand_name}`)
+    }
+  }
 }
 
 /**
