@@ -717,6 +717,36 @@ serve(async (req: Request) => {
             }
 
             try {
+                // IMPORTANT: Update next_run_at BEFORE execution to prevent
+                // duplicate triggers if the execution times out or fails.
+                // The cron runs every minute; without this, a timeout would
+                // leave next_run_at in the past and the cron would re-trigger.
+                if (schedule.recurrence_type !== "once") {
+                    const nextRun = calculateNextRun(schedule);
+                    await supabase
+                        .from("prompt_schedules")
+                        .update({
+                            last_run_at: new Date().toISOString(),
+                            next_run_at: nextRun.toISOString(),
+                            total_runs: schedule.total_runs + 1,
+                        })
+                        .eq("id", schedule.id);
+
+                    console.log(`[Scheduler] Next run for "${schedule.name}": ${nextRun.toISOString()}`);
+                } else {
+                    // For one-time schedules, deactivate immediately
+                    await supabase
+                        .from("prompt_schedules")
+                        .update({
+                            last_run_at: new Date().toISOString(),
+                            is_active: false,
+                            total_runs: schedule.total_runs + 1,
+                        })
+                        .eq("id", schedule.id);
+
+                    console.log(`[Scheduler] One-time schedule "${schedule.name}" deactivated`);
+                }
+
                 if (isMultiAccount) {
                     // Multi-account schedule: Delegate to multi-account-runner
                     console.log(`[Scheduler] Delegating multi-account schedule "${schedule.name}" to multi-account-runner`);
@@ -775,33 +805,6 @@ serve(async (req: Request) => {
                         success: result.success,
                         error: result.error,
                     });
-                }
-
-                // Update schedule with next run time (for both types)
-                if (schedule.recurrence_type !== "once") {
-                    const nextRun = calculateNextRun(schedule);
-                    await supabase
-                        .from("prompt_schedules")
-                        .update({
-                            last_run_at: new Date().toISOString(),
-                            next_run_at: nextRun.toISOString(),
-                            total_runs: schedule.total_runs + 1,
-                        })
-                        .eq("id", schedule.id);
-
-                    console.log(`[Scheduler] Next run for "${schedule.name}": ${nextRun.toISOString()}`);
-                } else {
-                    // For one-time schedules, deactivate after run
-                    await supabase
-                        .from("prompt_schedules")
-                        .update({
-                            last_run_at: new Date().toISOString(),
-                            is_active: false,
-                            total_runs: schedule.total_runs + 1,
-                        })
-                        .eq("id", schedule.id);
-
-                    console.log(`[Scheduler] One-time schedule "${schedule.name}" completed and deactivated`);
                 }
 
             } catch (err) {

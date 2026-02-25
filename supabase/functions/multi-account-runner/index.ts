@@ -155,6 +155,27 @@ async function runMultiAccountSchedule(
 ): Promise<string> {
   const startTime = Date.now()
 
+  // 0. Dedup guard: skip if there's already a running execution for this schedule
+  {
+    const { data: existingRun } = await supabase
+      .from('schedule_runs')
+      .select('id, started_at')
+      .eq('schedule_id', schedule.id)
+      .eq('status', 'running')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (existingRun) {
+      const startedAt = new Date(existingRun.started_at).getTime()
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000
+      if (startedAt > twoHoursAgo) {
+        console.log(`[Multi-Account Runner] Schedule ${schedule.id} already has a running execution (${existingRun.id}), skipping duplicate`)
+        return existingRun.id
+      }
+    }
+  }
+
   // 1. Evaluate conditional rules (unless forced)
   if (!force) {
     const { shouldRun, reason } = await shouldExecuteSchedule(supabase, schedule)
