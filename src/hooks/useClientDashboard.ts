@@ -3402,10 +3402,12 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
                 source_type: info.source_type,
                 authority_tier: info.authority_tier,
                 relationship_type: info.relationship_type,
+                verification_status: 'pending', // So cron picks up new domains for verification
                 updated_at: new Date().toISOString()
               });
 
               newMeta[originalDomain] = {
+                ...newMeta[originalDomain], // Preserve existing verification fields
                 category: info.category,
                 source_type: info.source_type,
                 authority_tier: info.authority_tier,

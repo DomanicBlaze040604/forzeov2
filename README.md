@@ -94,6 +94,11 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates
 
+### v2.9.1 - Categorize → Verify Pipeline (Feb 25, 2026)
+- **Auto-Verification Pipeline**: Newly categorized domains are now automatically stamped with `verification_status: 'pending'`, which the pg_cron job (`invoke-verify-citations`, every 5 min) picks up for immediate verification — no manual trigger needed.
+- **Verification Field Preservation**: Re-categorizing existing domains now spreads the existing meta (`similarity_score`, `matched_paragraph`, `page_content`, `verified_at`) before writing new category fields, preventing data loss on re-runs.
+- Full pipeline is now: **Audit → Auto-Categorize → Auto-Verify** with zero manual steps.
+
 ### v2.9 - AI Visibility Strategist Insights (Feb 24, 2026)
 - **AI Visibility Strategist (Prompt-Level Insights)**: Completely rebuilt the Insights tab with a two-step AI analysis engine:
   - **Step 1 — Citation Gap Analysis**: LLM audits each AI platform's presence/rank for the target brand, identifies which competitor content types are driving citations, and pinpoints specific content/claim gaps.

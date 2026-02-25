@@ -151,6 +151,13 @@ The edge function applies **regex-based enforcement rules** after AI classificat
 - **Inputs**: `domains[]`, `brand_name`, `brand_domain`, `competitors[]`
 - **Output**: JSON map of `{ domain: { category, source_type, authority_tier, relationship_type } }`
 
+### D. pg_cron Verification Pipeline Integration
+When domains are categorized, the system now automatically feeds them into the verification pipeline:
+- **New domains**: Written with `verification_status: 'pending'` so the pg_cron job (`invoke-verify-citations`, runs every 5 minutes) picks them up immediately for content fetching and semantic similarity scoring.
+- **Re-categorized domains**: Uses a spread (`...existingMeta`) before writing new category fields, so `verification_status`, `similarity_score`, `matched_paragraph`, and `page_content` are **preserved** — re-categorization never overwrites verification results.
+
+This creates a fully automated pipeline: **Audit → Categorize → Verify** with zero manual steps.
+
 ---
 
 ## 5. Hover Content Preview
