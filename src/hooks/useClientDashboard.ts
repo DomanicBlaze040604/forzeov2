@@ -3303,18 +3303,33 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
       if (data) {
         const meta: Record<string, CitationMeta> = {};
+        // Priority ranking: verified > partially_verified > hallucinated > error > pending > null
+        const statusPriority: Record<string, number> = {
+          verified: 5, partially_verified: 4, hallucinated: 3, error: 2, pending: 1
+        };
         data.forEach((row: any) => {
-          meta[row.domain] = {
-            category: row.citation_category,
-            source_type: row.source_type,
-            authority_tier: row.authority_tier,
-            relationship_type: row.relationship_type,
-            is_affiliate: row.source_type === 'affiliate',
-            verification_status: row.verification_status,
-            similarity_score: row.similarity_score,
-            matched_paragraph: row.matched_paragraph,
-            page_fetch_status: row.page_fetch_status
-          };
+          const domain = row.domain;
+          const existing = meta[domain];
+          const existingPriority = statusPriority[existing?.verification_status || ''] || 0;
+          const newPriority = statusPriority[row.verification_status || ''] || 0;
+
+          // Keep the row with the highest-priority verification status (prefer verified over pending)
+          if (!existing || newPriority > existingPriority) {
+            meta[domain] = {
+              category: row.citation_category,
+              source_type: row.source_type,
+              authority_tier: row.authority_tier,
+              relationship_type: row.relationship_type,
+              is_affiliate: row.source_type === 'affiliate',
+              verification_status: row.verification_status,
+              similarity_score: row.similarity_score,
+              matched_paragraph: row.matched_paragraph,
+              page_fetch_status: row.page_fetch_status
+            };
+          } else if (newPriority === existingPriority && !existing.category && row.citation_category) {
+            // Same verification status but new row has category info — merge it
+            meta[domain] = { ...existing, category: row.citation_category, source_type: row.source_type, authority_tier: row.authority_tier, relationship_type: row.relationship_type };
+          }
         });
         setCitationMeta(meta);
       }
@@ -3439,11 +3454,18 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
         console.log(`[Categorize] Saving ${allUpsertData.length} results to DB...`);
 
         // Find which domains already exist for this client (batch .in() to avoid limit)
+        // Check BOTH www and non-www variants to prevent duplicate rows
         const allDomainsToCheck = allUpsertData.map(d => d.domain);
+        const allDomainVariants = allDomainsToCheck.flatMap(d => {
+          const bare = d.replace(/^www\./, '');
+          return [d, `www.${bare}`, bare];
+        });
+        const uniqueVariants = [...new Set(allDomainVariants)];
+
         const existingRows: any[] = [];
         const IN_BATCH = 50; // Supabase .in() limit safety
-        for (let b = 0; b < allDomainsToCheck.length; b += IN_BATCH) {
-          const batchDomains = allDomainsToCheck.slice(b, b + IN_BATCH);
+        for (let b = 0; b < uniqueVariants.length; b += IN_BATCH) {
+          const batchDomains = uniqueVariants.slice(b, b + IN_BATCH);
           const { data: rows, error: lookupErr } = await supabase
             .from('citation_intelligence')
             .select('id, domain')
@@ -3453,8 +3475,19 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
           if (rows) existingRows.push(...rows);
         }
 
-        const existingDomains = new Set(existingRows.map(r => r.domain));
-        const existingMap = new Map(existingRows.map(r => [r.domain, r.id]));
+        // Build lookup maps that normalize www/non-www variants to find existing rows
+        const existingDomains = new Set<string>();
+        const existingMap = new Map<string, string>();
+        existingRows.forEach(r => {
+          const bare = r.domain.replace(/^www\./, '');
+          existingDomains.add(r.domain);
+          existingDomains.add(bare);
+          existingDomains.add(`www.${bare}`);
+          // Map all variants to the same ID (first match wins)
+          if (!existingMap.has(r.domain)) existingMap.set(r.domain, r.id);
+          if (!existingMap.has(bare)) existingMap.set(bare, r.id);
+          if (!existingMap.has(`www.${bare}`)) existingMap.set(`www.${bare}`, r.id);
+        });
         console.log(`[Categorize] ${existingDomains.size} existing, ${allUpsertData.length - existingDomains.size} new`);
 
         // Update existing records

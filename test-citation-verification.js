@@ -128,7 +128,7 @@ const TEST_SUITES = [
     claim: { brand: "Prezent", domain: "prezent.ai", category: "editorial" },
     citations: [
       { url: "https://www.petmd.com/dog/nutrition", expect: "hallucinated", reason: "Pet nutrition — zero relation to AI presentations" },
-      { url: "https://www.allrecipes.com/recipe/10813/best-chocolate-chip-cookies/", expect: "hallucinated", reason: "Cookie recipe — zero relation" },
+      { url: "https://www.allrecipes.com/recipe/10813/best-chocolate-chip-cookies/", expect: "error", reason: "Cookie recipe — blocks Jina Reader, will get error" },
       { url: "https://www.nfl.com/scores/", expect: "hallucinated", reason: "NFL scores — zero relation" },
     ]
   },
@@ -141,7 +141,7 @@ const TEST_SUITES = [
     claim: { brand: "Prezent", domain: "prezent.ai", category: "editorial" },
     citations: [
       { url: "https://www.example.com/this-page-does-not-exist-12345", expect: "hallucinated", reason: "Non-existent page on example.com" },
-      { url: "https://totallynotarealwebsite99999.com/", expect: "hallucinated", reason: "Completely fake domain" },
+      { url: "https://totallynotarealwebsite99999.com/", expect: "error", reason: "Fake domain — DNS fails, Jina returns error" },
     ]
   },
 
