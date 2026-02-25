@@ -874,16 +874,28 @@ export function useClientDashboard() {
         console.error("[CitationMeta] Load error:", ciError);
       } else if (data) {
         const meta: Record<string, CitationMeta> = {};
+        const statusPriority: Record<string, number> = {
+          verified: 5, partially_verified: 4, hallucinated: 3, error: 2, pending: 1
+        };
         data.forEach((row: any) => {
-          meta[row.domain] = {
-            category: row.citation_category, source_type: row.source_type,
-            authority_tier: row.authority_tier, relationship_type: row.relationship_type,
-            is_affiliate: row.source_type === 'affiliate',
-            verification_status: row.verification_status,
-            similarity_score: row.similarity_score,
-            matched_paragraph: row.matched_paragraph,
-            page_fetch_status: row.page_fetch_status
-          };
+          const domain = (row.domain || '').replace(/^www\./, '');
+          if (!domain) return;
+          const existing = meta[domain];
+          const existingPriority = statusPriority[existing?.verification_status || ''] || 0;
+          const newPriority = statusPriority[row.verification_status || ''] || 0;
+          if (!existing || newPriority > existingPriority) {
+            meta[domain] = {
+              category: row.citation_category, source_type: row.source_type,
+              authority_tier: row.authority_tier, relationship_type: row.relationship_type,
+              is_affiliate: row.source_type === 'affiliate',
+              verification_status: row.verification_status,
+              similarity_score: row.similarity_score,
+              matched_paragraph: row.matched_paragraph,
+              page_fetch_status: row.page_fetch_status
+            };
+          } else if (newPriority === existingPriority && !existing.category && row.citation_category) {
+            meta[domain] = { ...existing, category: row.citation_category, source_type: row.source_type, authority_tier: row.authority_tier, relationship_type: row.relationship_type };
+          }
         });
         loadedCitationMeta = meta;
         console.log(`[CitationMeta] Loaded ${data.length} rows for client ${client.brand_name}`);
@@ -3308,7 +3320,8 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
           verified: 5, partially_verified: 4, hallucinated: 3, error: 2, pending: 1
         };
         data.forEach((row: any) => {
-          const domain = row.domain;
+          const domain = (row.domain || '').replace(/^www\./, '');
+          if (!domain) return;
           const existing = meta[domain];
           const existingPriority = statusPriority[existing?.verification_status || ''] || 0;
           const newPriority = statusPriority[row.verification_status || ''] || 0;

@@ -9,7 +9,7 @@ const corsHeaders = {
 // OpenRouter API
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") || "";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "google/gemini-2.0-flash-001"; // Fast, reliable JSON, great domain knowledge
+const OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"; // Truly free, fast classification
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -60,10 +60,10 @@ Brand: ${brand_name || "Unknown"}
 Brand domain: ${brandDomain}
 Competitors: ${competitorList || "none specified"}
 
-Return ONLY a JSON object. No markdown, no explanation, no thinking.
+Return ONLY a JSON object. No markdown, no explanation.
 Format: { "domain.com": { "category": "...", "source_type": "...", "authority_tier": 1|2|3, "relationship_type": "owned|competitor|neutral" } }`;
 
-        const userPrompt = `Classify these ${batch.length} domains:\n${batch.join("\n")}`;
+        const userPrompt = `Classify these ${batch.length} domains:\n${batch.join("\n")}\n/no_think`;
 
         const response = await fetch(OPENROUTER_API_URL, {
             method: "POST",
@@ -81,7 +81,7 @@ Format: { "domain.com": { "category": "...", "source_type": "...", "authority_ti
                 ],
                 temperature: 0.0,
                 response_format: { type: "json_object" },
-                max_tokens: 4000,
+                max_tokens: 8000,
             })
         });
 
@@ -98,7 +98,11 @@ Format: { "domain.com": { "category": "...", "source_type": "...", "authority_ti
         try {
             result = JSON.parse(content);
         } catch {
-            const cleaned = content.replace(/```json\n?|\n?```/g, "").trim();
+            // Strip Qwen3 <think> reasoning tags + markdown fences
+            const cleaned = content
+                .replace(/<think>[\s\S]*?<\/think>/g, "")
+                .replace(/```json\n?|\n?```/g, "")
+                .trim();
             result = JSON.parse(cleaned);
         }
 

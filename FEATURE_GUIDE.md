@@ -104,9 +104,9 @@ Enhanced AI-powered categorization using **Google Gemini 2.0 Flash** (via OpenRo
 
 ### Model
 - **Provider**: OpenRouter API
-- **Model**: `google/gemini-2.0-flash-001` — fast, cost-effective, native JSON output
+- **Model**: `google/gemini-2.0-flash-001` (primary), falls back to `qwen/qwen3.5-397b-a17b`
+- **Domain Normalization**: Automatically strips `www.` prefix to ensure consistency across citations and aggregate metrics.
 - **Temperature**: 0.0 (deterministic)
-- **Fallback**: `qwen/qwen3.5-397b-a17b`
 
 ### Categories
 | Category | Examples |
@@ -136,8 +136,8 @@ The edge function applies **regex-based enforcement rules** after AI classificat
 - **Frontend Batch Size**: 40 domains per edge function call (matches edge function capacity)
 - **Concurrency**: 2 parallel batches
 - **Inter-round Delay**: 500ms between rounds
+- **Domain Normalization**: AI-returned domains are normalized by stripping `www.` prefixes to match internal records perfectly.
 - **Retry Logic**: Failed batches retry once after 3s delay (handles 503 rate limiting)
-- **Domain Normalization**: AI-returned domains mapped back to original names (handles `www.` prefix mismatch)
 
 ### Auto-Categorization
 - **On Page Load**: Automatically categorizes any uncategorized domains

@@ -7,7 +7,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 
 // Qwen3 235B A22B — 235B MoE reasoning model with enforced thinking, FREE via OpenRouter
-const OPENROUTER_MODEL = "qwen/qwen3-235b-a22b"
+const OPENROUTER_MODEL = "qwen/qwen3-235b-a22b:free"
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 const corsHeaders = {
