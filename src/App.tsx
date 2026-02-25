@@ -1,10 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
-import { Auth } from '@supabase/auth-ui-react'
-import { ThemeSupa } from '@supabase/auth-ui-shared'
 import { supabase } from '@/integrations/supabase/client'
 import ClientDashboard from './pages/ClientDashboard'
 import { Toaster } from "sonner"
 import { OnboardingWizard } from '@/components/ui/OnboardingWizard'
+import { AuthForm } from '@/components/AuthForm'
 
 function App() {
   const [session, setSession] = useState<any>(null)
@@ -168,57 +167,12 @@ function App() {
             </div>
 
             {/* Auth Form */}
-            <Auth
-              supabaseClient={supabase}
-              appearance={{
-                theme: ThemeSupa,
-                variables: {
-                  default: {
-                    colors: {
-                      brand: '#2563eb',
-                      brandAccent: '#1d4ed8',
-                      inputBackground: 'rgba(255, 255, 255, 0.9)',
-                      inputBorder: '#e2e8f0',
-                      inputBorderFocus: '#2563eb',
-                      inputBorderHover: '#cbd5e1',
-                    },
-                    radii: {
-                      borderRadiusButton: '0.75rem',
-                      buttonBorderRadius: '0.75rem',
-                      inputBorderRadius: '0.75rem',
-                    },
-                  },
-                },
-                style: {
-                  button: { fontWeight: '600', boxShadow: '0 4px 14px 0 rgba(37, 99, 235, 0.25)' },
-                  input: { boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)', border: '1px solid #e2e8f0' },
-                  label: { fontWeight: '600', color: '#374151' },
-                },
-              }}
-              providers={['google']}
-              redirectTo="https://app.forzeo.com"
-              localization={{
-                variables: {
-                  sign_in: {
-                    email_label: 'Work Email',
-                    password_label: 'Password',
-                    button_label: 'Sign In to Dashboard',
-                    link_text: "Don't have an account? Sign Up",
-                  },
-                  sign_up: {
-                    email_label: 'Work Email',
-                    password_label: 'Create Password',
-                    button_label: 'Create Account',
-                    link_text: 'Already have an account? Sign In',
-                  },
-                },
-              }}
-            />
+            <AuthForm />
 
             {/* Contact Sales */}
             <p className="text-center text-slate-600 text-sm">
               Need enterprise access?
-              <a className="text-blue-600 hover:text-blue-700 font-semibold transition-colors ml-1" href="mailto:sales@forzeo.com">Contact Sales</a>
+              <a className="text-blue-600 hover:text-blue-700 font-semibold transition-colors ml-1" href="mailto:contact@forzeo.com">Contact Sales</a>
             </p>
           </div>
 
@@ -235,7 +189,7 @@ function App() {
 
           {/* Footer */}
           <div className="mt-6 text-center">
-            <p className="text-slate-500 text-xs font-medium">© 2024 Forzeo Analytics. All rights reserved.</p>
+            <p className="text-slate-500 text-xs font-medium">© 2026 Forzeo Analytics. All rights reserved.</p>
           </div>
         </div>
       </div>

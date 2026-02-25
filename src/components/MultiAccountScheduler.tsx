@@ -16,6 +16,7 @@ import ExecutionMonitor from './scheduler/ExecutionMonitor';
 import ConditionalRulesEditor, { ConditionalRule } from './scheduler/ConditionalRulesEditor';
 import AnalyticsDashboard from './scheduler/AnalyticsDashboard';
 import { localTimeToUTC, utcToLocalTime, formatInTimezone } from '@/utils/timezone';
+import { AI_MODELS } from '@/hooks/useClientDashboard';
 
 interface Client {
   id: string;
@@ -654,6 +655,42 @@ export default function MultiAccountScheduler({
                   </p>
                 </div>
 
+                <div>
+                  <Label className="mb-2 block">AI Models</Label>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Select which models to run. At least one must be selected.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {AI_MODELS.map((model) => (
+                      <div
+                        key={model.id}
+                        className="flex items-center space-x-2 p-2 border rounded hover:bg-gray-50"
+                      >
+                        <Checkbox
+                          id={`model-${model.id}`}
+                          checked={form.models.includes(model.id)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setForm({ ...form, models: [...form.models, model.id] });
+                            } else {
+                              if (form.models.length > 1) {
+                                setForm({ ...form, models: form.models.filter(m => m !== model.id) });
+                              }
+                            }
+                          }}
+                        />
+                        <Label htmlFor={`model-${model.id}`} className="flex-1 cursor-pointer">
+                          <span className="text-sm font-medium">{model.name}</span>
+                        </Label>
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: model.color }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="notify"
@@ -714,7 +751,10 @@ export default function MultiAccountScheduler({
                     <strong>Concurrency:</strong> {form.concurrencyLimit} brands in parallel
                   </div>
                   <div>
-                    <strong>Models:</strong> {form.models.join(', ')}
+                    <strong>Models:</strong>{' '}
+                    {form.models
+                      .map(id => AI_MODELS.find(m => m.id === id)?.name || id)
+                      .join(', ')}
                   </div>
                 </div>
 

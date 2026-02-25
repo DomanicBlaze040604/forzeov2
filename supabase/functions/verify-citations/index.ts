@@ -112,8 +112,92 @@ function selectBestParagraphs(paragraphs, brand, maxCount = 5) {
     return scored.slice(0, maxCount).map(s => s.paragraph)
 }
 
+// Clean raw Jina Reader content — strip nav/boilerplate, keep substantive text
+function cleanPageContent(rawContent) {
+    if (!rawContent) return ''
+    const lines = rawContent.split('\n')
+    const cleaned = []
+
+    // Patterns that indicate nav/boilerplate lines
+    const skipPatterns = [
+        /^skip to\b/i, /^jump to\b/i, /^\(press enter\)/i,
+        /^(find a store|live chat|order status|gift card|track order|store locator)/i,
+        /^(sign in|sign up|log in|log out|create account|my account|register|forgot password)/i,
+        /^(cart|checkout|shopping bag|wishlist|favorites|compare)/i,
+        /^(menu|navigation|close menu|open menu|toggle|hamburger|breadcrumb)/i,
+        /^(free shipping|sale|shop now|buy now|add to cart|view all|see more|load more|show more)/i,
+        /^(follow us|share this|tweet|pin it|email this)/i,
+        /^(cookie|we use cookies|accept cookies|privacy policy|terms of (use|service)|disclaimer)/i,
+        /^(subscribe|newsletter|enter your email|join our|get \d+% off)/i,
+        /^(back to top|scroll to top|page \d|next page|previous)/i,
+        /^(all rights reserved|copyright|\u00a9|\(c\))/i,
+        /^(powered by|built with|designed by)/i,
+    ]
+
+    // Skip lines that are clearly menu items or boilerplate
+    for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+
+        // Skip very short lines (likely nav items)
+        if (trimmed.length < 30 && !trimmed.endsWith('.') && !trimmed.endsWith('?') && !trimmed.endsWith('!')) continue
+
+        // Skip all-caps short labels (WOMEN, MEN, SHOP, etc.)
+        if (/^[A-Z\s&|\/]{2,25}$/.test(trimmed)) continue
+
+        // Skip pattern matches
+        if (skipPatterns.some(p => p.test(trimmed))) continue
+
+        // Skip lines that look like menu items (short + no punctuation)
+        if (trimmed.length < 50 && !/[.!?:;,]/.test(trimmed) && /^[A-Z]/.test(trimmed)) {
+            // But keep if it looks like a heading (followed by content)
+            const wordCount = trimmed.split(/\s+/).length
+            if (wordCount <= 4) continue
+        }
+
+        cleaned.push(trimmed)
+    }
+
+    return cleaned.join('\n')
+}
+
+// Extract meaningful keywords from a URL path (e.g., "/r/presentations/" → ["presentations"])
+function extractUrlKeywords(url) {
+    try {
+        const parsed = new URL(url)
+        const pathWords = parsed.pathname
+            .split(/[\/\-_.]/)
+            .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
+            .filter(w => w.length > 3 && !['www', 'html', 'index', 'page', 'com', 'http', 'https'].includes(w))
+        const queryWords = (parsed.search || '')
+            .replace(/[?&=+%]/g, ' ')
+            .split(/\s+/)
+            .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
+            .filter(w => w.length > 3)
+        return [...new Set([...pathWords, ...queryWords])].slice(0, 10)
+    } catch {
+        return []
+    }
+}
+
+// Check if URL path keywords overlap with brand's industry (fuzzy matching)
+function urlPathRelevance(url, brand) {
+    const urlWords = extractUrlKeywords(url)
+    if (urlWords.length === 0) return { relevant: false, keywords: [] }
+
+    const brandWords = brand.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+    const matched = urlWords.filter(uw =>
+        brandWords.some(bw =>
+            uw.includes(bw) || bw.includes(uw) ||
+            // Fuzzy: share 4+ char prefix (prezent ↔ presentations, hospital ↔ hospitals)
+            (uw.length >= 5 && bw.length >= 4 && (uw.startsWith(bw.substring(0, 4)) || bw.startsWith(uw.substring(0, 4))))
+        )
+    )
+    return { relevant: matched.length > 0, keywords: urlWords, matchedKeywords: matched }
+}
+
 // ============================================================================
-// STEPFUN STEP 3.5 FLASH — Citation Verification via OpenRouter (FREE)
+// Qwen3 235B A22B — Citation Verification via OpenRouter (FREE)
 // ============================================================================
 
 async function verifyCitationWithModel(claim, pageText, entityCheck) {
@@ -142,9 +226,11 @@ async function verifyCitationWithModel(claim, pageText, entityCheck) {
 TASK: An AI model (ChatGPT/Gemini/Perplexity) was asked questions about a brand. It returned citations (URLs) in its response. You must verify whether each citation is legitimate by analyzing the fetched page content.
 
 BRAND BEING AUDITED: "${claim.brand}"
+CITATION URL: ${claim.url || 'unknown'}
 CITATION DOMAIN: ${claim.domain || 'unknown'}
 CITATION CATEGORY: ${claim.category || 'unknown'}
 BRAND DETECTED ON PAGE: ${entityCheck.found ? 'YES — "' + (entityCheck.snippet || '').substring(0, 150) + '"' : 'NO'}
+${claim.urlContext ? '\n' + claim.urlContext : ''}
 
 ANALYSIS STEPS:
 1. Is this page REAL with substantive content? (not an error page, login wall, cookie notice, or empty)
@@ -173,7 +259,7 @@ WHAT MAKES A CITATION INVALID (score < 0.30):
 Set entity_match:true ONLY if the brand name "${claim.brand}" literally appears on the page.
 
 Respond with ONLY valid JSON (no markdown, no explanation):
-{"score": 0.0-1.0, "entity_match": true|false, "matched_text": "most relevant 200-char excerpt or null", "reasoning": "one sentence why"}`
+{"score": 0.0-1.0, "entity_match": true|false, "matched_text": "most relevant 200-char excerpt or null", "reasoning": "one sentence why", "page_summary": "2-sentence description of what this page is about and what industry/topic it covers"}`
                 },
                 {
                     role: "user",
@@ -268,9 +354,11 @@ Respond with ONLY valid JSON (no markdown, no explanation):
 async function checkSimilarity(claim, pageText) {
     // Step 0: Content quality pre-check (free, instant — skip model call if clearly junk)
     const trimmed = pageText.trim()
-    if (trimmed.length < 100) {
+    const isThinContent = trimmed.length < 300
+
+    if (trimmed.length < 50) {
         console.log(`[Verify] Page content too short (${trimmed.length} chars) — likely empty/error`)
-        return { score: 0.10, matched_text: null, entity_match: false }
+        return { score: 0.10, matched_text: null, entity_match: false, reasoning: 'Page content too short — likely empty or error page', page_summary: null }
     }
 
     // Detect common error/block pages
@@ -283,7 +371,29 @@ async function checkSimilarity(claim, pageText) {
     const isJunk = junkPatterns.some(p => lowerText.includes(p)) && trimmed.length < 500
     if (isJunk) {
         console.log(`[Verify] Detected error/block page — skipping model call`)
-        return { score: 0.15, matched_text: null, entity_match: false }
+        return { score: 0.15, matched_text: null, entity_match: false, reasoning: 'Error or bot-blocking page detected', page_summary: null }
+    }
+
+    // Step 0.5: Thin content fallback — use URL path keywords as relevance signal
+    // Sites like Reddit, Canva, Quora return thin content via Jina (heavy SPA/bot blocking)
+    // but the URL path itself tells us relevance (e.g., reddit.com/r/presentations/)
+    if (isThinContent && claim.url) {
+        const urlSignal = urlPathRelevance(claim.url, claim.brand)
+        console.log(`[Verify] Thin content (${trimmed.length} chars) — URL keywords: [${urlSignal.keywords.join(', ')}], match: ${urlSignal.relevant}`)
+
+        if (urlSignal.relevant) {
+            // URL path matches brand keywords → page is likely relevant but content was blocked
+            console.log(`[Verify] URL path relevance match — scoring as verified despite thin content`)
+            return {
+                score: 0.70,
+                matched_text: `URL path indicates relevance: /${urlSignal.matchedKeywords.join(', ')}`,
+                entity_match: false,
+                reasoning: `URL path contains industry-relevant keywords (${urlSignal.matchedKeywords.join(', ')}) despite thin page content`,
+                page_summary: `Page content was limited (likely SPA/bot-blocking) but URL path indicates relevance to the brand's industry.`
+            }
+        }
+        // URL has no brand-related keywords + thin content → likely unrelated or blocked
+        // Still send to model with URL context for better decision
     }
 
     // Step 1: Free entity detection (instant, no API)
@@ -291,14 +401,52 @@ async function checkSimilarity(claim, pageText) {
     console.log(`[Verify] Entity detection for "${claim.brand}": ${entityCheck.found ? 'FOUND' : 'not found'}`)
 
     // Step 2: Qwen3 235B reasoning model via OpenRouter (free)
-    const result = await verifyCitationWithModel(claim, pageText, entityCheck)
+    // Include URL context if content is thin
+    const enhancedClaim = isThinContent && claim.url
+        ? { ...claim, urlContext: `NOTE: Page content may be incomplete (${trimmed.length} chars). The citation URL is: ${claim.url}. Consider the URL path when evaluating relevance.` }
+        : claim
+    const result = await verifyCitationWithModel(enhancedClaim, pageText, entityCheck)
 
     console.log(`[Verify] Model result: score=${result.score}, entity=${result.entity_match}, reason="${result.reasoning || ''}"`)
 
+    let finalScore = Math.min(1.0, Math.max(0, result.score))
+
+    // Post-model URL path relevance boost:
+    // If model scored low but the URL path clearly contains industry-relevant keywords,
+    // boost the score. This helps with SPAs (Canva, Reddit) where content is thin.
+    if (claim.url && finalScore < 0.50) {
+        const urlWords = extractUrlKeywords(claim.url)
+        if (urlWords.length > 0) {
+            // Check against brand keywords AND common industry terms from the page
+            const brandLower = (claim.brand || '').toLowerCase()
+            const brandWords = brandLower.split(/\s+/).filter(w => w.length > 2)
+
+            // Also check if URL keywords appear in the fetched page content
+            const pageWords = pageText.toLowerCase()
+            const urlWordsInPage = urlWords.filter(uw => pageWords.includes(uw))
+
+            // Check: URL keyword matches brand words (fuzzy — share 4+ char prefix)
+            const brandMatch = urlWords.some(uw => brandWords.some(bw =>
+                uw.includes(bw) || bw.includes(uw) ||
+                (uw.length >= 5 && bw.length >= 4 && (uw.startsWith(bw.substring(0, 4)) || bw.startsWith(uw.substring(0, 4))))
+            ))
+            // URL keyword found in page text — only meaningful if 2+ specific keywords match
+            const contentMatch = urlWordsInPage.filter(w => w.length >= 6).length >= 2
+
+            if (brandMatch || contentMatch) {
+                const boosted = Math.max(finalScore, 0.60)
+                console.log(`[Verify] URL relevance boost: ${finalScore.toFixed(2)} → ${boosted.toFixed(2)} (urlWords: [${urlWords.join(',')}], brandMatch: ${brandMatch}, contentMatch: ${contentMatch})`)
+                finalScore = boosted
+            }
+        }
+    }
+
     return {
-        score: Math.min(1.0, Math.max(0, result.score)),
+        score: finalScore,
         matched_text: result.matched_text || entityCheck.snippet || null,
-        entity_match: result.entity_match || entityCheck.found
+        entity_match: result.entity_match || entityCheck.found,
+        reasoning: result.reasoning || null,
+        page_summary: result.page_summary || null
     }
 }
 
@@ -366,12 +514,18 @@ async function processCitation(citation, claim, supabase) {
         console.warn(`[Verify] Jina Reader failed for ${url}:`, e.message)
     }
 
-    // No content → 404 = hallucinated, else error (retry next run)
+    // No content → determine if hallucinated or fetch error
     if (!pageContent || pageContent.trim().length === 0) {
         console.warn(`[Verify] No content fetched for ${url} (status: ${pageStatus})`)
 
+        // pageStatus 404 = page not found → hallucinated (page doesn't exist)
+        // pageStatus 0/403/5xx = network/block error → error (retry next run)
+        // We can't distinguish DNS failure (fake domain) from bot blocking at this level,
+        // so we default to "error" which will be retried. Persistent errors stay as "error".
+        const fetchVerdict = pageStatus === 404 ? 'hallucinated' : 'error'
+
         const updateData = {
-            verification_status: pageStatus === 404 ? 'hallucinated' : 'error',
+            verification_status: fetchVerdict,
             page_fetch_status: pageStatus,
             verified_at: new Date().toISOString()
         }
@@ -390,11 +544,13 @@ async function processCitation(citation, claim, supabase) {
         }
     }
 
-    // Step 2: Verify with entity detection + StepFun reasoning model
+    // Step 2: Verify with entity detection + reasoning model
     console.log(`[Verify] Verifying ${url} for brand "${claimObj.brand}"`)
 
+    // Pass URL into claim for thin-content URL path analysis
+    const claimWithUrl = { ...claimObj, url }
     const similarity = await retryWithBackoff(async () => {
-        return await checkSimilarity(claimObj, pageContent)
+        return await checkSimilarity(claimWithUrl, pageContent)
     }, 3)
 
     // Step 3: Determine verification status from score
@@ -408,14 +564,23 @@ async function processCitation(citation, claim, supabase) {
         verificationStatus = 'hallucinated'
     }
 
-    // Step 4: Store result
+    // Step 4: Store result — clean content + rich AI analysis
+    const cleanedContent = cleanPageContent(pageContent)
     const updateData = {
         verification_status: verificationStatus,
         similarity_score: similarity.score,
         matched_paragraph: similarity.matched_text,
         page_fetch_status: pageStatus,
-        page_content: pageContent.substring(0, 5000),
-        verified_at: new Date().toISOString()
+        page_content: (cleanedContent || pageContent).substring(0, 5000),
+        verified_at: new Date().toISOString(),
+        brand_mentioned_in_source: similarity.entity_match || false,
+        ai_analysis: {
+            reasoning: similarity.reasoning || null,
+            page_summary: similarity.page_summary || null,
+            entity_match: similarity.entity_match || false,
+            model: OPENROUTER_MODEL,
+            verified_with: 'verify-citations-v2'
+        }
     }
 
     if (existing?.id) {
