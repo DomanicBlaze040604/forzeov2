@@ -15,9 +15,12 @@ import {
 interface AgencyBrandsManagerProps {
     clients: any[];
     onSelectClient: (clientId: string) => void;
+    onAddBrand?: () => void;
+    onEditBrand?: (clientId: string) => void;
+    auditResults?: any[];
 }
 
-export function AgencyBrandsManager({ clients, onSelectClient }: AgencyBrandsManagerProps) {
+export function AgencyBrandsManager({ clients, onSelectClient, onAddBrand, onEditBrand, auditResults }: AgencyBrandsManagerProps) {
     const [searchQuery, setSearchQuery] = useState("");
 
     const filteredClients = clients.filter(c =>
@@ -32,7 +35,7 @@ export function AgencyBrandsManager({ clients, onSelectClient }: AgencyBrandsMan
                     <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Managed Brands</h2>
                     <p className="text-gray-500 mt-1">Access and manage your client portfolio.</p>
                 </div>
-                <Button className="bg-gray-900 text-white hover:bg-gray-800">
+                <Button className="bg-gray-900 text-white hover:bg-gray-800" onClick={onAddBrand}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add New Brand
                 </Button>
@@ -83,7 +86,7 @@ export function AgencyBrandsManager({ clients, onSelectClient }: AgencyBrandsMan
                                             <ExternalLink className="h-4 w-4 mr-2" /> Open Dashboard
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => onEditBrand?.(client.id)}>
                                             <Settings className="h-4 w-4 mr-2" /> Settings
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
@@ -99,7 +102,19 @@ export function AgencyBrandsManager({ clients, onSelectClient }: AgencyBrandsMan
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-gray-500">Last Audit</span>
-                                    <span className="text-gray-900 font-medium">Today</span>
+                                    <span className="text-gray-900 font-medium">
+                                        {(() => {
+                                            const clientAudits = (auditResults || []).filter(r => r.client_id === client.id);
+                                            if (clientAudits.length === 0) return "No audits yet";
+                                            const latest = clientAudits.reduce((a, b) => new Date(a.created_at) > new Date(b.created_at) ? a : b);
+                                            const d = new Date(latest.created_at);
+                                            const now = new Date();
+                                            const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+                                            if (diffDays === 0) return "Today";
+                                            if (diffDays === 1) return "Yesterday";
+                                            return `${diffDays}d ago`;
+                                        })()}
+                                    </span>
                                 </div>
                             </div>
 

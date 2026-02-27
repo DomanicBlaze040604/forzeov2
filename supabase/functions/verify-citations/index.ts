@@ -6,8 +6,8 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") || ""
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 
-// Qwen3 235B A22B — 235B MoE reasoning model with enforced thinking, FREE via OpenRouter
-const OPENROUTER_MODEL = "qwen/qwen3-235b-a22b:free"
+// Arcee Trinity Large — 400B MoE reasoning model, truly FREE via OpenRouter
+const OPENROUTER_MODEL = "arcee-ai/trinity-large-preview:free"
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 const corsHeaders = {
@@ -638,7 +638,7 @@ async function handleBatchVerification(params) {
     const { data: pendingCitations, error: queryError } = await supabase
         .from('citation_intelligence')
         .select('id, url, domain, client_id, citation_category')
-        .or(`verification_status.eq.pending,verification_status.is.null,and(verified_at.lt.${sevenDaysAgo},verification_status.neq.error)`)
+        .or(`verification_status.eq.pending,verification_status.is.null,verified_at.lt.${sevenDaysAgo}`)
         .order('created_at', { ascending: true })
         .limit(BATCH_LIMIT)
 

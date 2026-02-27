@@ -1335,6 +1335,7 @@ async function getGoogleAIOverview(
     language_code: "en",
     device: "desktop",
     depth: 10,
+    load_async_ai_overview: true,
   }]);
 
   const responseTime = Date.now() - startTime;
@@ -1563,16 +1564,54 @@ function matchCountryCode(locationCode: number): number {
   ];
   if (knownCountries.includes(locationCode)) return locationCode;
 
-  // City-to-Country Mapping (Common fallback for user regions)
-  // Bangalore (1027351) -> India (2356)
-  if (locationCode === 1027351) return 2356;
+  // City-to-Country Mapping (expanded — maps DataForSEO city location_codes to country codes)
+  const CITY_TO_COUNTRY: Record<number, number> = {
+    // India cities → India (2356)
+    1027351: 2356, // Bangalore
+    1015539: 2356, // Mumbai
+    1007758: 2356, // Delhi
+    1022862: 2356, // Chennai
+    1275339: 2356, // Hyderabad
+    1269843: 2356, // Kolkata
+    1275004: 2356, // Pune
+    1277333: 2356, // Ahmedabad
+    // US cities → USA (2840)
+    1023191: 2840, // New York
+    1014895: 2840, // Los Angeles
+    1016367: 2840, // Chicago
+    1025433: 2840, // Houston
+    1025542: 2840, // Phoenix
+    1020862: 2840, // Dallas
+    1024638: 2840, // San Antonio
+    1019330: 2840, // Miami
+    1021209: 2840, // San Francisco
+    1021455: 2840, // Seattle
+    // UK cities → UK (2826)
+    1006886: 2826, // London
+    1006984: 2826, // Birmingham
+    1006914: 2826, // Manchester
+    // Australia cities → AU (2036)
+    1000073: 2036, // Sydney
+    1000688: 2036, // Melbourne
+    1000664: 2036, // Brisbane
+    // Canada cities → CA (2124)
+    1006583: 2124, // Toronto
+    1006481: 2124, // Vancouver
+    1006656: 2124, // Montreal
+    // UAE cities → AE (2784)
+    292223: 2784, // Dubai
+    292968: 2784, // Abu Dhabi
+    // Singapore → SG (2702)
+    1880252: 2702,
+  };
 
-  // Default fallback: If code looks like a city (> 100k) and not in our list, 
-  // we might need a more complex lookup, but for now we'll return a default (USA) or the code itself
-  // and hope for the best, or log a warning.
+  if (CITY_TO_COUNTRY[locationCode]) return CITY_TO_COUNTRY[locationCode];
+
+  // Unknown city code: fall back to US (2840) — a neutral default
+  // Previously defaulted to India which was wrong for non-Indian users
   if (locationCode > 1000000) {
-    console.warn(`[LocationMap] Unknown city code ${locationCode}, falling back to India (2356) for this project's typical usage`);
-    return 2356;
+    console.warn(`[LocationMap] Unknown city code ${locationCode}, falling back to US (2840)`);
+    return 2840;
   }
 
   return locationCode;
@@ -1837,17 +1876,18 @@ async function getLiveLLMResponse(
 
     // GPT-5 Nano is extremely sensitive — do NOT send temperature or max_output_tokens
     if (config.modelName !== "gpt-5-nano") {
-      payload.max_output_tokens = 1000;
+      payload.max_output_tokens = 1024; // 1024 is the DataForSEO minimum for Claude/reasoning models
       payload.temperature = 0.7;
     }
 
-    // Gemini does NOT support web_search_country_iso_code
-    // Perplexity and Claude DO — and Claude REQUIRES web_search: true with it
-    if (model === "perplexity" || model === "claude") {
+    // Gemini supports web_search:true but NOT web_search_country_iso_code
+    // Perplexity and Claude support both web_search:true AND web_search_country_iso_code
+    // All confirmed via DataForSEO docs: https://docs.dataforseo.com/v3/ai_optimization/*/llm_responses/live/
+    if (model === "gemini" || model === "perplexity" || model === "claude") {
       payload.web_search = true;
-      if (isoCode) {
-        payload.web_search_country_iso_code = isoCode;
-      }
+    }
+    if ((model === "perplexity" || model === "claude") && isoCode) {
+      payload.web_search_country_iso_code = isoCode;
     }
 
     console.log(`[LIVE LLM/${model}] [v10] Prompt: "${prompt.substring(0, 60)}" | ISO: ${isoCode || 'none'}`);

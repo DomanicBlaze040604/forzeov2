@@ -416,12 +416,6 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
         setAutoFindingCompetitors(true);
         try {
-            const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
-
-            if (!groqApiKey) {
-                throw new Error("Groq API key not configured. Please add VITE_GROQ_API_KEY.");
-            }
-
             const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
             const locationName = LOCATIONS.find(l => l.code === formData.location)?.name?.replace(/^[^\s]+\s/, '') || 'United States';
 
@@ -446,19 +440,14 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 console.warn("[Auto-Find] Tavily search failed:", e);
             }
 
-            // Step 2: Use Groq to extract/generate competitors
-            console.log("[Auto-Find] Step 2: Using Groq to find competitors...");
+            // Step 2: Use groq-proxy to extract/generate competitors
+            console.log("[Auto-Find] Step 2: Using groq-proxy to find competitors...");
             const groqPrompt = tavilyContext
                 ? `Based on this search data about ${formData.brandName} competitors:\n${tavilyContext}\n\nExtract 5 direct competitor company names for "${formData.brandName}" in the "${finalIndustry}" industry. Return ONLY a JSON array like ["Comp1", "Comp2"].`
                 : `Find 5 direct competitors for "${formData.brandName}" in the "${finalIndustry}" industry in ${locationName}. Return ONLY a JSON array like ["Comp1", "Comp2", "Comp3", "Comp4", "Comp5"]`;
 
-            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${groqApiKey}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
+            const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+                body: {
                     model: "llama-3.3-70b-versatile",
                     messages: [
                         { role: "system", content: "You are a market research expert. Return ONLY a JSON array of competitor company names. No explanations, no markdown, just the JSON array." },
@@ -466,13 +455,12 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                     ],
                     temperature: 0.1,
                     max_tokens: 300,
-                }),
+                },
             });
 
-            if (response.ok) {
-                const data = await response.json();
-                const content = data.choices?.[0]?.message?.content || '';
-                console.log("[Auto-Find] Groq response:", content);
+            if (!proxyError && proxyData?.response) {
+                const content = proxyData.response;
+                console.log("[Auto-Find] groq-proxy response:", content);
                 try {
                     const jsonMatch = content.match(/\[[\s\S]*?\]/);
                     if (jsonMatch) {
@@ -481,9 +469,8 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 } catch (e) {
                     console.warn("[Auto-Find] Parse error:", e);
                 }
-            } else {
-                const errorText = await response.text();
-                console.error("[Auto-Find] Groq error:", errorText);
+            } else if (proxyError) {
+                console.error("[Auto-Find] groq-proxy error:", proxyError);
             }
 
             if (competitors.length > 0) {
@@ -538,7 +525,6 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         setLoading(true);
         setCurrentStep('review_prompts');
 
-        const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
         const locationInstruction = getLocationDrilldown(locationName);
 
         // GEO Strategist system prompt — Brand-Neutral Category Dominance
@@ -571,38 +557,32 @@ Instructions:
 
             let generatedLines: string[] = [];
 
-            // Try LLM generation via Groq
-            if (groqApiKey) {
-                try {
-                    console.log(`[GEO Onboarding] Generating prompts for keyword: "${keyword}"`);
-                    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                        method: "POST",
-                        headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            model: "llama-3.1-8b-instant",
-                            messages: [
-                                { role: "system", content: systemInstruction },
-                                { role: "user", content: userPrompt }
-                            ],
-                            temperature: 0.7,
-                            max_tokens: 2048,
-                        }),
-                    });
+            // Try LLM generation via groq-proxy (key is server-side)
+            try {
+                console.log(`[GEO Onboarding] Generating prompts for keyword: "${keyword}"`);
+                const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+                    body: {
+                        model: "llama-3.1-8b-instant",
+                        messages: [
+                            { role: "system", content: systemInstruction },
+                            { role: "user", content: userPrompt }
+                        ],
+                        temperature: 0.7,
+                        max_tokens: 2048,
+                    },
+                });
 
-                    if (response.ok) {
-                        const data = await response.json();
-                        const content = data.choices?.[0]?.message?.content || "";
-                        generatedLines = content.split("\n")
-                            .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").replace(/^[•]\s*/, "").trim())
-                            .filter((l: string) => l.length > 10 && !l.toLowerCase().includes(formData.brandName.toLowerCase()))
-                            .slice(0, promptsNeeded);
-                        console.log(`[GEO Onboarding] Got ${generatedLines.length} prompts for "${keyword}"`);
-                    } else {
-                        console.warn(`[GEO Onboarding] Groq returned ${response.status}`);
-                    }
-                } catch (err) {
-                    console.error("[GEO Onboarding] Groq error:", err);
+                if (!proxyError && proxyData?.response) {
+                    generatedLines = proxyData.response.split("\n")
+                        .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").replace(/^[•]\s*/, "").trim())
+                        .filter((l: string) => l.length > 10 && !l.toLowerCase().includes(formData.brandName.toLowerCase()))
+                        .slice(0, promptsNeeded);
+                    console.log(`[GEO Onboarding] Got ${generatedLines.length} prompts for "${keyword}"`);
+                } else if (proxyError) {
+                    console.warn(`[GEO Onboarding] groq-proxy error:`, proxyError);
                 }
+            } catch (err) {
+                console.error("[GEO Onboarding] groq-proxy error:", err);
             }
 
             // Fallback to templates if LLM failed or no API key

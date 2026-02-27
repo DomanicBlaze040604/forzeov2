@@ -625,14 +625,6 @@ export function UniversalImport({ clientId, onImportComplete }: UniversalImportP
                 </DialogContent>
             </Dialog>
 
-            {/* Hidden file input */}
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,.csv,.txt"
-                className="hidden"
-                onChange={handleFileSelect}
-            />
         </>
     );
 }

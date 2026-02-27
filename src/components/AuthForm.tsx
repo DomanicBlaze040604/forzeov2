@@ -33,6 +33,7 @@ export function AuthForm() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errorIsNetwork, setErrorIsNetwork] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
   const [online, setOnline] = useState(navigator.onLine)
 
@@ -59,6 +60,7 @@ export function AuthForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setErrorIsNetwork(false)
     setSuccess(null)
     setLoading(true)
 
@@ -86,6 +88,7 @@ export function AuthForm() {
         setSuccess('Check your email for a confirmation link!')
       }
     } catch (err) {
+      setErrorIsNetwork(isNetworkError(err))
       setError(friendlyError(err))
     } finally {
       setLoading(false)
@@ -94,6 +97,7 @@ export function AuthForm() {
 
   const handleGoogleSignIn = async () => {
     setError(null)
+    setErrorIsNetwork(false)
     setLoading(true)
     try {
       const { error } = await withRetry(() =>
@@ -104,6 +108,7 @@ export function AuthForm() {
       )
       if (error) throw error
     } catch (err) {
+      setErrorIsNetwork(isNetworkError(err))
       setError(friendlyError(err))
       setLoading(false)
     }
@@ -186,7 +191,7 @@ export function AuthForm() {
             <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             <div className="flex-1">
               <p>{error}</p>
-              {isNetworkError(error) && (
+              {errorIsNetwork && (
                 <button type="button" onClick={handleSubmit as any} className="mt-1 text-red-800 underline font-medium text-xs">
                   Tap to retry
                 </button>

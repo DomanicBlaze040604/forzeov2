@@ -63,7 +63,7 @@ Competitors: ${competitorList || "none specified"}
 Return ONLY a JSON object. No markdown, no explanation.
 Format: { "domain.com": { "category": "...", "source_type": "...", "authority_tier": 1|2|3, "relationship_type": "owned|competitor|neutral" } }`;
 
-        const userPrompt = `Classify these ${batch.length} domains:\n${batch.join("\n")}\n/no_think`;
+        const userPrompt = `Classify these ${batch.length} domains:\n${batch.join("\n")}`;
 
         const response = await fetch(OPENROUTER_API_URL, {
             method: "POST",
@@ -95,15 +95,31 @@ Format: { "domain.com": { "category": "...", "source_type": "...", "authority_ti
         const content = data.choices?.[0]?.message?.content || "{}";
 
         let result;
+        // Strip thinking tags + markdown fences before parsing
+        let cleaned = content
+            .replace(/<think>[\s\S]*?<\/think>/g, "")
+            .replace(/```json\n?|\n?```/g, "")
+            .trim();
         try {
-            result = JSON.parse(content);
-        } catch {
-            // Strip Qwen3 <think> reasoning tags + markdown fences
-            const cleaned = content
-                .replace(/<think>[\s\S]*?<\/think>/g, "")
-                .replace(/```json\n?|\n?```/g, "")
-                .trim();
             result = JSON.parse(cleaned);
+        } catch {
+            // Truncated JSON — salvage by closing the object
+            // Find last complete entry (ends with }) and close the outer object
+            const lastComplete = cleaned.lastIndexOf("}");
+            if (lastComplete > 0) {
+                let truncated = cleaned.substring(0, lastComplete + 1);
+                // Count braces to determine nesting
+                const opens = (truncated.match(/\{/g) || []).length;
+                const closes = (truncated.match(/\}/g) || []).length;
+                // Add missing closing braces
+                for (let i = 0; i < opens - closes; i++) {
+                    truncated += "}";
+                }
+                console.warn(`[Categorize] Salvaged truncated JSON (${Object.keys(JSON.parse(truncated)).length} domains recovered)`);
+                result = JSON.parse(truncated);
+            } else {
+                throw new Error("Failed to parse model response as JSON");
+            }
         }
 
         // Post-process: enforce hard rules that AI might miss

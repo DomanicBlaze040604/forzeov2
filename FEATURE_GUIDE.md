@@ -10,25 +10,34 @@ The Geo-Audit Engine is the core mechanism for tracking "Share of Voice" across 
 
 ### How It Works
 1.  **Request**: User initiates an audit for a specific query (e.g., "Best CRM for small business").
-2.  **Live Inference**: The system calls **DataForSEO's Live LLM API**. This is *not* a cached database; it triggers real-time inference on the actual models:
-    *   **ChatGPT**: via OpenAI GPT-4o
-    *   **Gemini**: via Google Gemini 1.5 Pro
-    *   **Claude**: via Anthropic Claude 3.5 Sonnet
-    *   **Perplexity**: via Perplexity Online
+2.  **Live Inference**: The system calls **DataForSEO's Live LLM API**. This triggers real-time inference on the actual models:
+    *   **ChatGPT**: via ChatGPT Scraper Live endpoint (OpenAI GPT-4o class)
+    *   **Gemini**: via Google Gemini 2.5 Flash — `web_search: true` enabled (confirmed supported)
+    *   **Claude**: via Anthropic Claude (`claude-haiku-4-5`) — `web_search: true` + `web_search_country_iso_code`
+    *   **Perplexity**: via Perplexity Sonar — always-on web search + `web_search_country_iso_code`
 3.  **Parsing & Scoring**: The raw text response is parsed to calculate metrics:
     *   **Rank**: The position of the brand in the list (1-10).
     *   **Share of Voice (SOV)**: Percentage of models that mentioned the brand.
     *   **Recommendation**: A generated "Top Recommendation" based on the brand's presence (or lack thereof).
 
+### `web_search` Parameter Support (DataForSEO)
+| Model | `web_search` | `web_search_country_iso_code` |
+|-------|-------------|-------------------------------|
+| **Gemini** | ✅ Yes | ❌ Not supported |
+| **Claude** | ✅ Yes | ✅ Yes |
+| **Perplexity** | ✅ Always-on | ✅ Yes |
+| **ChatGPT** | Uses Scraper endpoint | Location injected into prompt |
+
 ### Database Schema
-*   `audit_results`: Stores the high-level metrics (rank, sov, citations_count) for a specific run.
+*   `audit_results`: Stores the high-level metrics (rank, sov, citations_count) for a specific run. **Queries are bounded to 500 most recent results per client** to prevent unbounded fetches.
 *   `citations`: Parses URLs linked in the AI response and stores them linked to the audit.
+*   `api_usage`: Logs cost and token usage for every geo-audit and scheduled run.
 
 ---
 
 ## 2. Citation Intelligence Engine
 
-The Citation Intelligence system analyzes the *sources* that AI models use to construct their answers. It combines **Forzeo Discovery Engine** (powered by Tavily) and **Groq (Llama 3.1)** for deep analysis.
+The Citation Intelligence system analyzes the *sources* that AI models use to construct their answers. It combines **Forzeo Discovery Engine** (powered by Tavily) and **OpenRouter AI (Nemotron & Trinity)** for deep analysis.
 
 ### A. Discovery Engine (Deep Analysis)
 *   **Provider**: Forzeo Discovery Engine (via Tavily API).
@@ -68,7 +77,7 @@ The Citation Verification Engine determines whether AI-cited URLs actually suppo
 
 ### How It Works
 1. **Fetch Page Content**: Uses [Jina Reader](https://r.jina.ai/) to fetch the full text of each cited URL.
-2. **Semantic Similarity**: Sends the fetched content + the original AI prompt to Groq LLM to compute a similarity score (0.0–1.0).
+2. **Semantic Similarity**: Sends the fetched content + the original AI prompt to OpenRouter LLM (`arcee-ai/trinity-large-preview:free`) to compute a similarity score (0.0–1.0).
 3. **Status Assignment**:
    | Score | Status | Meaning |
    |-------|--------|---------|
@@ -93,7 +102,8 @@ The Citation Verification Engine determines whether AI-cited URLs actually suppo
 
 ### Edge Function: `verify-citations`
 - **Runtime**: Deno (Supabase Edge Functions)
-- **APIs Used**: Jina Reader (content fetch), Groq LLM (similarity scoring)
+- **APIs Used**: Jina Reader (content fetch), OpenRouter LLM (similarity scoring)
+- **Retry Policy**: Citations with `verification_status = 'error'` are re-queued after 7 days (same window as expired verifications)
 - **Auth**: `verify_jwt = false` (called from frontend with service role)
 
 ---
@@ -104,7 +114,7 @@ Enhanced AI-powered categorization using **Google Gemini 2.0 Flash** (via OpenRo
 
 ### Model
 - **Provider**: OpenRouter API
-- **Model**: `google/gemini-2.0-flash-001` (primary), falls back to `qwen/qwen3.5-397b-a17b`
+- **Model**: `nvidia/nemotron-3-nano-30b-a3b:free` — ultra-fast, truly free classification
 - **Domain Normalization**: Automatically strips `www.` prefix to ensure consistency across citations and aggregate metrics.
 - **Temperature**: 0.0 (deterministic)
 
@@ -310,9 +320,12 @@ Admin-only feature for scheduling audits across multiple brands simultaneously w
 ### Architecture
 | Component | Purpose |
 |-----------|---------|
-| **`scheduler`** edge function | Cron-triggered, checks for due schedules, delegates multi-account runs |
+| **`scheduler`** edge function | Cron-triggered, checks for due schedules, delegates multi-account runs. Logs cost to `api_usage` after each run. |
 | **`multi-account-runner`** edge function | Orchestrates audit execution across multiple brands in sequence |
 | **`notify-schedule-execution`** edge function | Sends email notifications (via Resend API) on completion |
+
+### Cost Logging
+After each completed scheduled run, a row is inserted into `api_usage` with `api_name: "scheduler"` so scheduled audit costs appear in the billing dashboard alongside manual audits.
 
 ### Database Tables
 - **`prompt_schedules`**: Enhanced with `client_ids UUID[]`, `recurrence_type`, `timezone`, `models TEXT[]`
@@ -441,9 +454,38 @@ If Groq is unavailable or JSON parsing fails, the function returns a `PromptInsi
 ### API Details
 | Setting | Value |
 |---------|-------|
-| **Provider** | Groq |
+| **Provider** | Groq (via `groq-proxy` edge function — key is server-side only) |
 | **Model** | `llama-3.3-70b-versatile` |
 | **Max Tokens** | 4096 |
 | **Temperature** | 0.5 |
 | **Response Format** | JSON object |
-| **Env Var** | `VITE_GROQ_API_KEY` |
+| **Secret** | `GROQ_API_KEY` (Supabase secret, never exposed to browser) |
+
+---
+
+## 12. Groq Proxy Edge Function
+
+**File**: `supabase/functions/groq-proxy/index.ts`
+
+All Groq API calls are proxied through this server-side edge function. `GROQ_API_KEY` is stored as a Supabase secret and never bundled into frontend JavaScript.
+
+### Interface
+**Request body:**
+```json
+{ "model": "llama-3.3-70b-versatile", "messages": [...], "temperature": 0.5, "max_tokens": 4096, "response_format": { "type": "json_object" } }
+```
+**Response:**
+```json
+{ "response": "<LLM output string>", "usage": { "prompt_tokens": 0, "completion_tokens": 0 } }
+```
+
+### Callers
+| Function | Purpose |
+|----------|---------|
+| `generatePromptsFromKeywords` | Brand-neutral GEO prompt generation |
+| `generateContent` | General content generation |
+| `generateVisibilityContent` | 1,500–2,500 word humanized articles |
+| `fetchCompetitors` | Auto-discover top 5 competitors |
+| `generateRecommendations` | AI Visibility Strategist per-prompt insights |
+| `generateOverallRecommendations` | Dashboard-level strategic summary |
+| `OnboardingWizard` (x2) | Competitor auto-find + prompt generation during setup |

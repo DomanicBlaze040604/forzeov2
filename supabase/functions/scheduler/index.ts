@@ -382,17 +382,31 @@ async function queryLLM(
     }
 
     try {
+        // Location code to ISO mapping for web_search_country_iso_code
+        const locationCodeToISO: Record<number, string> = {
+            2356: "IN", 2840: "US", 2826: "GB", 2036: "AU", 2124: "CA",
+            2276: "DE", 2250: "FR", 2392: "JP", 2076: "BR", 2484: "MX",
+            2380: "IT", 2724: "ES", 2410: "KR", 2702: "SG", 2784: "AE",
+        };
+        const isoCode = locationCode ? locationCodeToISO[locationCode] : undefined;
+
         const payload: Record<string, any> = {
-            prompt,
+            user_prompt: prompt,
             model_name: config.model_name,
-            location_code: locationCode,
-            language_code: "en",
         };
 
         // GPT-5 Nano is extremely sensitive — do NOT send temperature or max_output_tokens
         if (config.model_name !== "gpt-5-nano") {
-            payload.max_output_tokens = 1000;
+            payload.max_output_tokens = 1024;
             payload.temperature = 0.7;
+        }
+
+        // Perplexity and Claude support web_search; Gemini does not
+        if (model === "perplexity" || model === "claude") {
+            payload.web_search = true;
+            if (isoCode) {
+                payload.web_search_country_iso_code = isoCode;
+            }
         }
 
         const response = await fetch(`${DATAFORSEO_API}${config.endpoint}`, {
@@ -413,18 +427,41 @@ async function queryLLM(
         const result = task?.result?.[0];
         const cost = task?.cost || 0;
 
-        const llmResponse = result?.response || result?.items?.[0]?.text || "";
+        // Extract text from items -> sections (DataForSEO LLM response structure)
+        let llmResponse = "";
+        if (result?.items) {
+            for (const item of result.items) {
+                if (item.sections) {
+                    for (const section of item.sections) {
+                        if (section.text) llmResponse += section.text;
+                    }
+                }
+            }
+        }
 
-        // Extract citations from response
+        // Extract structured citations from annotations (not regex)
         const citations: Array<{ url: string; title: string; domain: string }> = [];
-        const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
-        const urls = llmResponse.match(urlRegex) || [];
-        for (const url of urls) {
-            citations.push({
-                url,
-                title: extractDomain(url),
-                domain: extractDomain(url),
-            });
+        if (result?.items) {
+            for (const item of result.items) {
+                if (item.sections) {
+                    for (const section of item.sections) {
+                        if (section.annotations) {
+                            for (const ann of section.annotations) {
+                                if (ann.url) {
+                                    try {
+                                        const urlObj = new URL(ann.url);
+                                        citations.push({
+                                            url: ann.url,
+                                            title: ann.title || urlObj.hostname,
+                                            domain: urlObj.hostname.replace(/^www\./, ''),
+                                        });
+                                    } catch { /* skip invalid URLs */ }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         return { success: true, response: llmResponse, citations, cost };
@@ -611,8 +648,26 @@ async function processSingleAccountSchedule(
             })
             .eq("id", run.id);
 
+
         console.log(`[Scheduler] Completed single-account schedule "${schedule.name}" - SOV: ${shareOfVoice}%`);
+
+        // Log API usage for cost tracking (so scheduled runs appear in billing dashboard)
+        if (totalCost > 0) {
+            const { error: usageError } = await supabase.from("api_usage").insert({
+                client_id: client.id,
+                organization_id: null,
+                api_name: "scheduler",
+                endpoint: "/scheduler",
+                request_count: schedule.models.length,
+                cost: totalCost,
+                prompt_text: promptText.substring(0, 200),
+                models_used: schedule.models,
+            });
+            if (usageError) console.error("[Scheduler] Failed to log api_usage:", usageError);
+        }
+
         return { success: true };
+
 
     } catch (err) {
         console.error("[Scheduler] Error processing single-account schedule:", err);

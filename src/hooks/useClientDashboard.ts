@@ -816,7 +816,7 @@ export function useClientDashboard() {
     // --- Load Audit Results ---
     try {
       const { data: resultsData } = await supabase
-        .from("audit_results").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
+        .from("audit_results").select("*").eq("client_id", client.id).order("created_at", { ascending: false }).limit(500);
       if (resultsData && resultsData.length > 0) {
         loadedResults = resultsData.map(r => ({
           id: r.id, prompt_id: r.prompt_id, prompt_text: r.prompt_text,
@@ -845,7 +845,7 @@ export function useClientDashboard() {
     try {
       const { data: tavilyData } = await supabase
         .from('tavily_results').select('*').eq('client_id', client.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }).limit(500);
       if (tavilyData && tavilyData.length > 0) {
         const tavilyMap: Record<string, unknown> = {};
         tavilyData.forEach(t => {
@@ -2480,15 +2480,10 @@ Instructions:
       }
     } catch (err) { console.log("[GEO] Edge function error:", err); }
 
-    // 2. Direct Groq call (Primary method)
-    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
-    if (!groqApiKey) return [];
-
+    // 2. Try groq-proxy edge function (key stays server-side)
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+        body: {
           model: "llama-3.1-8b-instant",
           messages: [
             { role: "system", content: systemInstruction },
@@ -2496,19 +2491,18 @@ Instructions:
           ],
           temperature: 0.7,
           max_tokens: 2048,
-        }),
+        },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || "";
-        return content.split("\n")
+      if (!proxyError && proxyData?.response) {
+        return proxyData.response.split("\n")
           .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").replace(/^[•]\s*/, "").trim())
           .filter((l: string) => l.length > 10 && !l.toLowerCase().includes(brandName.toLowerCase()));
       }
-    } catch (err) { console.error("[GEO] Groq error:", err); }
+    } catch (err) { console.error("[GEO] groq-proxy error:", err); }
 
     return [];
+
   }, [selectedClient, getLocationDrilldown]);
 
   const generateContent = useCallback(async (topic: string, contentType: string, tone?: string, audience?: string, keywords?: string): Promise<string | null> => {
@@ -2531,23 +2525,17 @@ Instructions:
       if (!error && data?.response) return data.response;
     } catch (err) { console.log("Generate content error:", err); }
 
-    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
-    if (!groqApiKey) return null;
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+        body: {
           model: "llama-3.1-8b-instant",
           messages: [{ role: "system", content: "You are an expert content writer." }, { role: "user", content: prompt }],
-          temperature: 0.7, max_tokens: 4096,
-        }),
+          temperature: 0.7,
+          max_tokens: 4096,
+        },
       });
-      if (response.ok) {
-        const data = await response.json();
-        return data.choices?.[0]?.message?.content || null;
-      }
-    } catch (err) { console.error("Groq error:", err); }
+      if (!proxyError && proxyData?.response) return proxyData.response;
+    } catch (err) { console.error("groq-proxy error:", err); }
     return null;
   }, [selectedClient]);
 
@@ -2662,43 +2650,29 @@ CONTENT STRATEGY BASED ON ANALYSIS:
 Generate comprehensive, humanized content that will improve this brand's AI visibility:`;
 
 
-    // Try Groq API directly for best quality
-    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
-    if (!groqApiKey) {
-      console.error('[Groq] No API key configured');
-      return null;
-    }
-
+    // Use groq-proxy edge function (key stays server-side)
     try {
-      console.log('[Groq] Generating visibility content for:', promptText.substring(0, 50));
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${groqApiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",  // Use larger model for better quality
+      console.log('[groq-proxy] Generating visibility content for:', promptText.substring(0, 50));
+      const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+        body: {
+          model: "llama-3.3-70b-versatile",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
           ],
-          temperature: 0.8,  // Higher temperature for more creative/human writing
+          temperature: 0.8,
           max_tokens: 8192,
-        }),
+        },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content;
-        console.log('[Groq] Generated content:', content?.length || 0, 'characters');
-        return content || null;
-      } else {
-        const errorText = await response.text();
-        console.error('[Groq] API error:', response.status, errorText);
+      if (!proxyError && proxyData?.response) {
+        console.log('[groq-proxy] Generated content:', proxyData.response.length, 'characters');
+        return proxyData.response;
+      } else if (proxyError) {
+        console.error('[groq-proxy] Error:', proxyError);
       }
     } catch (err) {
-      console.error('[Groq] Exception:', err);
+      console.error('[groq-proxy] Exception:', err);
     }
 
     // Fallback to edge function
@@ -2761,17 +2735,11 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
     industry: string,
     region: string
   ): Promise<string[]> => {
-    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
-    if (!groqApiKey || !brandName) return [];
+    if (!brandName) return [];
 
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${groqApiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
+      const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+        body: {
           model: "llama-3.3-70b-versatile",
           messages: [
             {
@@ -2786,15 +2754,12 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
           temperature: 0.1,
           max_tokens: 500,
           response_format: { type: "json_object" }
-        }),
+        },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content;
+      if (!proxyError && proxyData?.response) {
         try {
-          const parsed = JSON.parse(content);
-          // Handle various possible JSON structures the LLM might return
+          const parsed = JSON.parse(proxyData.response);
           const list = Array.isArray(parsed) ? parsed : (parsed.competitors || parsed.companies || Object.values(parsed)[0]);
           return Array.isArray(list) ? list.map(String).slice(0, 7) : [];
         } catch (e) {
@@ -2820,12 +2785,6 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
     completedRecommendations: string[] = []
   ): Promise<PromptInsightResult | null> => {
     if (!selectedClient) return null;
-
-    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
-    if (!groqApiKey) {
-      console.error('[Groq] No API key for recommendations');
-      return null;
-    }
 
     // Build context from audit - per-platform response text
     const sov = auditResult?.summary?.share_of_voice || 0;
@@ -3019,14 +2978,9 @@ CURRENT VISIBILITY STATUS:
 Generate the Citation Gap Analysis and exactly 6 Recommendations (2-3 High Impact + 3-4 Quick Wins) as JSON:`;
 
     try {
-      console.log('[Groq] Generating AI Visibility Strategist insights for:', promptText.substring(0, 40));
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${groqApiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
+      console.log('[groq-proxy] Generating AI Visibility Strategist insights for:', promptText.substring(0, 40));
+      const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+        body: {
           model: "llama-3.3-70b-versatile",
           messages: [
             { role: "system", content: systemPrompt },
@@ -3035,13 +2989,12 @@ Generate the Citation Gap Analysis and exactly 6 Recommendations (2-3 High Impac
           temperature: 0.5,
           max_tokens: 4096,
           response_format: { type: "json_object" }
-        }),
+        },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || '';
-        console.log('[Groq] AI Visibility Strategist response:', content.substring(0, 150));
+      if (!proxyError && proxyData?.response) {
+        const content = proxyData.response;
+        console.log('[groq-proxy] AI Visibility Strategist response:', content.substring(0, 150));
 
         try {
           const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -3077,13 +3030,13 @@ Generate the Citation Gap Analysis and exactly 6 Recommendations (2-3 High Impac
             };
           }
         } catch (parseErr) {
-          console.error('[Groq] Failed to parse AI Visibility Strategist JSON:', parseErr);
+          console.error('[groq-proxy] Failed to parse AI Visibility Strategist JSON:', parseErr);
         }
-      } else {
-        console.error('[Groq] AI Visibility Strategist API error:', response.status);
+      } else if (proxyError) {
+        console.error('[groq-proxy] AI Visibility Strategist error:', proxyError);
       }
     } catch (err) {
-      console.error('[Groq] AI Visibility Strategist exception:', err);
+      console.error('[groq-proxy] AI Visibility Strategist exception:', err);
     }
 
     // Return fallback based on data
@@ -3160,12 +3113,6 @@ Generate the Citation Gap Analysis and exactly 6 Recommendations (2-3 High Impac
   ): Promise<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string; keyActions: string[] } | null> => {
     if (!selectedClient) return null;
 
-    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
-    if (!groqApiKey) {
-      console.error('[Groq] No API key for overall recommendations');
-      return null;
-    }
-
     const systemPrompt = `You are an AI Visibility Strategy Expert analyzing aggregated brand performance.
 Generate PRECISE, IMMEDIATELY ACTIONABLE strategic recommendations.
 
@@ -3236,14 +3183,9 @@ ${aggregatedData.tavilyInsights.slice(0, 5).join('\n') || 'No Tavily data'}
 Provide strategic, pinpoint recommendations to improve overall AI visibility for ${selectedClient.brand_name}:`;
 
     try {
-      console.log('[Groq] Generating overall recommendations');
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${groqApiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
+      console.log('[groq-proxy] Generating overall recommendations');
+      const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+        body: {
           model: "llama-3.1-8b-instant",
           messages: [
             { role: "system", content: systemPrompt },
@@ -3251,13 +3193,12 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
           ],
           temperature: 0.5,
           max_tokens: 1200,
-        }),
+        },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || '';
-        console.log('[Groq] Overall recommendations response:', content.substring(0, 100));
+      if (!proxyError && proxyData?.response) {
+        const content = proxyData.response;
+        console.log('[groq-proxy] Overall recommendations response:', content.substring(0, 100));
 
         try {
           const jsonMatch = content.match(/\{[\s\S]*\}/);

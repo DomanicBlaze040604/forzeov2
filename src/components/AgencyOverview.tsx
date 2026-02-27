@@ -14,19 +14,24 @@ export function AgencyOverview({ clients, prompts, auditResults, onNavigateToBra
     const totalClients = clients.length;
     const totalPrompts = prompts.length;
 
-    // Calculate average visibility across all brands (using latest audit for each prompt)
-    const recentAudits = auditResults.slice(0, 100); // Take recent sample
-    const avgVisibility = recentAudits.length > 0
-        ? Math.round(recentAudits.reduce((sum, r) => sum + (r.summary?.share_of_voice || 0), 0) / recentAudits.length)
+    // Calculate per-client average visibility, then average across clients
+    const clientVisibilities = clients.map(client => {
+        const clientAudits = auditResults.filter(r => r.client_id === client.id);
+        if (!clientAudits.length) return { ...client, visibility: 0, hasAudits: false };
+        const avgVis = clientAudits.reduce((sum, r) => sum + (r.summary?.share_of_voice || 0), 0) / clientAudits.length;
+        return { ...client, visibility: Math.round(avgVis), hasAudits: true };
+    });
+    const clientsWithAudits = clientVisibilities.filter(c => c.hasAudits);
+    const avgVisibility = clientsWithAudits.length > 0
+        ? Math.round(clientsWithAudits.reduce((sum, c) => sum + c.visibility, 0) / clientsWithAudits.length)
         : 0;
 
     // Identify brands needing attention (low visibility)
-    const brandsWithLowVisibility = clients.map(client => {
-        const clientAudits = auditResults.filter(r => r.client_id === client.id);
-        if (!clientAudits.length) return null;
-        const clientAvgVis = clientAudits.reduce((sum, r) => sum + (r.summary?.share_of_voice || 0), 0) / clientAudits.length;
-        return clientAvgVis < 30 ? { ...client, visibility: Math.round(clientAvgVis) } : null;
-    }).filter(Boolean);
+    const brandsWithLowVisibility = clientVisibilities
+        .filter(c => c.hasAudits && c.visibility < 30);
+
+    // Top performing brands sorted by visibility (descending)
+    const topPerformingBrands = [...clientVisibilities].sort((a, b) => b.visibility - a.visibility);
 
     return (
         <div className="space-y-8 fade-in">
@@ -112,7 +117,7 @@ export function AgencyOverview({ clients, prompts, auditResults, onNavigateToBra
                         </h3>
                     </div>
                     <div className="divide-y divide-gray-100">
-                        {clients.slice(0, 5).map((client) => (
+                        {topPerformingBrands.slice(0, 5).map((client) => (
                             <div key={client.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => onNavigateToBrand(client.id)}>
                                 <div className="flex items-center gap-3">
                                     <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-600 border border-gray-200">
@@ -120,6 +125,7 @@ export function AgencyOverview({ clients, prompts, auditResults, onNavigateToBra
                                     </div>
                                     <div>
                                         <h4 className="font-medium text-gray-900">{client.brand_name}</h4>
+                                        <p className="text-xs text-gray-500">{client.hasAudits ? `${client.visibility}% visibility` : 'No audits yet'}</p>
                                     </div>
                                 </div>
                                 <ArrowRight className="h-4 w-4 text-gray-300" />
