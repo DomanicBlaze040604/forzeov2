@@ -86,6 +86,118 @@ function brandMentionedInText(response: string, brandName: string, aliases: stri
   return false;
 }
 
+/**
+ * Compute position for an audit result using multi-layer fallbacks:
+ * 1. summary.average_rank (from backend)
+ * 2. Average of model_results brand_rank fields
+ * 3. Parse from raw_response using cleanAndAnalyzeResponse
+ * 4. Extracted brands position (DataForSEO)
+ */
+function computePositionForResult(
+  r: any,
+  selectedClient: any
+): number | null {
+  if (!r) return null;
+
+  // 1. Use summary.average_rank if available
+  let pos = r.summary?.average_rank;
+  if (pos) return pos;
+
+  // Check visibility
+  const visibleCount = r.model_results.filter((mr: any) => {
+    if (mr.brand_mentioned) return true;
+    if (selectedClient && mr.raw_response) {
+      return brandMentionedInText(mr.raw_response, selectedClient.brand_name, selectedClient.brand_tags || []);
+    }
+    return false;
+  }).length;
+
+  if (visibleCount === 0) return null;
+
+  // 2. Average of model_results brand_rank fields
+  const ranksFromModels = r.model_results
+    .filter((mr: any) => mr.brand_mentioned && mr.brand_rank != null)
+    .map((mr: any) => mr.brand_rank as number);
+  if (ranksFromModels.length > 0) {
+    return Math.round(ranksFromModels.reduce((a: number, b: number) => a + b, 0) / ranksFromModels.length * 10) / 10;
+  }
+
+  // 3. Parse from raw_response
+  if (selectedClient) {
+    const parsedRanks: number[] = [];
+    r.model_results.forEach((mr: any) => {
+      if (mr.brand_mentioned && mr.raw_response) {
+        const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors, selectedClient.brand_tags || []);
+        if (brandRank !== null) parsedRanks.push(brandRank);
+      }
+    });
+    if (parsedRanks.length > 0) {
+      return Math.round(parsedRanks.reduce((a, b) => a + b, 0) / parsedRanks.length * 10) / 10;
+    }
+  }
+
+  // 4. Extracted brands position fallback (DataForSEO)
+  if (selectedClient) {
+    const extractedRanks: number[] = [];
+    r.model_results.forEach((mr: any) => {
+      (mr.extracted_brands || []).forEach((eb: any) => {
+        if (eb.is_own_brand && eb.positions && eb.positions.length > 0) {
+          extractedRanks.push(eb.position);
+        }
+      });
+    });
+    if (extractedRanks.length > 0) {
+      return Math.round(extractedRanks.reduce((a: number, b: number) => a + b, 0) / extractedRanks.length * 10) / 10;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Format Google AI Overview text for display.
+ * DataForSEO returns AI Overview as plain text without line breaks.
+ * This detects structured patterns and adds markdown formatting.
+ */
+function formatAIOverviewForDisplay(text: string): string {
+  if (!text) return '';
+
+  let formatted = text;
+
+  // Clean DataForSEO artifacts: {Link: BrandName } → BrandName
+  formatted = formatted.replace(/\{Link:\s*([^}]+?)\s*\}/g, '$1');
+
+  // Remove floating citation count markers (e.g., "CrowdStrike +2" before list items)
+  formatted = formatted.replace(/([.!?])\s+[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\s+\+\d+\s+/g, '$1\n\n');
+
+  // Format "Product Name (Category): description" as markdown bullet list items
+  formatted = formatted.replace(
+    /([.!?])\s+([A-Z][a-zA-Z0-9]+(?:\s+[A-Za-z0-9]+){0,6})\s*\(([^)]{3,60})\)\s*:/g,
+    '$1\n\n- **$2** ($3):'
+  );
+
+  // Format "Product Name :" or "Product Name:" description as bullet list 
+  // (handles spaces before colons and up to 5 word brand names)
+  formatted = formatted.replace(
+    /([.!?])\s+([A-Z][A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+){0,5})\s*:/g,
+    '$1\n\n- **$2**:'
+  );
+
+  // Format standalone section headers after sentence end: "Key Considerations:" "Ease of Deployment:"
+  formatted = formatted.replace(
+    /([.!?])\s+((?!For\s)(?:[A-Z][a-z]+\s+){1,3}(?:\([A-Z]+\)\s*)?[A-Za-z]*)\s*:/g,
+    '$1\n\n### $2\n\n'
+  );
+
+  // Format "For [Reason]:" lines as bullet points
+  formatted = formatted.replace(
+    /([.!?])\s+(For\s+[^:]+)\s*:/g,
+    '$1\n\n- **$2**:'
+  );
+
+  return formatted.trim();
+}
+
 const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; dot: string }> = {
   owned: { label: "Owned", color: "text-emerald-700", bg: "bg-emerald-100", dot: "#10b981" },
   competitor: { label: "Competitor", color: "text-red-700", bg: "bg-red-100", dot: "#ef4444" },
@@ -1634,9 +1746,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             <div className="mt-4 flex items-baseline gap-2">
               <span className="text-4xl font-bold text-gray-950">
                 {(() => {
-                  const ranksWithValue = filteredAuditResults.filter(r => r.summary?.average_rank != null && r.summary.share_of_voice > 0);
-                  if (ranksWithValue.length === 0) return "—";
-                  const avgRank = Math.round(ranksWithValue.reduce((sum, r) => sum + (r.summary.average_rank || 0), 0) / ranksWithValue.length * 10) / 10;
+                  const positions = filteredAuditResults
+                    .map(r => computePositionForResult(r, selectedClient))
+                    .filter((p): p is number => p !== null);
+                  if (positions.length === 0) return "—";
+                  const avgRank = Math.round(positions.reduce((sum, p) => sum + p, 0) / positions.length * 10) / 10;
                   return `#${avgRank}`;
                 })()}
               </span>
@@ -1911,44 +2025,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   return false;
                 }).length || 0;
                 const totalCount = r?.model_results.length || 0;
-                // Calculate position: use summary.average_rank, or compute from model results, or parse from raw_response, or extracted_brands
-                let pos = r?.summary?.average_rank;
-                if (!pos && r?.model_results && visibleCount > 0) {
-                  // First try using existing brand_rank field
-                  const ranksFromModels = r.model_results
-                    .filter(mr => mr.brand_mentioned && mr.brand_rank != null)
-                    .map(mr => mr.brand_rank as number);
-                  if (ranksFromModels.length > 0) {
-                    pos = Math.round(ranksFromModels.reduce((a, b) => a + b, 0) / ranksFromModels.length * 10) / 10;
-                  } else {
-                    // Fallback: parse rank from raw_response using cleanAndAnalyzeResponse
-                    const parsedRanks: number[] = [];
-                    r.model_results.forEach(mr => {
-                      if (mr.brand_mentioned && mr.raw_response && selectedClient) {
-                        const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors, selectedClient.brand_tags);
-                        if (brandRank !== null) parsedRanks.push(brandRank);
-                      }
-                    });
-                    if (parsedRanks.length > 0) {
-                      pos = Math.round(parsedRanks.reduce((a, b) => a + b, 0) / parsedRanks.length * 10) / 10;
-                    }
-                  }
-                  // Fallback: use extracted_brands position for own brand (DataForSEO entity data)
-                  if (!pos && selectedClient) {
-                    const extractedRanks: number[] = [];
-                    r.model_results.forEach(mr => {
-                      (mr.extracted_brands || []).forEach(eb => {
-                        if (eb.is_own_brand && eb.positions && eb.positions.length > 0) {
-                          // Use the list position (numbered rank) if available
-                          extractedRanks.push(eb.position);
-                        }
-                      });
-                    });
-                    if (extractedRanks.length > 0) {
-                      pos = Math.round(extractedRanks.reduce((a, b) => a + b, 0) / extractedRanks.length * 10) / 10;
-                    }
-                  }
-                }
+                // Calculate position using shared helper (same logic as overview card)
+                const pos = computePositionForResult(r, selectedClient);
                 const cit = r?.summary.total_citations || 0;
                 const isInactive = p.is_active === false;
 
@@ -2526,11 +2604,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     {expandedTopic === td.topic && td.prompts.map((p) => {
                       const r = getPromptResult(p.id);
                       const vis = r ? `${r.model_results.filter(mr => mr.brand_mentioned).length}/${r.model_results.length}` : "—";
-                      let pos = r?.summary?.average_rank;
-                      if (!pos && r?.model_results) {
-                        const ranks = r.model_results.filter(mr => mr.brand_mentioned && mr.brand_rank != null).map(mr => mr.brand_rank as number);
-                        if (ranks.length > 0) pos = Math.round(ranks.reduce((a, b) => a + b, 0) / ranks.length * 10) / 10;
-                      }
+                      const pos = computePositionForResult(r, selectedClient);
                       const cit = r?.summary.total_citations || 0;
 
                       return (
@@ -4275,29 +4349,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     const uniqueCitations = Array.from(new Map(allPromptCitations.map(c => [c.url, c])).values());
     const tavilyData = selectedPromptDetail ? tavilyResults[selectedPromptDetail] as any : null;
 
-    // Calculate average rank from model results if summary.average_rank is missing
-    let computedAvgRank = displayResult?.summary?.average_rank || null;
-    if (!computedAvgRank && displayResult?.model_results) {
-      // First try using existing brand_rank field
-      const ranksFromModels = displayResult.model_results
-        .filter(mr => mr.brand_mentioned && mr.brand_rank != null)
-        .map(mr => mr.brand_rank as number);
-      if (ranksFromModels.length > 0) {
-        computedAvgRank = Math.round(ranksFromModels.reduce((a, b) => a + b, 0) / ranksFromModels.length * 10) / 10;
-      } else if (selectedClient) {
-        // Fallback: parse rank from raw_response using cleanAndAnalyzeResponse
-        const parsedRanks: number[] = [];
-        displayResult.model_results.forEach(mr => {
-          if (mr.brand_mentioned && mr.raw_response) {
-            const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors, selectedClient.brand_tags);
-            if (brandRank !== null) parsedRanks.push(brandRank);
-          }
-        });
-        if (parsedRanks.length > 0) {
-          computedAvgRank = Math.round(parsedRanks.reduce((a, b) => a + b, 0) / parsedRanks.length * 10) / 10;
-        }
-      }
-    }
+    // Calculate average rank using shared helper (consistent with overview card and prompts table)
+    const computedAvgRank = computePositionForResult(displayResult, selectedClient);
 
     const handleGenerateVisibilityContent = async () => {
       if (!prompt && !result) return;
@@ -4557,19 +4610,19 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                               <ReactMarkdown
                                 remarkPlugins={[remarkGfm]}
                                 components={{
-                                  p: ({ node, ...props }) => <p className="mb-3 leading-relaxed last:mb-0" {...props} />,
-                                  a: ({ node, ...props }) => <a className="text-blue-600 hover:underline font-medium" target="_blank" rel="noopener noreferrer" {...props} />,
-                                  ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1" {...props} />,
-                                  ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1" {...props} />,
-                                  li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-                                  h1: ({ node, ...props }) => <h1 className="text-xl font-bold mt-6 mb-3 text-gray-900" {...props} />,
-                                  h2: ({ node, ...props }) => <h2 className="text-lg font-bold mt-5 mb-2 text-gray-900" {...props} />,
-                                  h3: ({ node, ...props }) => <h3 className="text-base font-bold mt-4 mb-2 text-gray-900" {...props} />,
-                                  code: ({ node, ...props }) => <code className="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-pink-600" {...props} />,
+                                  p: ({ node, ...props }) => <p className="mb-4 text-gray-700 leading-relaxed text-[15px] max-w-3xl" {...props} />,
+                                  a: ({ node, ...props }) => <a className="text-blue-600 hover:text-blue-700 hover:underline font-medium transition-colors" target="_blank" rel="noopener noreferrer" {...props} />,
+                                  ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-5 space-y-2.5 text-[15px] max-w-3xl" {...props} />,
+                                  ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-5 space-y-2.5 text-[15px] max-w-3xl" {...props} />,
+                                  li: ({ node, ...props }) => <li className="pl-1 text-gray-700 marker:text-gray-400" {...props} />,
+                                  h1: ({ node, ...props }) => <h1 className="text-xl font-bold mt-8 mb-4 text-gray-900 tracking-tight" {...props} />,
+                                  h2: ({ node, ...props }) => <h2 className="text-lg font-bold mt-6 mb-3 text-gray-900 tracking-tight" {...props} />,
+                                  h3: ({ node, ...props }) => <h3 className="text-[1.05rem] font-bold mt-5 mb-2 text-gray-900 tracking-tight" {...props} />,
+                                  code: ({ node, ...props }) => <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[13px] font-mono text-slate-800 border border-slate-200" {...props} />,
                                   strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
                                 }}
                               >
-                                {cleanedResponse}
+                                {mr.model === "google_ai_overview" ? formatAIOverviewForDisplay(cleanedResponse) : cleanedResponse}
                               </ReactMarkdown>
                             </div>
 
@@ -4863,17 +4916,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                               const citationCount = run.model_results.reduce((sum, mr) => sum + mr.citations.length, 0);
                               const sov = run.summary.share_of_voice || 0;
 
-                              // Calculate average rank dynamically if missing from summary
-                              let avgRank = run.summary.average_rank;
-                              if (!avgRank) {
-                                const ranks = run.model_results
-                                  .map(mr => mr.brand_rank)
-                                  .filter((r): r is number => typeof r === 'number' && r > 0);
-
-                                if (ranks.length > 0) {
-                                  avgRank = Number((ranks.reduce((a, b) => a + b, 0) / ranks.length).toFixed(1));
-                                }
-                              }
+                              // Calculate average rank using shared helper (consistent everywhere)
+                              const avgRank = computePositionForResult(run, selectedClient);
 
                               // Extract unique brands from extracted_brands or fallback
                               const uniqueBrands = new Set<string>();
