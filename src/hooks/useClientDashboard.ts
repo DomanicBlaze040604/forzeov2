@@ -106,10 +106,23 @@ export const AI_MODELS: AIModel[] = [
 ];
 
 // Helper to clean and analyze response text
+/**
+ * Normalize a brand name token for fuzzy matching.
+ */
+function normalizeBrandToken(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\.(com|io|ai|co|org|net|app|dev|me|us|uk|de|fr|in|ca|au|xyz|info|biz|so|gg)$/gi, '')
+    .replace(/\b(crm|app|software|platform|tool|cloud|hq|labs|inc|llc|ltd|corp|suite|hub|pro|studio|agency|group|saas|erp)\b/gi, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
 export function cleanAndAnalyzeResponse(
   rawText: string,
   brandName: string,
-  competitors: string[]
+  competitors: string[],
+  brandTags: string[] = []
 ): {
   cleanedResponse: string;
   brandMentions: number;
@@ -127,8 +140,6 @@ export function cleanAndAnalyzeResponse(
   // 1b. Deduplicate repeated responses (API sometimes returns content twice)
   if (cleaned.length > 200) {
     const halfLen = Math.floor(cleaned.length / 2);
-    // Check if the text is roughly duplicated by comparing two halves
-    // Find the nearest newline boundary around the midpoint for a clean split
     const searchStart = Math.max(halfLen - 100, 0);
     const searchEnd = Math.min(halfLen + 100, cleaned.length);
     const midSection = cleaned.substring(searchStart, searchEnd);
@@ -137,8 +148,6 @@ export function cleanAndAnalyzeResponse(
       const splitPoint = searchStart + newlineOffset + 1;
       const firstHalf = cleaned.substring(0, splitPoint).trim();
       const secondHalf = cleaned.substring(splitPoint).trim();
-      // If the second half starts the same way as the first half (first 150 chars match),
-      // the response is duplicated — keep only the first half
       const compareLen = Math.min(150, firstHalf.length, secondHalf.length);
       if (compareLen > 50 && firstHalf.substring(0, compareLen) === secondHalf.substring(0, compareLen)) {
         cleaned = firstHalf;
@@ -149,20 +158,42 @@ export function cleanAndAnalyzeResponse(
   // 2. Analyze Mentions & Ranks
   const lowerText = cleaned.toLowerCase();
   const lowerBrand = brandName.toLowerCase();
+  const brandToken = normalizeBrandToken(brandName);
+  const allBrandTerms = [brandName, ...brandTags].filter(Boolean);
 
-  // Brand Mentions
-  const brandMatches = lowerText.match(new RegExp(lowerBrand, "g"));
-  const brandMentions = brandMatches ? brandMatches.length : 0;
+  // Brand Mentions (exact + normalized)
+  let brandMentions = 0;
+  for (const term of allBrandTerms) {
+    const termLower = term.toLowerCase();
+    const matches = lowerText.match(new RegExp(termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "g"));
+    if (matches) brandMentions += matches.length;
+  }
+  // Normalized token fallback
+  if (brandMentions === 0 && brandToken.length >= 3) {
+    const cleanText = lowerText.replace(/[^a-z0-9\s]/g, '');
+    const tokenMatches = cleanText.match(new RegExp(brandToken, "g"));
+    if (tokenMatches) brandMentions = tokenMatches.length;
+  }
 
   // Rank Detection using numbered lists (1. Brand, 2. Competitor...)
   let brandRank: number | null = null;
   const lines = cleaned.split(/(?:\r\n|\r|\n)/);
 
-  // Competitor Stats
+  // Competitor Stats (use normalized matching for counting)
   const competitorStats = competitors.map(comp => {
     const lowerComp = comp.toLowerCase();
-    const matches = lowerText.match(new RegExp(lowerComp, "g"));
-    return { name: comp, count: matches ? matches.length : 0, rank: null as number | null };
+    const compToken = normalizeBrandToken(comp);
+    let count = 0;
+    // Exact match
+    const exactMatches = lowerText.match(new RegExp(lowerComp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "g"));
+    if (exactMatches) count = exactMatches.length;
+    // Normalized fallback
+    if (count === 0 && compToken.length >= 3) {
+      const cleanText = lowerText.replace(/[^a-z0-9\s]/g, '');
+      const tokenMatches = cleanText.match(new RegExp(compToken, "g"));
+      if (tokenMatches) count = tokenMatches.length;
+    }
+    return { name: comp, count, rank: null as number | null };
   });
 
   // Scan for ranks in numbered lists
@@ -184,16 +215,31 @@ export function cleanAndAnalyzeResponse(
 
     if (currentRank !== null) {
       const lowerLine = line.toLowerCase();
+      const lowerLineClean = lowerLine.replace(/[^a-z0-9\s]/g, '');
 
-      // Check Brand Rank
-      if (brandRank === null && lowerLine.includes(lowerBrand)) {
-        brandRank = currentRank;
+      // Check Brand Rank (exact + normalized + brand_tags)
+      if (brandRank === null) {
+        for (const term of allBrandTerms) {
+          if (lowerLine.includes(term.toLowerCase())) {
+            brandRank = currentRank;
+            break;
+          }
+        }
+        // Normalized fallback
+        if (brandRank === null && brandToken.length >= 3 && lowerLineClean.includes(brandToken)) {
+          brandRank = currentRank;
+        }
       }
 
-      // Check Competitor Ranks
+      // Check Competitor Ranks (exact + normalized)
       competitorStats.forEach(stat => {
-        if (stat.rank === null && lowerLine.includes(stat.name.toLowerCase())) {
-          stat.rank = currentRank;
+        if (stat.rank === null) {
+          const compToken = normalizeBrandToken(stat.name);
+          if (lowerLine.includes(stat.name.toLowerCase())) {
+            stat.rank = currentRank;
+          } else if (compToken.length >= 3 && lowerLineClean.includes(compToken)) {
+            stat.rank = currentRank;
+          }
         }
       });
     }
@@ -1695,7 +1741,8 @@ export function useClientDashboard() {
             const analysis = cleanAndAnalyzeResponse(
               mr.raw_response || "",
               selectedClient.brand_name,
-              selectedClient.competitors
+              selectedClient.competitors,
+              selectedClient.brand_tags
             );
             return {
               ...mr,
@@ -1854,7 +1901,8 @@ export function useClientDashboard() {
           const analysis = cleanAndAnalyzeResponse(
             mr.raw_response || "",
             selectedClient.brand_name,
-            selectedClient.competitors
+            selectedClient.competitors,
+            selectedClient.brand_tags
           );
           return {
             ...mr,
@@ -2034,7 +2082,8 @@ export function useClientDashboard() {
             const analysis = cleanAndAnalyzeResponse(
               mr.raw_response || "",
               selectedClient.brand_name,
-              selectedClient.competitors
+              selectedClient.competitors,
+              selectedClient.brand_tags
             );
             return {
               ...mr,

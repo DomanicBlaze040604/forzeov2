@@ -395,6 +395,62 @@ function analyzeSentiment(context: string): "positive" | "neutral" | "negative" 
 }
 
 /**
+ * Normalize a brand name for fuzzy matching.
+ * Strips TLDs, common suffixes, and punctuation so "monday.com" and "Monday CRM" match.
+ */
+function normalizeBrandToken(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\.(com|io|ai|co|org|net|app|dev|me|us|uk|de|fr|in|ca|au|xyz|info|biz|so|gg)$/gi, '')
+    .replace(/\b(crm|app|software|platform|tool|cloud|hq|labs|inc|llc|ltd|corp|suite|hub|pro|studio|agency|group|saas|erp)\b/gi, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+/**
+ * Check if a brand name appears in text using both exact and normalized token matching.
+ */
+function brandFoundInText(text: string, brandName: string): boolean {
+  if (!text || !brandName) return false;
+  const lower = text.toLowerCase();
+  if (lower.includes(brandName.toLowerCase())) return true;
+  const token = normalizeBrandToken(brandName);
+  if (token.length >= 3) {
+    const cleanText = lower.replace(/[^a-z0-9\s]/g, '');
+    if (cleanText.includes(token)) return true;
+  }
+  return false;
+}
+
+/**
+ * Count occurrences of a brand in text using both exact and normalized matching.
+ */
+function countBrandMentions(text: string, brandName: string): number {
+  if (!text || !brandName) return 0;
+  const lower = text.toLowerCase();
+  const termLower = brandName.toLowerCase();
+  let count = 0;
+  let idx = 0;
+  while ((idx = lower.indexOf(termLower, idx)) !== -1) {
+    count++;
+    idx++;
+  }
+  // If no exact match, try normalized token
+  if (count === 0) {
+    const token = normalizeBrandToken(brandName);
+    if (token.length >= 3) {
+      const cleanText = lower.replace(/[^a-z0-9\s]/g, '');
+      let tidx = 0;
+      while ((tidx = cleanText.indexOf(token, tidx)) !== -1) {
+        count++;
+        tidx++;
+      }
+    }
+  }
+  return count;
+}
+
+/**
  * Parse brand mentions from response text
  * Detects brand name and alternative tags
  */
@@ -415,19 +471,15 @@ function parseBrandData(
 
   const lower = response.toLowerCase();
   const allTerms = [brandName, ...brandTags].filter(Boolean);
+  // Also generate normalized tokens for each term
+  const allTokens = allTerms.map(t => normalizeBrandToken(t)).filter(t => t.length >= 3);
   let totalCount = 0;
   const matchedTerms: string[] = [];
 
-  // Count all mentions of brand and tags
+  // Count all mentions of brand and tags (exact + normalized matching)
   for (const term of allTerms) {
     if (!term) continue;
-    const termLower = term.toLowerCase();
-    let idx = 0;
-    let count = 0;
-    while ((idx = lower.indexOf(termLower, idx)) !== -1) {
-      count++;
-      idx++;
-    }
+    const count = countBrandMentions(response, term);
     if (count > 0) {
       totalCount += count;
       matchedTerms.push(term);
@@ -441,10 +493,21 @@ function parseBrandData(
     const match = line.match(/^\s*(\d+)[.)\]]\s*\*{0,2}(.+)/);
     if (match) {
       const lineContent = match[2].toLowerCase();
+      const lineContentClean = lineContent.replace(/[^a-z0-9\s]/g, '');
+      // Check exact terms first
       for (const term of allTerms) {
         if (term && lineContent.includes(term.toLowerCase())) {
           rank = parseInt(match[1]);
           break;
+        }
+      }
+      // If no exact match, check normalized tokens
+      if (!rank) {
+        for (const token of allTokens) {
+          if (lineContentClean.includes(token)) {
+            rank = parseInt(match[1]);
+            break;
+          }
         }
       }
       if (rank) break;
@@ -461,6 +524,19 @@ function parseBrandData(
       const contextEnd = Math.min(response.length, idx + term.length + 100);
       sentiment = analyzeSentiment(response.substring(contextStart, contextEnd));
       break;
+    }
+  }
+  // Fallback sentiment: try normalized match if no exact match found
+  if (sentiment === "neutral" && totalCount > 0) {
+    for (const token of allTokens) {
+      const cleanLower = lower.replace(/[^a-z0-9\s]/g, '');
+      const idx = cleanLower.indexOf(token);
+      if (idx !== -1) {
+        const contextStart = Math.max(0, idx - 100);
+        const contextEnd = Math.min(response.length, idx + token.length + 100);
+        sentiment = analyzeSentiment(response.substring(contextStart, contextEnd));
+        break;
+      }
     }
   }
 
@@ -483,39 +559,42 @@ function parseCompetitors(response: string, competitors: string[]): CompetitorMe
   const results: CompetitorMention[] = [];
 
   for (const comp of competitors) {
-    const compLower = comp.toLowerCase();
-    let count = 0;
-    let idx = 0;
-
-    while ((idx = lower.indexOf(compLower, idx)) !== -1) {
-      count++;
-      idx++;
-    }
+    // Use normalized matching for count (handles "monday.com" vs "Monday" etc.)
+    const count = countBrandMentions(response, comp);
 
     if (count === 0) continue;
 
-    // Find rank in numbered lists
+    const compLower = comp.toLowerCase();
+    const compToken = normalizeBrandToken(comp);
+
+    // Find rank in numbered lists (exact + normalized)
     let rank: number | null = null;
     for (const line of response.split("\n")) {
       const match = line.match(/^\s*(\d+)[.)\]]\s*\*{0,2}(.+)/);
-      if (match && match[2].toLowerCase().includes(compLower)) {
-        rank = parseInt(match[1]);
-        break;
+      if (match) {
+        const lineContent = match[2].toLowerCase();
+        const lineContentClean = lineContent.replace(/[^a-z0-9\s]/g, '');
+        if (lineContent.includes(compLower) || (compToken.length >= 3 && lineContentClean.includes(compToken))) {
+          rank = parseInt(match[1]);
+          break;
+        }
       }
     }
 
     // Analyze sentiment
-    const firstIdx = lower.indexOf(compLower);
-    const context = response.substring(
-      Math.max(0, firstIdx - 50),
-      Math.min(response.length, firstIdx + comp.length + 50)
-    );
+    let firstIdx = lower.indexOf(compLower);
+    if (firstIdx === -1 && compToken.length >= 3) {
+      firstIdx = lower.replace(/[^a-z0-9\s]/g, '').indexOf(compToken);
+    }
+    const context = firstIdx !== -1
+      ? response.substring(Math.max(0, firstIdx - 50), Math.min(response.length, firstIdx + comp.length + 50))
+      : "";
 
     results.push({
       name: comp,
       count,
       rank,
-      sentiment: analyzeSentiment(context)
+      sentiment: context ? analyzeSentiment(context) : "neutral"
     });
   }
 
@@ -1079,8 +1158,11 @@ function mapDataForSEOBrandEntities(
 
     const entityPoints = positions.reduce((sum, pos) => sum + (1 / pos), 0);
 
-    const isOwnBrand = allBrandTerms.some(t => titleLower.includes(t) || t.includes(titleLower));
-    const isCompetitor = allCompetitorTerms.some(c => titleLower.includes(c) || c.includes(titleLower));
+    const titleToken = normalizeBrandToken(apiBrand.title);
+    const isOwnBrand = allBrandTerms.some(t => titleLower.includes(t) || t.includes(titleLower))
+      || allBrandTerms.some(t => { const tt = normalizeBrandToken(t); return tt.length >= 3 && titleToken.length >= 3 && (tt.includes(titleToken) || titleToken.includes(tt)); });
+    const isCompetitor = allCompetitorTerms.some(c => titleLower.includes(c) || c.includes(titleLower))
+      || allCompetitorTerms.some(c => { const ct = normalizeBrandToken(c); return ct.length >= 3 && titleToken.length >= 3 && (ct.includes(titleToken) || titleToken.includes(ct)); });
 
     // Sentiment from response context
     let sentiment: "positive" | "neutral" | "negative" = "neutral";

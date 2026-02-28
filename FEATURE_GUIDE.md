@@ -15,10 +15,16 @@ The Geo-Audit Engine is the core mechanism for tracking "Share of Voice" across 
     *   **Gemini**: via Google Gemini 2.5 Flash — `web_search: true` enabled (confirmed supported)
     *   **Claude**: via Anthropic Claude (`claude-haiku-4-5`) — `web_search: true` + `web_search_country_iso_code`
     *   **Perplexity**: via Perplexity Sonar — always-on web search + `web_search_country_iso_code`
-3.  **Parsing & Scoring**: The raw text response is parsed to calculate metrics:
-    *   **Rank**: The position of the brand in the list (1-10).
-    *   **Share of Voice (SOV)**: Percentage of models that mentioned the brand.
-    *   **Recommendation**: A generated "Top Recommendation" based on the brand's presence (or lack thereof).
+### Parsing & Scoring Logic
+The raw text response is parsed to calculate metrics:
+*   **Rank**: The position of the brand in the list (1-10).
+*   **Share of Voice (SOV)**: Percentage of models that mentioned the brand.
+*   **Recommendation**: A generated "Top Recommendation" based on the brand's presence (or lack thereof).
+
+### Fuzzy Brand Matching
+To ensure accurate Share of Voice detection, the engine uses robust fuzzy matching:
+- **Normalized Tokens**: Brand names and competitors are normalized by stripping common TLDs (e.g., `.com`, `.io`, `.ai`) and corporate/generic suffixes (e.g., `inc`, `crm`, `software`, `app`). This allows variations like "monday.com" and "Monday CRM" to correctly match the token "monday".
+- **Exact & Token Fallbacks**: The system first attempts exact substring matching for mentions, ranks, and sentiment. If nothing is found, it falls back to normalized token matching, significantly reducing false negatives.
 
 ### `web_search` Parameter Support (DataForSEO)
 | Model | `web_search` | `web_search_country_iso_code` |

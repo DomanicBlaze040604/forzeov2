@@ -35,6 +35,57 @@ import { CitationPreview } from "@/components/CitationPreview";
 
 import { toast } from "sonner";
 
+/**
+ * Normalize a brand name for fuzzy matching.
+ * Strips TLDs (.com, .io, etc.), common suffixes (CRM, App, Software...),
+ * punctuation, and extra whitespace so that "monday.com", "Monday CRM",
+ * and "Monday" all reduce to the same core token for comparison.
+ */
+function normalizeBrandToken(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\.(com|io|ai|co|org|net|app|dev|me|us|uk|de|fr|in|ca|au|xyz|info|biz|so|gg)$/gi, '')
+    .replace(/\b(crm|app|software|platform|tool|cloud|hq|labs|inc|llc|ltd|corp|suite|hub|pro|studio|agency|group|saas|erp)\b/gi, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+/**
+ * Check if two brand names refer to the same entity using normalized tokens.
+ * E.g. "monday.com" matches "Monday CRM", "Monday" matches "monday.com"
+ */
+function brandNamesMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const na = normalizeBrandToken(a);
+  const nb = normalizeBrandToken(b);
+  if (!na || !nb) return false;
+  // Exact normalized match or one contains the other (for partial names)
+  return na === nb || (na.length >= 3 && nb.length >= 3 && (na.includes(nb) || nb.includes(na)));
+}
+
+/**
+ * Check if a brand name (or any of its aliases) appears in a response text.
+ * Uses both exact substring and normalized token matching.
+ */
+function brandMentionedInText(response: string, brandName: string, aliases: string[] = []): boolean {
+  if (!response) return false;
+  const lower = response.toLowerCase();
+  const allTerms = [brandName, ...aliases].filter(Boolean);
+  // Direct substring match (original behavior)
+  for (const term of allTerms) {
+    if (lower.includes(term.toLowerCase())) return true;
+  }
+  // Normalized token match: extract potential brand tokens from response
+  // and compare against normalized brand name
+  const brandToken = normalizeBrandToken(brandName);
+  if (brandToken.length >= 3) {
+    // Check if the normalized token appears as a word in the response
+    const responseClean = lower.replace(/[^a-z0-9\s]/g, '');
+    if (responseClean.includes(brandToken)) return true;
+  }
+  return false;
+}
+
 const DOMAIN_TYPES: Record<string, { label: string; color: string; bg: string; dot: string }> = {
   owned: { label: "Owned", color: "text-emerald-700", bg: "bg-emerald-100", dot: "#10b981" },
   competitor: { label: "Competitor", color: "text-red-700", bg: "bg-red-100", dot: "#ef4444" },
@@ -69,10 +120,14 @@ function classifyDomain(domain: string, clientDomain?: string, competitors?: str
     if (normalizedBrand.length > 2 && d.includes(normalizedBrand)) return "owned";
   }
 
-  // Check configured competitors first
+  // Check configured competitors first (exact + normalized matching)
   if (competitors) {
     for (const comp of competitors) {
-      if (comp && d.includes(comp.toLowerCase().replace(/^www\./, ''))) return "competitor";
+      if (!comp) continue;
+      if (d.includes(comp.toLowerCase().replace(/^www\./, ''))) return "competitor";
+      // Normalized: strip TLDs and suffixes from competitor name and check domain
+      const compToken = normalizeBrandToken(comp);
+      if (compToken.length >= 3 && d.includes(compToken)) return "competitor";
     }
   }
 
@@ -540,7 +595,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             // Try to get rank
             let rank = mr.brand_rank;
             if (!rank && mr.raw_response) {
-              const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors);
+              const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors, selectedClient.brand_tags);
               rank = brandRank;
             }
             if (rank) {
@@ -554,25 +609,29 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         selectedClient.competitors.forEach(comp => {
           if (!stats[comp]) return;
 
-          // Check mentions
-          const regex = new RegExp(`(?:^|[^a-z0-9])${comp.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[^a-z0-9]|$)`, "gi");
-          const matches = response.match(regex);
-          if (matches && matches.length > 0) {
-            stats[comp].mentions += matches.length;
-            totalMentionsAllBrands += matches.length;
+          // Check mentions using normalized matching (handles "monday.com" vs "Monday" etc.)
+          const mentioned = brandMentionedInText(mr.raw_response || '', comp);
+          if (mentioned) {
+            // Count exact mentions
+            const regex = new RegExp(`(?:^|[^a-z0-9])${comp.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[^a-z0-9]|$)`, "gi");
+            const matches = response.match(regex);
+            const mentionCount = matches ? matches.length : 1; // At least 1 since brandMentionedInText matched
+            stats[comp].mentions += mentionCount;
+            totalMentionsAllBrands += mentionCount;
             brandsFoundInThisAudit.add(comp);
 
             // Check rank (from competitors_found or parse new)
             let rank: number | null = null;
             if (mr.competitors_found) {
-              const cf = mr.competitors_found.find(c => c.name.toLowerCase() === comp.toLowerCase());
+              // Use normalized matching to find the competitor in competitors_found
+              const cf = mr.competitors_found.find(c => brandNamesMatch(c.name, comp));
               if (cf && cf.rank) rank = cf.rank;
             }
 
             if (!rank) {
               // Parse rank from text if not in metadata
-              const { competitorStats } = cleanAndAnalyzeResponse(mr.raw_response || "", selectedClient.brand_name, selectedClient.competitors);
-              const cs = competitorStats.find(c => c.name.toLowerCase() === comp.toLowerCase());
+              const { competitorStats } = cleanAndAnalyzeResponse(mr.raw_response || "", selectedClient.brand_name, selectedClient.competitors, selectedClient.brand_tags);
+              const cs = competitorStats.find(c => brandNamesMatch(c.name, comp));
               if (cs && cs.rank) rank = cs.rank;
             }
 
@@ -997,8 +1056,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
   const handleAddCompetitor = async (competitorName: string) => {
     if (!selectedClient) return;
-    // Check (case-insensitive)
-    if (selectedClient.competitors.some(c => c.toLowerCase() === competitorName.toLowerCase())) return;
+    // Check using normalized matching to prevent duplicates like "monday.com" + "Monday CRM"
+    if (selectedClient.competitors.some(c => brandNamesMatch(c, competitorName))) return;
+    // Also don't add if it matches the client's own brand
+    if (brandNamesMatch(competitorName, selectedClient.brand_name)) return;
+    if (selectedClient.brand_tags.some(t => brandNamesMatch(competitorName, t))) return;
 
     const updatedCompetitors = [...selectedClient.competitors, competitorName];
 
@@ -1839,9 +1901,17 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               {filteredPrompts.map((p) => {
                 const r = getPromptResult(p.id);
                 const isLoading = loadingPromptIds.has(p.id);
-                const visibleCount = r?.model_results.filter(mr => mr.brand_mentioned).length || 0;
+                // Visibility: use backend brand_mentioned OR client-side normalized matching (catches brand_tags aliases)
+                const visibleCount = r?.model_results.filter(mr => {
+                  if (mr.brand_mentioned) return true;
+                  // Client-side fallback: check brand_tags and normalized name matching
+                  if (selectedClient && mr.raw_response) {
+                    return brandMentionedInText(mr.raw_response, selectedClient.brand_name, selectedClient.brand_tags);
+                  }
+                  return false;
+                }).length || 0;
                 const totalCount = r?.model_results.length || 0;
-                // Calculate position: use summary.average_rank, or compute from model results, or parse from raw_response
+                // Calculate position: use summary.average_rank, or compute from model results, or parse from raw_response, or extracted_brands
                 let pos = r?.summary?.average_rank;
                 if (!pos && r?.model_results && visibleCount > 0) {
                   // First try using existing brand_rank field
@@ -1855,12 +1925,27 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     const parsedRanks: number[] = [];
                     r.model_results.forEach(mr => {
                       if (mr.brand_mentioned && mr.raw_response && selectedClient) {
-                        const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors);
+                        const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors, selectedClient.brand_tags);
                         if (brandRank !== null) parsedRanks.push(brandRank);
                       }
                     });
                     if (parsedRanks.length > 0) {
                       pos = Math.round(parsedRanks.reduce((a, b) => a + b, 0) / parsedRanks.length * 10) / 10;
+                    }
+                  }
+                  // Fallback: use extracted_brands position for own brand (DataForSEO entity data)
+                  if (!pos && selectedClient) {
+                    const extractedRanks: number[] = [];
+                    r.model_results.forEach(mr => {
+                      (mr.extracted_brands || []).forEach(eb => {
+                        if (eb.is_own_brand && eb.positions && eb.positions.length > 0) {
+                          // Use the list position (numbered rank) if available
+                          extractedRanks.push(eb.position);
+                        }
+                      });
+                    });
+                    if (extractedRanks.length > 0) {
+                      pos = Math.round(extractedRanks.reduce((a, b) => a + b, 0) / extractedRanks.length * 10) / 10;
                     }
                   }
                 }
@@ -1961,18 +2046,29 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           if (!r) return <span className="text-xs text-gray-400 italic">Not run</span>;
 
                           const trackedBrands = new Set<string>();
-                          const brandName = selectedClient?.brand_name?.toLowerCase() || '';
+                          const brandName = selectedClient?.brand_name || '';
+                          const brandTags = selectedClient?.brand_tags || [];
                           const competitors = selectedClient?.competitors || [];
 
                           // Check all model responses for tracked brand/competitor mentions
                           r.model_results.forEach(mr => {
-                            const response = (mr.raw_response || '').toLowerCase();
-                            if (brandName && response.includes(brandName)) {
-                              trackedBrands.add(selectedClient?.brand_name || '');
+                            const response = (mr.raw_response || '');
+                            // Own brand: check brand_name + brand_tags with normalized matching
+                            if (brandName && brandMentionedInText(response, brandName, brandTags)) {
+                              trackedBrands.add(brandName);
                             }
+                            // Competitors: use normalized matching so "monday.com" matches "Monday CRM" etc.
                             competitors.forEach(comp => {
-                              if (response.includes(comp.toLowerCase())) {
+                              if (brandMentionedInText(response, comp)) {
                                 trackedBrands.add(comp);
+                              }
+                            });
+                            // Also check competitors_found from backend (already matched by geo-audit)
+                            (mr.competitors_found || []).forEach(cf => {
+                              if (cf.count > 0) {
+                                // Map back to the original competitor name
+                                const matchedComp = competitors.find(c => brandNamesMatch(c, cf.name));
+                                trackedBrands.add(matchedComp || cf.name);
                               }
                             });
                           });
@@ -1981,7 +2077,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           if (isAdmin) {
                             r.model_results.forEach(mr => {
                               (mr.extracted_brands || []).forEach(eb => {
-                                if (!eb.is_own_brand) trackedBrands.add(eb.title);
+                                if (!eb.is_own_brand) {
+                                  // Check if this extracted brand matches any configured competitor
+                                  const matchedComp = competitors.find(c => brandNamesMatch(c, eb.title));
+                                  trackedBrands.add(matchedComp || eb.title);
+                                }
                               });
                             });
                           }
@@ -1989,7 +2089,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           // Non-admin: only show competitor brands (exclude own brand)
                           const brandsArray = isAdmin
                             ? Array.from(trackedBrands)
-                            : Array.from(trackedBrands).filter(b => competitors.some(c => c.toLowerCase() === b.toLowerCase()));
+                            : Array.from(trackedBrands).filter(b => competitors.some(c => brandNamesMatch(c, b)));
                           if (brandsArray.length === 0) {
                             return <span className="text-xs text-gray-400 italic">None</span>;
                           }
@@ -2000,7 +2100,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           return (
                             <div className="flex items-center gap-1.5">
                               {displayBrands.map((brand, idx) => {
-                                const isUserBrand = brand.toLowerCase() === brandName;
+                                const isUserBrand = brandNamesMatch(brand, brandName) || brandTags.some(t => brandNamesMatch(brand, t));
                                 const domain = `${brand.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
                                 return (
                                   <div
@@ -4189,7 +4289,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         const parsedRanks: number[] = [];
         displayResult.model_results.forEach(mr => {
           if (mr.brand_mentioned && mr.raw_response) {
-            const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors);
+            const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors, selectedClient.brand_tags);
             if (brandRank !== null) parsedRanks.push(brandRank);
           }
         });
@@ -4362,7 +4462,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     const { cleanedResponse } = cleanAndAnalyzeResponse(
                       mr.raw_response || "",
                       selectedClient?.brand_name || "",
-                      selectedClient?.competitors || []
+                      selectedClient?.competitors || [],
+                      selectedClient?.brand_tags || []
                     );
 
                     // Competitor Analysis
@@ -4373,11 +4474,42 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                       rank: c.rank
                     }));
 
+                    // Merge: ensure ALL configured competitors that are mentioned (via normalized matching) appear
+                    const mentionedNames = new Set(competitorMentions.map(c => c.name.toLowerCase()));
+                    (selectedClient?.competitors || []).forEach(comp => {
+                      // Skip if already present (exact or normalized match)
+                      if (mentionedNames.has(comp.toLowerCase())) return;
+                      if (competitorMentions.some(cm => brandNamesMatch(cm.name, comp))) return;
+                      // Use normalized matching to detect mentions
+                      if (brandMentionedInText(cleanedResponse, comp)) {
+                        // Count occurrences
+                        const compLower = comp.toLowerCase();
+                        const compToken = normalizeBrandToken(comp);
+                        let count = 0;
+                        // Try exact match first
+                        const exactMatches = responseText.match(new RegExp(compLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "gi"));
+                        if (exactMatches) count = exactMatches.length;
+                        // Try normalized token match
+                        if (count === 0 && compToken.length >= 3) {
+                          const tokenRegex = new RegExp(`\\b${compToken}\\b`, "gi");
+                          const tokenMatches = responseText.replace(/[^a-z0-9\s]/g, '').match(tokenRegex);
+                          if (tokenMatches) count = tokenMatches.length;
+                        }
+                        if (count > 0) {
+                          competitorMentions.push({ name: comp, count, rank: null });
+                        }
+                      }
+                    });
+
                     // Fallback for old data or if competitors_found is empty but regex finds matches
                     if (competitorMentions.length === 0) {
                       competitorMentions = (selectedClient?.competitors || []).map(comp => {
-                        const matches = responseText.match(new RegExp(comp.toLowerCase(), "gi"));
-                        return { name: comp, count: matches ? matches.length : 0, rank: null as number | null };
+                        if (brandMentionedInText(cleanedResponse, comp)) {
+                          const compLower = comp.toLowerCase();
+                          const exactMatches = responseText.match(new RegExp(compLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "gi"));
+                          return { name: comp, count: exactMatches ? exactMatches.length : 1, rank: null as number | null };
+                        }
+                        return { name: comp, count: 0, rank: null as number | null };
                       }).filter(c => c.count > 0);
                     }
 
@@ -4447,7 +4579,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                               // For admin: show all detected brands with option to add as competitor
                               const displayMentions = isAdmin
                                 ? competitorMentions
-                                : competitorMentions.filter(c => selectedClient?.competitors.some(tc => tc.toLowerCase() === c.name.toLowerCase()));
+                                : competitorMentions.filter(c => selectedClient?.competitors.some(tc => brandNamesMatch(tc, c.name)));
                               const displayTop = displayMentions[0] || null;
 
                               if (displayMentions.length === 0) return null;
@@ -4466,7 +4598,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                         {isAdmin ? "All brands mentioned:" : "Competitor brands mentioned:"}
                                       </span>
                                       {displayMentions.map((comp, k) => {
-                                        const isTracked = selectedClient?.competitors.some(c => c.toLowerCase() === comp.name.toLowerCase());
+                                        const isTracked = selectedClient?.competitors.some(c => brandNamesMatch(c, comp.name));
                                         return (
                                           <div key={k} className="flex items-center gap-1">
                                             <Badge variant="secondary" className={cn("text-xs border", isTracked ? "text-gray-600 bg-gray-100 hover:bg-gray-200 border-gray-200" : "text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200")}>
@@ -4527,8 +4659,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Brands Mentioned ({mr.extracted_brands.length})</div>
                             <div className="flex flex-wrap gap-2">
                               {mr.extracted_brands.map((brand, j) => {
-                                const isOwnBrand = brand.is_own_brand;
-                                const isCompetitor = brand.is_competitor;
+                                // Use backend flags but also do client-side normalized check
+                                const isOwnBrand = brand.is_own_brand || brandNamesMatch(brand.title, selectedClient?.brand_name || '') || (selectedClient?.brand_tags || []).some(t => brandNamesMatch(brand.title, t));
+                                const isCompetitor = brand.is_competitor || (selectedClient?.competitors || []).some(c => brandNamesMatch(c, brand.title));
                                 const isNew = !isOwnBrand && !isCompetitor;
 
                                 return (
