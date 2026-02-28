@@ -1402,10 +1402,19 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         // Escape quotes by doubling them, and wrap the entire string in quotes to protect newlines/commas
         const escapedContent = `"${rawContent.replace(/"/g, '""')}"`;
 
+        // Map explicitly requested model names
+        let explicitModelName = mr.model;
+        if (mr.model === "google-ai-overview") explicitModelName = "ai overview";
+        else if (mr.model.includes("gpt")) explicitModelName = "gpt";
+        else if (mr.model.includes("claude")) explicitModelName = "claude";
+        else if (mr.model.includes("gemini")) explicitModelName = "gemini";
+        else if (mr.model.includes("perplexity")) explicitModelName = "perplexity";
+        else if (mr.model.includes("serp") || mr.model.includes("google-search")) explicitModelName = "serp";
+
         rows.push([
           `"${(promptInfo?.prompt_text || r.prompt_text || "").replace(/"/g, '""')}"`,
           `"${(promptInfo?.category || "custom").replace(/"/g, '""')}"`,
-          AI_MODELS.find(m => m.id === mr.model)?.name || mr.model_name || mr.model,
+          explicitModelName,
           isVisible,
           rank,
           `"${brands.replace(/"/g, '""')}"`,
