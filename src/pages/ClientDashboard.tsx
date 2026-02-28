@@ -1,7 +1,7 @@
 /**
  * FORZEO GEO DASHBOARD - Redesigned UI v6.0
  */
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -1376,6 +1376,55 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     </Dialog>
   );
 
+  const exportModelResponsesToCSV = useCallback(() => {
+    if (!selectedClient || filteredAuditResults.length === 0) return;
+
+    // Define CSV headers
+    const rows = [["Prompt", "Topic", "Model", "Visibility", "Rank", "Brands Mentioned", "Citations Found", "Raw Response"]];
+
+    for (const r of filteredAuditResults) {
+      const promptInfo = prompts.find(p => p.id === r.prompt_id);
+
+      // Iterate over each model result within this audit
+      r.model_results.forEach(mr => {
+        // Skip models filtered out by the UI
+        if (modelFilter.length > 0 && !modelFilter.includes(mr.model)) return;
+
+        const isVisible = mr.brand_mentioned ? "Yes" : "No";
+        const rank = mr.brand_rank ? mr.brand_rank.toString() : "-";
+        const citationsCount = mr.citations?.length?.toString() || "0";
+
+        // Format brands list
+        const brands = mr.extracted_brands?.map(b => b.title).join("; ") || "None";
+
+        // Clean and escape raw response for CSV
+        let rawContent = mr.raw_response || "No response data available";
+        // Escape quotes by doubling them, and wrap the entire string in quotes to protect newlines/commas
+        const escapedContent = `"${rawContent.replace(/"/g, '""')}"`;
+
+        rows.push([
+          `"${(promptInfo?.prompt_text || r.prompt_text || "").replace(/"/g, '""')}"`,
+          `"${(promptInfo?.category || "custom").replace(/"/g, '""')}"`,
+          mr.model_name || mr.model,
+          isVisible,
+          rank,
+          `"${brands.replace(/"/g, '""')}"`,
+          citationsCount,
+          escapedContent
+        ]);
+      });
+    }
+
+    const csv = rows.map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${selectedClient.slug}-raw-responses-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [selectedClient, filteredAuditResults, prompts, modelFilter]);
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
       <aside className={cn(
@@ -1634,7 +1683,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 {/* All Models filter removed per UI overhaul */}
               </div>
 
-              <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export CSV</DropdownMenuItem><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => window.print()}><FileText className="h-4 w-4 mr-2" /> Export as PDF (Print)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+              <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export Data</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={exportToCSV}><FileText className="h-4 w-4 mr-2" /> Export Summary (CSV)</DropdownMenuItem><DropdownMenuItem onClick={exportModelResponsesToCSV}><FileText className="h-4 w-4 mr-2" /> Export Raw Responses (CSV)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={exportFullReport}><FileText className="h-4 w-4 mr-2" /> Export Report (TXT)</DropdownMenuItem><DropdownMenuItem onClick={handleExportFullAudit}><FileText className="h-4 w-4 mr-2" /> Export Full Audit (TXT)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => window.print()}><FileText className="h-4 w-4 mr-2" /> Export as PDF (Print)</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setImportDialogOpen(true)}><Upload className="h-4 w-4 mr-2" /> Import Data</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
               {isAdmin && <button onClick={() => setIncludeTavily(!includeTavily)} className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border", includeTavily ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50")} title="Include Forzeo Discovery Engine"><span className={cn("w-2 h-2 rounded-full", includeTavily ? "bg-amber-500" : "bg-gray-300")} />{includeTavily ? "Discovery On" : "Discovery Off"}</button>}
               {isAdmin && <Button onClick={() => runFullAudit()} disabled={loading || pendingPrompts === 0} className="bg-gray-900 hover:bg-gray-800 text-white">{loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}{loading ? "Running..." : `Run ${pendingPrompts} Prompts`}</Button>}
             </div>
@@ -1984,12 +2033,26 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         }
 
         {/* Search & Export */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input placeholder="Search prompts..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-white border-gray-200" />
+            <Input placeholder="Search prompts..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-gray-50 border-transparent hover:bg-gray-100 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-colors" />
           </div>
-          <Button variant="outline" onClick={exportToCSV}><Download className="h-4 w-4 mr-1" /> Export</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="bg-white border-gray-200 hover:bg-gray-50 text-gray-700 font-medium shadow-sm transition-all duration-200">
+                <Download className="h-4 w-4 mr-2 text-gray-500" /> Export Data
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={exportToCSV} className="cursor-pointer">
+                <FileText className="h-4 w-4 mr-2 text-gray-400" /> Export Summary (CSV)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportModelResponsesToCSV} className="cursor-pointer">
+                <FileText className="h-4 w-4 mr-2 text-blue-500" /> Export Raw Responses (CSV)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Table */}
