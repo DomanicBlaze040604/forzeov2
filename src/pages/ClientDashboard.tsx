@@ -1405,7 +1405,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         rows.push([
           `"${(promptInfo?.prompt_text || r.prompt_text || "").replace(/"/g, '""')}"`,
           `"${(promptInfo?.category || "custom").replace(/"/g, '""')}"`,
-          mr.model_name || mr.model,
+          AI_MODELS.find(m => m.id === mr.model)?.name || mr.model_name || mr.model,
           isVisible,
           rank,
           `"${brands.replace(/"/g, '""')}"`,
