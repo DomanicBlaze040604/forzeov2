@@ -104,21 +104,42 @@ Format: { "domain.com": { "category": "...", "source_type": "...", "authority_ti
             result = JSON.parse(cleaned);
         } catch {
             // Truncated JSON — salvage by closing the object
-            // Find last complete entry (ends with }) and close the outer object
-            const lastComplete = cleaned.lastIndexOf("}");
-            if (lastComplete > 0) {
-                let truncated = cleaned.substring(0, lastComplete + 1);
-                // Count braces to determine nesting
-                const opens = (truncated.match(/\{/g) || []).length;
-                const closes = (truncated.match(/\}/g) || []).length;
-                // Add missing closing braces
-                for (let i = 0; i < opens - closes; i++) {
-                    truncated += "}";
+            try {
+                const lastComplete = cleaned.lastIndexOf("}");
+                if (lastComplete > 0) {
+                    let truncated = cleaned.substring(0, lastComplete + 1);
+                    // Count braces to determine nesting
+                    const opens = (truncated.match(/\{/g) || []).length;
+                    const closes = (truncated.match(/\}/g) || []).length;
+                    // Add missing closing braces
+                    for (let i = 0; i < opens - closes; i++) {
+                        truncated += "}";
+                    }
+                    const salvaged = JSON.parse(truncated);
+                    // Validate: each entry must have a category field
+                    const validEntries: Record<string, any> = {};
+                    for (const [domain, info] of Object.entries(salvaged)) {
+                        const val = info as any;
+                        if (val && typeof val === 'object' && val.category) {
+                            validEntries[domain] = val;
+                        } else {
+                            // Default invalid entries to "other"
+                            validEntries[domain] = { category: "other", source_type: "unknown", authority_tier: 3, relationship_type: "neutral" };
+                        }
+                    }
+                    console.warn(`[Categorize] Salvaged truncated JSON (${Object.keys(validEntries).length} domains recovered)`);
+                    result = validEntries;
+                } else {
+                    throw new Error("No recoverable JSON structure");
                 }
-                console.warn(`[Categorize] Salvaged truncated JSON (${Object.keys(JSON.parse(truncated)).length} domains recovered)`);
-                result = JSON.parse(truncated);
-            } else {
-                throw new Error("Failed to parse model response as JSON");
+            } catch (salvageError) {
+                console.error("[Categorize] JSON salvage failed:", salvageError);
+                // Default all domains to "other" instead of crashing
+                result = {};
+                for (const domain of batch) {
+                    result[domain] = { category: "other", source_type: "unknown", authority_tier: 3, relationship_type: "neutral" };
+                }
+                console.warn(`[Categorize] Defaulted all ${batch.length} domains to 'other'`);
             }
         }
 

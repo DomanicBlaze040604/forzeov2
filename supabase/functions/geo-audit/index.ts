@@ -255,8 +255,122 @@ function validateRequest(body: AuditRequest): string | null {
   if (body.models && !Array.isArray(body.models)) {
     return "models must be an array";
   }
-  if (body.location_code && (body.location_code < 1 || body.location_code > 9999999)) {
-    return "invalid location_code";
+  if (body.location_code) {
+    // DataForSEO valid location codes — countries + cities used by frontend
+    const VALID_LOCATION_CODES = new Set([
+      // Countries
+      2032, // Argentina
+      2036, // Australia
+      2040, // Austria
+      2056, // Belgium
+      2076, // Brazil
+      2124, // Canada
+      2152, // Chile
+      2156, // China
+      2170, // Colombia
+      2203, // Czech Republic
+      2208, // Denmark
+      2246, // Finland
+      2250, // France
+      2276, // Germany
+      2300, // Greece
+      2344, // Hong Kong
+      2348, // Hungary
+      2356, // India
+      2360, // Indonesia
+      2372, // Ireland
+      2376, // Israel
+      2380, // Italy
+      2392, // Japan
+      2410, // South Korea
+      2458, // Malaysia
+      2484, // Mexico
+      2528, // Netherlands
+      2554, // New Zealand
+      2566, // Nigeria
+      2578, // Norway
+      2608, // Philippines
+      2616, // Poland
+      2620, // Portugal
+      2642, // Romania
+      2643, // Russia
+      2682, // Saudi Arabia
+      2702, // Singapore
+      2710, // South Africa
+      2724, // Spain
+      2752, // Sweden
+      2756, // Switzerland
+      2764, // Thailand
+      2792, // Turkey
+      2804, // Ukraine
+      2784, // UAE
+      2826, // UK
+      2840, // USA
+      2704, // Vietnam
+      // US Cities
+      1023191, // New York
+      1013962, // Los Angeles
+      1016367, // Chicago
+      1026481, // Houston
+      1023564, // Phoenix
+      1014221, // San Francisco
+      1026339, // Dallas
+      1015116, // Miami
+      1027744, // Seattle
+      1018127, // Boston
+      1014395, // Denver
+      1015254, // Atlanta
+      1014218, // San Diego
+      1026135, // Austin
+      1023163, // Las Vegas
+      // UK Cities
+      1006886, // London
+      1006977, // Manchester
+      1006632, // Birmingham
+      1006943, // Leeds
+      1006822, // Glasgow
+      1006958, // Liverpool
+      1006789, // Edinburgh
+      1006682, // Bristol
+      // India Cities
+      1007788, // Mumbai
+      1007768, // Delhi
+      1007751, // Bangalore
+      1007774, // Hyderabad
+      1007762, // Chennai
+      1007780, // Kolkata
+      1007793, // Pune
+      1007747, // Ahmedabad
+      // Thailand Cities
+      1012541, // Bangkok
+      1012551, // Chiang Mai
+      1012568, // Phuket
+      1012565, // Pattaya
+      // Australia Cities
+      9069883, // Sydney
+      9069872, // Melbourne
+      9069858, // Brisbane
+      9069878, // Perth
+      // Germany Cities
+      1003854, // Berlin
+      1004047, // Munich
+      1003938, // Hamburg
+      1003906, // Frankfurt
+      1003993, // Cologne
+      // UAE Cities
+      1013010, // Dubai
+      1013002, // Abu Dhabi
+      // Singapore
+      9076810, // Singapore Central
+      // Canada Cities
+      9000984, // Toronto
+      9001009, // Vancouver
+      9000930, // Montreal
+      9000889, // Calgary
+    ]);
+    if (!VALID_LOCATION_CODES.has(body.location_code)) {
+      return `invalid location_code ${body.location_code} — use a valid DataForSEO country or city code`;
+    }
   }
   return null;
 }
@@ -373,6 +487,7 @@ function extractUrlsFromText(text: string): Citation[] {
  */
 function analyzeSentiment(context: string): "positive" | "neutral" | "negative" {
   const lower = context.toLowerCase();
+  const words = lower.split(/\s+/);
 
   const positiveWords = [
     "best", "top", "excellent", "recommended", "leading", "trusted",
@@ -386,8 +501,28 @@ function analyzeSentiment(context: string): "positive" | "neutral" | "negative" 
     "overpriced", "slow", "buggy", "unsafe"
   ];
 
-  const posCount = positiveWords.filter(w => lower.includes(w)).length;
-  const negCount = negativeWords.filter(w => lower.includes(w)).length;
+  const negationWords = new Set([
+    "not", "no", "never", "isn't", "wasn't", "don't", "doesn't",
+    "hardly", "barely", "neither", "nor", "without", "lack", "lacking"
+  ]);
+
+  let posCount = 0;
+  let negCount = 0;
+
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i].replace(/[^a-z]/g, '');
+    if (!word) continue;
+
+    // Check for negation in the 3 words preceding this one
+    const hasNegation = words.slice(Math.max(0, i - 3), i)
+      .some(w => negationWords.has(w.replace(/[^a-z']/g, '')));
+
+    if (positiveWords.includes(word)) {
+      if (hasNegation) negCount++; else posCount++;
+    } else if (negativeWords.includes(word)) {
+      if (hasNegation) posCount++; else negCount++;
+    }
+  }
 
   if (posCount > negCount) return "positive";
   if (negCount > posCount) return "negative";
@@ -410,13 +545,34 @@ function normalizeBrandToken(name: string): string {
 /**
  * Check if a brand name appears in text using both exact and normalized token matching.
  */
+// Common English words that cause false positive brand matches
+const COMMON_WORD_SKIP = new Set([
+  "able", "also", "area", "back", "been", "best", "both", "call", "came", "case",
+  "come", "could", "data", "days", "does", "done", "down", "each", "even", "fact",
+  "find", "first", "form", "from", "full", "gave", "gets", "give", "goes", "good",
+  "great", "hack", "half", "hand", "hard", "have", "head", "help", "here", "high",
+  "home", "idea", "info", "into", "just", "keep", "kind", "know", "last", "lead",
+  "left", "less", "life", "like", "line", "link", "list", "live", "long", "look",
+  "made", "main", "make", "many", "meet", "mind", "more", "most", "much", "must",
+  "name", "near", "need", "next", "note", "once", "only", "open", "over", "page",
+  "part", "past", "plan", "play", "plus", "post", "push", "read", "real", "rest",
+  "rich", "role", "rule", "runs", "safe", "said", "same", "save", "seen", "send",
+  "show", "side", "sign", "site", "size", "some", "sort", "step", "stop", "sure",
+  "take", "talk", "team", "tell", "test", "text", "that", "them", "then", "they",
+  "this", "time", "tool", "turn", "type", "unit", "upon", "used", "user", "uses",
+  "very", "view", "want", "wave", "well", "went", "were", "what", "when", "will",
+  "with", "word", "work", "year", "your", "zero"
+]);
+
 function brandFoundInText(text: string, brandName: string): boolean {
   if (!text || !brandName) return false;
   const lower = text.toLowerCase();
   if (lower.includes(brandName.toLowerCase())) return true;
   const token = normalizeBrandToken(brandName);
-  if (token.length >= 3) {
-    const cleanText = lower.replace(/[^a-z0-9\s]/g, '');
+  if (token.length >= 4 && !COMMON_WORD_SKIP.has(token)) {
+    // Strip ALL non-alphanumeric (including spaces) so multi-word brands like
+    // "Tata Tele Services" → "tatateleservices" can match in running text
+    const cleanText = lower.replace(/[^a-z0-9]/g, '');
     if (cleanText.includes(token)) return true;
   }
   return false;
@@ -438,8 +594,9 @@ function countBrandMentions(text: string, brandName: string): number {
   // If no exact match, try normalized token
   if (count === 0) {
     const token = normalizeBrandToken(brandName);
-    if (token.length >= 3) {
-      const cleanText = lower.replace(/[^a-z0-9\s]/g, '');
+    if (token.length >= 4 && !COMMON_WORD_SKIP.has(token)) {
+      // Strip ALL non-alphanumeric (including spaces) so multi-word brand tokens match
+      const cleanText = lower.replace(/[^a-z0-9]/g, '');
       let tidx = 0;
       while ((tidx = cleanText.indexOf(token, tidx)) !== -1) {
         count++;
@@ -493,7 +650,7 @@ function parseBrandData(
     const match = line.match(/^\s*(\d+)[.)\]]\s*\*{0,2}(.+)/);
     if (match) {
       const lineContent = match[2].toLowerCase();
-      const lineContentClean = lineContent.replace(/[^a-z0-9\s]/g, '');
+      const lineContentClean = lineContent.replace(/[^a-z0-9]/g, '');
       // Check exact terms first
       for (const term of allTerms) {
         if (term && lineContent.includes(term.toLowerCase())) {
@@ -529,7 +686,7 @@ function parseBrandData(
   // Fallback sentiment: try normalized match if no exact match found
   if (sentiment === "neutral" && totalCount > 0) {
     for (const token of allTokens) {
-      const cleanLower = lower.replace(/[^a-z0-9\s]/g, '');
+      const cleanLower = lower.replace(/[^a-z0-9]/g, '');
       const idx = cleanLower.indexOf(token);
       if (idx !== -1) {
         const contextStart = Math.max(0, idx - 100);
@@ -573,7 +730,7 @@ function parseCompetitors(response: string, competitors: string[]): CompetitorMe
       const match = line.match(/^\s*(\d+)[.)\]]\s*\*{0,2}(.+)/);
       if (match) {
         const lineContent = match[2].toLowerCase();
-        const lineContentClean = lineContent.replace(/[^a-z0-9\s]/g, '');
+        const lineContentClean = lineContent.replace(/[^a-z0-9]/g, '');
         if (lineContent.includes(compLower) || (compToken.length >= 3 && lineContentClean.includes(compToken))) {
           rank = parseInt(match[1]);
           break;
@@ -839,24 +996,13 @@ function extractBrandCandidatesFromText(
     }
   }
 
-  // Pre-scan: find known brands/competitors in the text (always high confidence)
-  const lowerClean = cleanText.toLowerCase();
+  // Pre-scan: find known brands/competitors using the same sentence array for consistent positioning
   for (const known of knownBrands) {
     if (!known || known.length < 2) continue;
     const knownLower = known.toLowerCase();
-    let idx = 0;
-    const positions: number[] = [];
-    while ((idx = lowerClean.indexOf(knownLower, idx)) !== -1) {
-      // Find which sentence this falls in
-      const textBefore = cleanText.substring(0, idx);
-      const sentIdx = (textBefore.match(/[.!?\n]/g) || []).length + 1;
-      positions.push(sentIdx);
-      idx += knownLower.length;
-    }
-    if (positions.length > 0) {
-      const key = knownLower;
-      for (const pos of positions) {
-        addBrand(key, known, pos, true);
+    for (let i = 0; i < sentences.length; i++) {
+      if (sentences[i].toLowerCase().includes(knownLower)) {
+        addBrand(knownLower, known, i + 1, true);
       }
     }
   }
@@ -1107,6 +1253,13 @@ function extractBrandsFromResponse(
     }
   }
 
+  // Final sort by entity_points descending and assign rank-based position (1st, 2nd, 3rd...)
+  // This replaces sentence-index positions with meaningful competitive ranking
+  results.sort((a, b) => b.entity_points - a.entity_points);
+  for (let i = 0; i < results.length; i++) {
+    results[i].position = i + 1;
+  }
+
   console.log(`[BrandDetection] Extracted ${results.length} brands from ${responseText.length} chars`);
   return results;
 }
@@ -1127,6 +1280,10 @@ function mapDataForSEOBrandEntities(
   const allBrandTerms = [brandName, ...brandTags].filter(Boolean).map(t => t.toLowerCase());
   const allCompetitorTerms = competitors.filter(Boolean).map(c => c.toLowerCase());
 
+  // Split into sentences for consistent position counting
+  const cleanText = stripUrlsForNER(responseText);
+  const sentences = cleanText.split(/(?<=[.!?])\s+|(?:\r?\n)+/).filter(s => s.trim().length > 0);
+
   const results: ExtractedBrandEntity[] = [];
   const seenTitles = new Set<string>();
 
@@ -1138,16 +1295,14 @@ function mapDataForSEOBrandEntities(
     if (seenTitles.has(titleLower)) continue;
     seenTitles.add(titleLower);
 
-    // Count mentions in actual response text
+    // Count mentions in actual response text using sentence-based positioning
     let mentionCount = 0;
     const positions: number[] = [];
-    let searchIdx = 0;
-    while ((searchIdx = lowerText.indexOf(titleLower, searchIdx)) !== -1) {
-      mentionCount++;
-      const textBefore = responseText.substring(0, searchIdx);
-      const sentenceIdx = (textBefore.match(/[.!?\n]/g) || []).length + 1;
-      if (!positions.includes(sentenceIdx)) positions.push(sentenceIdx);
-      searchIdx += titleLower.length;
+    for (let i = 0; i < sentences.length; i++) {
+      if (sentences[i].toLowerCase().includes(titleLower)) {
+        mentionCount++;
+        if (!positions.includes(i + 1)) positions.push(i + 1);
+      }
     }
 
     // If brand not found in response text, use minimal defaults
@@ -1211,6 +1366,12 @@ function mapDataForSEOBrandEntities(
     if (!a.is_competitor && b.is_competitor) return 1;
     return b.entity_points - a.entity_points;
   });
+
+  // Assign rank-based positions (1st, 2nd, 3rd...) based on entity_points
+  results.sort((a, b) => b.entity_points - a.entity_points);
+  for (let i = 0; i < results.length; i++) {
+    results[i].position = i + 1;
+  }
 
   console.log(`[BrandDetection] Mapped ${results.length} API brand entities from ${apiBrands.length} raw entities`);
   return results;
@@ -1646,45 +1807,69 @@ function matchCountryCode(locationCode: number): number {
   ];
   if (knownCountries.includes(locationCode)) return locationCode;
 
-  // City-to-Country Mapping (expanded — maps DataForSEO city location_codes to country codes)
+  // City-to-Country Mapping — maps DataForSEO city location_codes to country codes
+  // These must match the codes used by the frontend (useClientDashboard.ts / OnboardingWizard.tsx)
   const CITY_TO_COUNTRY: Record<number, number> = {
-    // India cities → India (2356)
-    1027351: 2356, // Bangalore
-    1015539: 2356, // Mumbai
-    1007758: 2356, // Delhi
-    1022862: 2356, // Chennai
-    1275339: 2356, // Hyderabad
-    1269843: 2356, // Kolkata
-    1275004: 2356, // Pune
-    1277333: 2356, // Ahmedabad
     // US cities → USA (2840)
     1023191: 2840, // New York
-    1014895: 2840, // Los Angeles
+    1013962: 2840, // Los Angeles
     1016367: 2840, // Chicago
-    1025433: 2840, // Houston
-    1025542: 2840, // Phoenix
-    1020862: 2840, // Dallas
-    1024638: 2840, // San Antonio
-    1019330: 2840, // Miami
-    1021209: 2840, // San Francisco
-    1021455: 2840, // Seattle
+    1026481: 2840, // Houston
+    1023564: 2840, // Phoenix
+    1014221: 2840, // San Francisco
+    1026339: 2840, // Dallas
+    1015116: 2840, // Miami
+    1027744: 2840, // Seattle
+    1018127: 2840, // Boston
+    1014395: 2840, // Denver
+    1015254: 2840, // Atlanta
+    1014218: 2840, // San Diego
+    1026135: 2840, // Austin
+    1023163: 2840, // Las Vegas
     // UK cities → UK (2826)
     1006886: 2826, // London
-    1006984: 2826, // Birmingham
-    1006914: 2826, // Manchester
+    1006977: 2826, // Manchester
+    1006632: 2826, // Birmingham
+    1006943: 2826, // Leeds
+    1006822: 2826, // Glasgow
+    1006958: 2826, // Liverpool
+    1006789: 2826, // Edinburgh
+    1006682: 2826, // Bristol
+    // India cities → India (2356)
+    1007788: 2356, // Mumbai
+    1007768: 2356, // Delhi
+    1007751: 2356, // Bangalore
+    1007774: 2356, // Hyderabad
+    1007762: 2356, // Chennai
+    1007780: 2356, // Kolkata
+    1007793: 2356, // Pune
+    1007747: 2356, // Ahmedabad
+    // Thailand cities → Thailand (2764)
+    1012541: 2764, // Bangkok
+    1012551: 2764, // Chiang Mai
+    1012568: 2764, // Phuket
+    1012565: 2764, // Pattaya
     // Australia cities → AU (2036)
-    1000073: 2036, // Sydney
-    1000688: 2036, // Melbourne
-    1000664: 2036, // Brisbane
-    // Canada cities → CA (2124)
-    1006583: 2124, // Toronto
-    1006481: 2124, // Vancouver
-    1006656: 2124, // Montreal
+    9069883: 2036, // Sydney
+    9069872: 2036, // Melbourne
+    9069858: 2036, // Brisbane
+    9069878: 2036, // Perth
+    // Germany cities → DE (2276)
+    1003854: 2276, // Berlin
+    1004047: 2276, // Munich
+    1003938: 2276, // Hamburg
+    1003906: 2276, // Frankfurt
+    1003993: 2276, // Cologne
     // UAE cities → AE (2784)
-    292223: 2784, // Dubai
-    292968: 2784, // Abu Dhabi
+    1013010: 2784, // Dubai
+    1013002: 2784, // Abu Dhabi
     // Singapore → SG (2702)
-    1880252: 2702,
+    9076810: 2702, // Singapore Central
+    // Canada cities → CA (2124)
+    9000984: 2124, // Toronto
+    9001009: 2124, // Vancouver
+    9000930: 2124, // Montreal
+    9000889: 2124, // Calgary
   };
 
   if (CITY_TO_COUNTRY[locationCode]) return CITY_TO_COUNTRY[locationCode];
@@ -2251,8 +2436,23 @@ async function getLiveLLMWithValidation(
       console.log(`[LIVE LLM/${model}] Response received, length: ${result.response.length}`);
       console.log(`[LIVE LLM/${model}] Brand data: mentioned=${brandData.mentioned}, count=${brandData.count}`);
 
-      const urlCitations = extractUrlsFromText(result.response);
-      console.log(`[LIVE LLM/${model}] URL citations extracted: ${urlCitations.length}`);
+      const rawUrlCitations = extractUrlsFromText(result.response);
+      // Filter out root-only URLs for brand/competitor domains — those are mentions, not citations
+      const brandDomainLower = normalizeBrandToken(brandName);
+      const competitorTokens = competitors.map((c: string) => normalizeBrandToken(c)).filter((t: string) => t.length >= 3);
+      const urlCitations = rawUrlCitations.filter(c => {
+        try {
+          const parsed = new URL(c.url);
+          const isRootOnly = parsed.pathname === '/' || parsed.pathname === '';
+          if (!isRootOnly) return true; // Keep URLs with meaningful paths
+          const domainToken = normalizeBrandToken(parsed.hostname);
+          // Exclude root-only brand/competitor domain mentions
+          if (domainToken === brandDomainLower) return false;
+          if (competitorTokens.some((ct: string) => domainToken === ct || domainToken.includes(ct))) return false;
+          return true;
+        } catch { return true; }
+      });
+      console.log(`[LIVE LLM/${model}] URL citations extracted: ${urlCitations.length} (filtered ${rawUrlCitations.length - urlCitations.length} domain-only mentions)`);
 
       const implicitCitations = extractImplicitCitations(result.response, brandName, brandTags, competitors);
       console.log(`[LIVE LLM/${model}] Implicit citations extracted: ${implicitCitations.length}`);

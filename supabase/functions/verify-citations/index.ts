@@ -93,9 +93,17 @@ function detectBrandMention(text, brand) {
 }
 
 // Select the most relevant paragraphs for the model (keyword pre-filter)
-function selectBestParagraphs(paragraphs, brand, maxCount = 5) {
+function selectBestParagraphs(paragraphs, brand, maxCount = 5, promptText = '') {
     const brandLower = brand.toLowerCase()
     const brandWords = brandLower.split(/\s+/).filter(w => w.length > 2)
+
+    // Extract topical keywords from prompt text for relevance scoring
+    const stopWords = new Set(['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has', 'his', 'how', 'its', 'may', 'new', 'now', 'old', 'see', 'way', 'who', 'did', 'get', 'let', 'say', 'she', 'too', 'use', 'what', 'which', 'best', 'most', 'with', 'from', 'that', 'this', 'will', 'your', 'about', 'their', 'there', 'these', 'would', 'could', 'should'])
+    const promptKeywords = promptText
+        ? promptText.toLowerCase().split(/\s+/)
+            .map(w => w.replace(/[^a-z0-9]/g, ''))
+            .filter(w => w.length > 3 && !stopWords.has(w) && !brandWords.includes(w))
+        : []
 
     const scored = paragraphs.map(p => {
         const lower = p.toLowerCase()
@@ -103,6 +111,10 @@ function selectBestParagraphs(paragraphs, brand, maxCount = 5) {
         if (lower.includes(brandLower)) score += 10
         for (const word of brandWords) {
             if (lower.includes(word)) score += 3
+        }
+        // Topical relevance from prompt keywords (+3 per keyword match)
+        for (const kw of promptKeywords) {
+            if (lower.includes(kw)) score += 3
         }
         score += Math.min(5, p.length / 100) // prefer longer paragraphs
         return { paragraph: p, score }
@@ -203,7 +215,7 @@ function urlPathRelevance(url, brand) {
 async function verifyCitationWithModel(claim, pageText, entityCheck) {
     // Select best paragraphs instead of raw text dump
     const paragraphs = splitIntoParagraphs(pageText)
-    const bestParagraphs = selectBestParagraphs(paragraphs, claim.brand, 5)
+    const bestParagraphs = selectBestParagraphs(paragraphs, claim.brand, 5, claim.promptText || '')
     const focusedText = bestParagraphs.length > 0
         ? bestParagraphs.join('\n\n')
         : pageText.substring(0, 3000)
@@ -688,9 +700,9 @@ async function handleBatchVerification(params) {
                 claimContext,
                 supabase
             )
-        } catch (error) {
+        } catch (error: unknown) {
             console.error(`[Verify-Batch] Error: ${citation.url}:`, error)
-            if (error.isRateLimit) {
+            if (error && typeof error === 'object' && 'isRateLimit' in error && (error as any).isRateLimit) {
                 console.log(`[Verify-Batch] Rate limited for ${citation.url} — keeping as pending`)
                 return { url: citation.url, status: 'rate_limited', error: 'Will retry next run' }
             }
@@ -699,7 +711,7 @@ async function handleBatchVerification(params) {
                     .update({ verification_status: 'error', verified_at: new Date().toISOString() })
                     .eq('id', citation.id)
             } catch { }
-            return { url: citation.url, status: 'error', error: error?.message }
+            return { url: citation.url, status: 'error', error: error instanceof Error ? error.message : String(error) }
         }
     })
 
@@ -755,9 +767,9 @@ serve(async (req) => {
         const tasks = citations.map(citation => async () => {
             try {
                 return await processCitation(citation, claim, supabase)
-            } catch (error) {
+            } catch (error: unknown) {
                 console.error(`[Verify] Error: ${citation.url}:`, error)
-                if (error.isRateLimit) {
+                if (error && typeof error === 'object' && 'isRateLimit' in error && (error as any).isRateLimit) {
                     return { citation_id: citation.citation_id, url: citation.url, status: 'rate_limited', error: 'Will retry' }
                 }
                 try {
@@ -766,7 +778,7 @@ serve(async (req) => {
                         .update({ verification_status: 'error', verified_at: new Date().toISOString() })
                         .eq('url', citation.url)
                 } catch { }
-                return { citation_id: citation.citation_id, url: citation.url, status: 'error', error: error.message }
+                return { citation_id: citation.citation_id, url: citation.url, status: 'error', error: error instanceof Error ? error.message : String(error) }
             }
         })
 
@@ -780,7 +792,7 @@ serve(async (req) => {
     } catch (error) {
         console.error('[Verify] Fatal error:', error)
         return new Response(
-            JSON.stringify({ error: error.message }),
+            JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
     }

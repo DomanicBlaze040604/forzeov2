@@ -94,6 +94,33 @@ Formerly known as the Tavily integration, this deep analysis engine provides rea
 
 ## ✨ Recent Updates
 
+### v3.1 - Dashboard Refactor, AI Opportunity & Rank Badge (Mar 2026)
+
+#### Architecture
+- **Tab Components Extracted**: `ClientDashboard.tsx` refactored — each major tab is now a standalone component in `src/components/tabs/` (`PromptsTab`, `OverviewTab`, etc.) for better maintainability and code-splitting.
+- **Shared Utilities**: Extracted `src/utils/brandMatching.ts` (fuzzy brand name matching) and `src/utils/dashboardHelpers.ts` (domain classification, `computePositionForResult`) from the monolithic dashboard file.
+
+#### Features
+- **AI Opportunity Score**: New column in the Prompts table replacing "Est. Search Volume". Five-tier categorical label (Very High / High / Medium / Low / Minimal) computed from model visibility, citation count, and position — static per prompt, sortable.
+- **Position Badge on LLM Cards**: In the Prompt Detail dialog, each LLM card now shows a distinct blue `#7` badge beside the green **Visible** badge when a brand rank is detected.
+- **Multi-Layer Rank Fallback** (`computePositionForResult`):
+  1. `summary.average_rank` from DB
+  2. Average of `model_results[].brand_rank` fields
+  3. Parsed from raw AI response text via `cleanAndAnalyzeResponse`
+  4. `extracted_brands[].position` from DataForSEO entity data
+  5. Mention-order heuristic (position among competitors in text)
+- **Per-Model Rank Badge**: Model cards now compute rank client-side from the raw response when `brand_rank` is null in the DB (covers older audit runs).
+
+#### Edge Functions
+- **`geo-audit`**: Significant improvements including better city fallback, Gemini web_search tool, bounded queries, citation retry logic, and scheduler cost logging.
+- **`categorize-citations`**: Enhanced with field preservation on re-categorization (prevents data loss of `similarity_score`, `matched_paragraph`, `page_content`).
+- **`verify-citations`**: Updated verification logic with improved retry handling.
+- **`multi-account-runner`**: Budget cap enforcement, self-healing chunked execution, post-audit citation categorization.
+
+#### Build
+- **`vite.config.ts`**: Updated chunk splitting strategy for optimized bundles.
+- Build output: ✅ `tsc && vite build` passes clean (26.30s, 681 kB main chunk).
+
 ### v2.9.1 - Categorize → Verify Pipeline (Feb 25, 2026)
 - **Auto-Verification Pipeline**: Newly categorized domains are now automatically stamped with `verification_status: 'pending'`, which the pg_cron job (`invoke-verify-citations`, every 5 min) picks up for immediate verification — no manual trigger needed.
 - **Verification Field Preservation**: Re-categorizing existing domains now spreads the existing meta (`similarity_score`, `matched_paragraph`, `page_content`, `verified_at`) before writing new category fields, preventing data loss on re-runs.

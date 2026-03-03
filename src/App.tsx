@@ -1,8 +1,8 @@
-import { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/integrations/supabase/client'
 import ClientDashboard from './pages/ClientDashboard'
 import { Toaster } from "sonner"
-import { OnboardingWizard } from '@/components/ui/OnboardingWizard'
+const OnboardingWizard = React.lazy(() => import('@/components/ui/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })))
 import { AuthForm } from '@/components/AuthForm'
 
 function App() {
@@ -203,11 +203,13 @@ function App() {
 
       {/* Onboarding Wizard Popup */}
       {showOnboarding && session?.user && (
-        <OnboardingWizard
-          open={showOnboarding}
-          onOpenChange={setShowOnboarding}
-          onComplete={handleOnboardingComplete}
-        />
+        <React.Suspense fallback={null}>
+          <OnboardingWizard
+            open={showOnboarding}
+            onOpenChange={setShowOnboarding}
+            onComplete={handleOnboardingComplete}
+          />
+        </React.Suspense>
       )}
     </>
   )

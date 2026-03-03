@@ -795,3 +795,78 @@ tbody tr:nth-child(even) {
   pointer-events: none;
   z-index: -1;
 }
+
+/* ===== PRINT / PDF EXPORT ===== */
+@media print {
+  /* Hide non-content elements */
+  aside,
+  nav,
+  header,
+  .print\\:hidden,
+  [data-radix-portal],
+  button,
+  .fixed,
+  input[type="file"],
+  .ambient-bg {
+    display: none !important;
+  }
+
+  /* Show the print header */
+  .print-header {
+    display: block !important;
+  }
+
+  /* Full width content */
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Clean background */
+  body,
+  html {
+    background: white !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Remove shadows and borders for cleaner print */
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Page break rules */
+  .bg-white {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  h2, h3, h4 {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  table {
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Ensure charts and cards print properly */
+  .rounded-xl,
+  .rounded-2xl {
+    border: 1px solid #e5e7eb !important;
+  }
+
+  /* Page margins */
+  @page {
+    margin: 1cm;
+    size: A4 landscape;
+  }
+}

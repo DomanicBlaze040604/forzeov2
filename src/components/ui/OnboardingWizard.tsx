@@ -370,7 +370,9 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         let quotaExceeded = false;
 
         for (const keyword of keywords) {
-            if (formData.seedKeywords.includes(keyword) || newKeywords.includes(keyword)) {
+            const existingLower = formData.seedKeywords.map(k => k.toLowerCase().trim());
+            const newLower = newKeywords.map(k => k.toLowerCase().trim());
+            if (existingLower.includes(keyword.toLowerCase().trim()) || newLower.includes(keyword.toLowerCase().trim())) {
                 duplicates.push(keyword);
             } else if (formData.seedKeywords.length + newKeywords.length >= userLimits.maxKeywords) {
                 quotaExceeded = true;
@@ -416,72 +418,80 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
 
         setAutoFindingCompetitors(true);
         try {
-            const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
-            const locationName = LOCATIONS.find(l => l.code === formData.location)?.name?.replace(/^[^\s]+\s/, '') || 'United States';
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("Taking too long — please add competitors manually.")), 30000)
+            );
 
-            let competitors: string[] = [];
+            const findPromise = (async () => {
+                const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
+                const locationName = LOCATIONS.find(l => l.code === formData.location)?.name?.replace(/^[^\s]+\s/, '') || 'United States';
 
-            // Step 1: Try Tavily search for real-time competitor data
-            let tavilyContext = "";
-            try {
-                console.log("[Auto-Find] Step 1: Searching with Tavily...");
-                const { data, error } = await supabase.functions.invoke("tavily-search", {
-                    body: {
-                        query: `top competitors of ${formData.brandName} in ${finalIndustry} industry ${locationName}`,
-                        search_depth: "basic",
-                        max_results: 5
-                    }
-                });
-                if (!error && data?.results) {
-                    tavilyContext = data.results.map((r: { title?: string; url?: string }) => `${r.title} - ${r.url}`).join("\n");
-                    console.log("[Auto-Find] Tavily found context:", tavilyContext);
-                }
-            } catch (e) {
-                console.warn("[Auto-Find] Tavily search failed:", e);
-            }
+                let competitors: string[] = [];
 
-            // Step 2: Use groq-proxy to extract/generate competitors
-            console.log("[Auto-Find] Step 2: Using groq-proxy to find competitors...");
-            const groqPrompt = tavilyContext
-                ? `Based on this search data about ${formData.brandName} competitors:\n${tavilyContext}\n\nExtract 5 direct competitor company names for "${formData.brandName}" in the "${finalIndustry}" industry. Return ONLY a JSON array like ["Comp1", "Comp2"].`
-                : `Find 5 direct competitors for "${formData.brandName}" in the "${finalIndustry}" industry in ${locationName}. Return ONLY a JSON array like ["Comp1", "Comp2", "Comp3", "Comp4", "Comp5"]`;
-
-            const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
-                body: {
-                    model: "llama-3.3-70b-versatile",
-                    messages: [
-                        { role: "system", content: "You are a market research expert. Return ONLY a JSON array of competitor company names. No explanations, no markdown, just the JSON array." },
-                        { role: "user", content: groqPrompt }
-                    ],
-                    temperature: 0.1,
-                    max_tokens: 300,
-                },
-            });
-
-            if (!proxyError && proxyData?.response) {
-                const content = proxyData.response;
-                console.log("[Auto-Find] groq-proxy response:", content);
+                // Step 1: Try Tavily search for real-time competitor data
+                let tavilyContext = "";
                 try {
-                    const jsonMatch = content.match(/\[[\s\S]*?\]/);
-                    if (jsonMatch) {
-                        competitors = JSON.parse(jsonMatch[0]);
+                    console.log("[Auto-Find] Step 1: Searching with Tavily...");
+                    const { data, error } = await supabase.functions.invoke("tavily-search", {
+                        body: {
+                            query: `top competitors of ${formData.brandName} in ${finalIndustry} industry ${locationName}`,
+                            search_depth: "basic",
+                            max_results: 5
+                        }
+                    });
+                    if (!error && data?.results) {
+                        tavilyContext = data.results.map((r: { title?: string; url?: string }) => `${r.title} - ${r.url}`).join("\n");
+                        console.log("[Auto-Find] Tavily found context:", tavilyContext);
                     }
                 } catch (e) {
-                    console.warn("[Auto-Find] Parse error:", e);
+                    console.warn("[Auto-Find] Tavily search failed:", e);
                 }
-            } else if (proxyError) {
-                console.error("[Auto-Find] groq-proxy error:", proxyError);
-            }
 
-            if (competitors.length > 0) {
-                const found = competitors.map(String).filter((n: string) => n && n.length > 1 && n.toLowerCase() !== formData.brandName.toLowerCase()).slice(0, 5);
-                if (found.length > 0) {
-                    setFormData(prev => ({ ...prev, competitors: [...new Set([...prev.competitors, ...found])] }));
-                    showNotification('success', `Found ${found.length} potential competitors!`);
-                    return;
+                // Step 2: Use groq-proxy to extract/generate competitors
+                console.log("[Auto-Find] Step 2: Using groq-proxy to find competitors...");
+                const groqPrompt = tavilyContext
+                    ? `Based on this search data about ${formData.brandName} competitors:\n${tavilyContext}\n\nExtract 5 direct competitor company names for "${formData.brandName}" in the "${finalIndustry}" industry. Return ONLY a JSON array like ["Comp1", "Comp2"].`
+                    : `Find 5 direct competitors for "${formData.brandName}" in the "${finalIndustry}" industry in ${locationName}. Return ONLY a JSON array like ["Comp1", "Comp2", "Comp3", "Comp4", "Comp5"]`;
+
+                const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
+                    body: {
+                        model: "llama-3.3-70b-versatile",
+                        messages: [
+                            { role: "system", content: "You are a market research expert. Return ONLY a JSON array of competitor company names. No explanations, no markdown, just the JSON array." },
+                            { role: "user", content: groqPrompt }
+                        ],
+                        temperature: 0.1,
+                        max_tokens: 300,
+                    },
+                });
+
+                if (!proxyError && proxyData?.response) {
+                    const content = proxyData.response;
+                    console.log("[Auto-Find] groq-proxy response:", content);
+                    try {
+                        const jsonMatch = content.match(/\[[\s\S]*?\]/);
+                        if (jsonMatch) {
+                            competitors = JSON.parse(jsonMatch[0]);
+                        }
+                    } catch (e) {
+                        console.warn("[Auto-Find] Parse error:", e);
+                    }
+                } else if (proxyError) {
+                    console.error("[Auto-Find] groq-proxy error:", proxyError);
                 }
-            }
-            throw new Error("Could not find competitors");
+
+                if (competitors.length > 0) {
+                    const found = competitors.map(String).filter((n: string) => n && n.length > 1 && n.toLowerCase() !== formData.brandName.toLowerCase()).slice(0, 5);
+                    if (found.length > 0) {
+                        setFormData(prev => ({ ...prev, competitors: [...new Set([...prev.competitors, ...found])] }));
+                        showNotification('success', `Found ${found.length} potential competitors!`);
+                        return;
+                    }
+                }
+                throw new Error("Could not find competitors");
+            })();
+
+            await Promise.race([findPromise, timeoutPromise]);
         } catch (error) {
             console.error("[Auto-Find] Failed:", error);
             showNotification('error', error instanceof Error ? error.message : "Could not auto-find competitors. Please add manually.");
@@ -614,7 +624,41 @@ Instructions:
             }
         }
 
-        setGeneratedPrompts(allPrompts);
+        // Dedup: remove prompts that are too similar (< 30% Levenshtein distance)
+        const levenshtein = (a: string, b: string): number => {
+            const la = a.length, lb = b.length;
+            if (la === 0) return lb;
+            if (lb === 0) return la;
+            const dp: number[][] = Array.from({ length: la + 1 }, (_, i) => [i]);
+            for (let j = 1; j <= lb; j++) dp[0][j] = j;
+            for (let i = 1; i <= la; i++) {
+                for (let j = 1; j <= lb; j++) {
+                    dp[i][j] = Math.min(
+                        dp[i - 1][j] + 1,
+                        dp[i][j - 1] + 1,
+                        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+                    );
+                }
+            }
+            return dp[la][lb];
+        };
+        const dedupedPrompts: typeof allPrompts = [];
+        for (const p of allPrompts) {
+            const pLower = p.text.toLowerCase();
+            const isDuplicate = dedupedPrompts.some(existing => {
+                const eLower = existing.text.toLowerCase();
+                const maxLen = Math.max(pLower.length, eLower.length);
+                if (maxLen === 0) return true;
+                const dist = levenshtein(pLower, eLower);
+                return (dist / maxLen) < 0.3; // < 30% difference = too similar
+            });
+            if (!isDuplicate) dedupedPrompts.push(p);
+        }
+        if (dedupedPrompts.length < allPrompts.length) {
+            console.log(`[GEO Onboarding] Deduped ${allPrompts.length - dedupedPrompts.length} similar prompts`);
+        }
+
+        setGeneratedPrompts(dedupedPrompts);
         setLoading(false);
     }, [formData, userLimits.maxPrompts, promptsPerKeyword, getLocationDrilldown]);
 
@@ -785,6 +829,10 @@ Instructions:
             case 'brand_details':
                 return (
                     <div className="space-y-6 py-4">
+                        <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700">
+                            <Info className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span>Your plan: up to <strong>{userLimits.maxKeywords}</strong> keywords, <strong>{userLimits.maxPrompts}</strong> prompts, <strong>{userLimits.promptsPerKeyword}</strong> prompts per keyword</span>
+                        </div>
                         <div className="space-y-3">
                             <Label className="text-sm font-semibold text-gray-700">Brand Name *</Label>
                             <Input placeholder="e.g. Acme Corp" value={formData.brandName} onChange={handleBrandNameChange}
@@ -811,18 +859,21 @@ Instructions:
                             </div>
                             <div className="space-y-3">
                                 <Label className="text-sm font-semibold text-gray-700">Target Location *</Label>
-                                {/* Search input for location */}
-                                <Input
-                                    placeholder="Type to search locations..."
-                                    value={locationSearch}
-                                    onChange={(e) => setLocationSearch(e.target.value)}
-                                    className="h-10 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 mb-2"
-                                />
                                 <Select onValueChange={(value) => { handleLocationChange(value); setLocationSearch(""); }} value={formData.location}>
                                     <SelectTrigger className="h-12 bg-white border-gray-200">
                                         <SelectValue placeholder="Select location" />
                                     </SelectTrigger>
                                     <SelectContent className="bg-white border-gray-200 max-h-80">
+                                        {/* Sticky search input inside dropdown */}
+                                        <div className="sticky top-0 z-10 bg-white px-2 pb-2 pt-1 border-b border-gray-100">
+                                            <Input
+                                                placeholder="Search locations..."
+                                                value={locationSearch}
+                                                onChange={(e) => { e.stopPropagation(); setLocationSearch(e.target.value); }}
+                                                onKeyDown={(e) => e.stopPropagation()}
+                                                className="h-9 bg-gray-50 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 text-sm"
+                                            />
+                                        </div>
                                         {/* Filter locations based on search */}
                                         {(() => {
                                             const searchLower = locationSearch.toLowerCase().trim();
@@ -1122,7 +1173,7 @@ Instructions:
                                 {currentStep === 'processing' && "Working our magic..."}
                             </DialogTitle>
                             <DialogDescription className="text-gray-600">
-                                Step {currentStep === 'brand_details' ? 1 : currentStep === 'competitors' ? 2 : currentStep === 'seed_keywords' ? 3 : currentStep === 'review_prompts' ? 4 : 4} of 4 • Setting up your AI visibility analytics
+                                {currentStep === 'processing' ? 'Processing...' : `Step ${currentStep === 'brand_details' ? 1 : currentStep === 'competitors' ? 2 : currentStep === 'seed_keywords' ? 3 : 4} of 4`} • Setting up your AI visibility analytics
                             </DialogDescription>
                         </div>
                     </div>

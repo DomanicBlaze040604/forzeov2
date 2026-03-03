@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -98,7 +99,7 @@ export function UserManagement({ open, onOpenChange }: UserManagementProps) {
             fetchData();
         } catch (error) {
             console.error('Error assigning brand:', error);
-            alert('Failed to assign brand to user');
+            toast.error('Failed to assign brand to user');
         }
     };
 
@@ -116,7 +117,7 @@ export function UserManagement({ open, onOpenChange }: UserManagementProps) {
             fetchData();
         } catch (error) {
             console.error('Error removing brand:', error);
-            alert('Failed to remove brand from user');
+            toast.error('Failed to remove brand from user');
         }
     };
 
@@ -133,7 +134,7 @@ export function UserManagement({ open, onOpenChange }: UserManagementProps) {
             fetchData();
         } catch (error) {
             console.error('Error updating role:', error);
-            alert('Failed to update user role');
+            toast.error('Failed to update user role');
         }
     };
 

@@ -1,5 +1,6 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,11 +47,7 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
     const [newName, setNewName] = useState("");
     const [isUpdating, setIsUpdating] = useState(false);
 
-    useEffect(() => {
-        fetchCampaigns();
-    }, [clientId]);
-
-    const fetchCampaigns = async () => {
+    const fetchCampaigns = useCallback(async () => {
         setLoading(true);
         try {
             const { data, error } = await supabase
@@ -66,18 +63,22 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
         } finally {
             setLoading(false);
         }
-    };
+    }, [clientId]);
 
-    const handleEdit = (campaign: Campaign, e: React.MouseEvent) => {
+    useEffect(() => {
+        fetchCampaigns();
+    }, [fetchCampaigns]);
+
+    const handleEdit = useCallback((campaign: Campaign, e: React.MouseEvent) => {
         e.stopPropagation();
         setEditingCampaign(campaign);
         setNewName(campaign.name);
-    };
+    }, []);
 
-    const handleDelete = (campaign: Campaign, e: React.MouseEvent) => {
+    const handleDelete = useCallback((campaign: Campaign, e: React.MouseEvent) => {
         e.stopPropagation();
         setDeletingCampaign(campaign);
-    };
+    }, []);
 
     const confirmEdit = async () => {
         if (!editingCampaign || !newName.trim()) return;
@@ -98,7 +99,7 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
             setEditingCampaign(null);
         } catch (err) {
             console.error("Error updating campaign:", err);
-            alert("Failed to rename campaign");
+            toast.error("Failed to rename campaign");
         } finally {
             setIsUpdating(false);
         }
@@ -128,7 +129,7 @@ export function CampaignsList({ clientId, onSelectCampaign }: CampaignsListProps
             setDeletingCampaign(null);
         } catch (err) {
             console.error("Error deleting campaign:", err);
-            alert("Failed to delete campaign");
+            toast.error("Failed to delete campaign");
         } finally {
             setIsUpdating(false);
         }

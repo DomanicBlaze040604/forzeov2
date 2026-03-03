@@ -84,6 +84,7 @@ export default function MultiAccountScheduler({
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [scheduleRuns, setScheduleRuns] = useState<ScheduleRun[]>([]);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
 
   const [form, setForm] = useState<ScheduleForm>({
@@ -94,7 +95,7 @@ export default function MultiAccountScheduler({
     selectedPromptIds: [],
     scheduledDate: new Date().toISOString().split('T')[0],
     scheduledTime: '09:00',
-    timezone: 'Asia/Kolkata', // Default to IST
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, // Default to user's browser timezone
     recurrence: 'once',
     models: selectedModels.length > 0 ? selectedModels : ['gemini-2.0-flash', 'gpt-4o-mini'],
     concurrencyLimit: 3,
@@ -278,7 +279,7 @@ export default function MultiAccountScheduler({
         selectedPromptIds: [],
         scheduledDate: new Date().toISOString().split('T')[0],
         scheduledTime: '09:00',
-        timezone: 'Asia/Kolkata', // Default to IST
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, // Default to user's browser timezone
         recurrence: 'once',
         models: selectedModels.length > 0 ? selectedModels : ['gemini-2.0-flash', 'gpt-4o-mini'],
         concurrencyLimit: 3,
@@ -303,6 +304,8 @@ export default function MultiAccountScheduler({
   };
 
   const runScheduleNow = async (scheduleId: string, scheduleName: string) => {
+    if (runningScheduleId) return; // Prevent concurrent executions
+    setRunningScheduleId(scheduleId);
     try {
       // Fetch schedule data
       const { data: schedule, error: scheduleError } = await supabase
@@ -337,12 +340,14 @@ export default function MultiAccountScheduler({
     } catch (error: any) {
       console.error('Failed to run schedule:', error);
       toast.error(`Failed to start execution: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setRunningScheduleId(null);
     }
   };
 
   const editSchedule = async (schedule: Schedule) => {
     try {
-      const timezone = (schedule as any).timezone || 'Asia/Kolkata';
+      const timezone = (schedule as any).timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
       // Convert UTC time back to local time for display using DST-aware conversion
       const localTime = schedule.next_run_at
@@ -797,7 +802,7 @@ export default function MultiAccountScheduler({
                           {schedule.prompt_selection_type} prompts •{' '}
                           {schedule.recurrence_type}
                           {schedule.next_run_at && (
-                            <span> • Next run: {formatInTimezone(schedule.next_run_at, (schedule as any).timezone || 'Asia/Kolkata')}</span>
+                            <span> • Next run: {formatInTimezone(schedule.next_run_at, (schedule as any).timezone || Intl.DateTimeFormat().resolvedOptions().timeZone)}</span>
                           )}
                         </div>
                       </div>

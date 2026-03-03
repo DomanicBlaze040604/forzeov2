@@ -9,9 +9,10 @@ const corsHeaders = {
 // Performance constants
 const AVERAGE_SECONDS_PER_PROMPT = 37
 const EDGE_FUNCTION_TIMEOUT = 150 // seconds
-const SAFE_EXECUTION_WINDOW = 120 // seconds (buffer for safety)
+const SAFE_EXECUTION_WINDOW = 110 // seconds (extra buffer for cleanup/logging)
 const CHUNK_SIZE_PROMPTS = 3 // Max prompts to process in one invocation
 const PER_PROMPT_TIMEOUT = 60_000 // 60 seconds max per geo-audit call
+const PER_PROMPT_WARN_MS = 45_000 // warn if a single prompt takes > 45s
 
 // ============================================================================
 // TYPES
@@ -27,6 +28,7 @@ interface Schedule {
   models: string[]
   concurrency_limit: number
   conditional_rules?: any
+  max_cost_per_run?: number // Budget cap in USD — stops execution if exceeded
 }
 
 interface Client {
@@ -138,7 +140,7 @@ serve(async (req) => {
   } catch (error) {
     console.error("[Multi-Account Runner] Error:", error)
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     )
   }
@@ -173,6 +175,10 @@ async function runMultiAccountSchedule(
         console.log(`[Multi-Account Runner] Schedule ${schedule.id} already has a running execution (${existingRun.id}), skipping duplicate`)
         return existingRun.id
       }
+      // Mark stale run (>2h) as error so it doesn't block future runs
+      await supabase.from('schedule_runs')
+        .update({ status: 'error', completed_at: new Date().toISOString(), metadata: { error: 'Timed out after 2 hours' } })
+        .eq('id', existingRun.id)
     }
   }
 
@@ -297,7 +303,7 @@ async function runMultiAccountSchedule(
       .update({
         status: 'failed',
         completed_at: new Date().toISOString(),
-        metadata: { error: error.message, execution_mode: 'failed' }
+        metadata: { error: error instanceof Error ? error.message : String(error), execution_mode: 'failed' }
       })
       .eq('id', run.id)
 
@@ -659,11 +665,21 @@ async function runClientPrompts(
 
   // Sequential execution within each brand (with retry logic)
   for (const prompt of prompts) {
+    // Budget check: stop if max_cost_per_run exceeded
+    if (schedule.max_cost_per_run && schedule.max_cost_per_run > 0) {
+      const accumulatedCost = Object.values(executionProgress).reduce((sum: number, p: any) => sum + (p.total_cost || 0), 0)
+      if (accumulatedCost >= schedule.max_cost_per_run) {
+        console.warn(`[Multi-Account Runner] Budget exceeded: $${accumulatedCost.toFixed(4)} >= $${schedule.max_cost_per_run} — stopping execution`)
+        executionProgress[client.id].status = 'budget_exceeded'
+        return
+      }
+    }
     const MAX_RETRIES = 2
     let success = false
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
+        const promptStartTime = Date.now()
         console.log(`[Multi-Account Runner] Running prompt: ${prompt.prompt_text.substring(0, 50)}... (attempt ${attempt + 1})`)
 
         // Call geo-audit edge function with timeout protection
@@ -691,6 +707,10 @@ async function runClientPrompts(
         const { data, error } = await Promise.race([geoAuditPromise, timeoutPromise])
 
         if (!error && data?.success) {
+          const promptDurationMs = Date.now() - promptStartTime
+          if (promptDurationMs > PER_PROMPT_WARN_MS) {
+            console.warn(`[Multi-Account Runner] Slow prompt (${(promptDurationMs / 1000).toFixed(1)}s): ${prompt.prompt_text.substring(0, 60)}`)
+          }
           executionProgress[client.id].completed_prompts++
           // Track cost from geo-audit response
           const promptCost = data?.data?.summary?.total_cost || 0

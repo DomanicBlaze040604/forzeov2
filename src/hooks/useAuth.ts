@@ -57,7 +57,7 @@ export function useAuth(): UseAuthReturn {
                 console.error('Error fetching user profile:', profileError);
                 setUser(authUser as AuthUser);
                 setRole('user');
-                setIsActive(true);
+                setIsActive(false); // Deny access until profile is verified — don't grant on failure
             } else {
                 setUser({ ...authUser, role: profile?.role as UserRole, isActive: profile?.is_active } as AuthUser);
                 setRole(profile?.role || 'user');
@@ -112,7 +112,7 @@ export function useAuth(): UseAuthReturn {
         });
 
         return () => {
-            subscription.unsubscribe();
+            subscription?.unsubscribe();
         };
     }, [fetchUserData]);
 

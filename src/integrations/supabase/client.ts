@@ -9,7 +9,7 @@ import { createClient } from '@supabase/supabase-js';
 
 // Get environment variables
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://bvmwnxargzlfheiwyget.supabase.co";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ2bXdueGFyZ3psZmhlaXd5Z2V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgwMjY1MjgsImV4cCI6MjA4MzYwMjUyOH0.wicc8Do5vcnwxW57kNHYWJd6qF5rJbjLRHODTtT2ybI";
 
 // Validate configuration
 if (!SUPABASE_URL) {

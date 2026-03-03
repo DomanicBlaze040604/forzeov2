@@ -168,9 +168,10 @@ export function cleanAndAnalyzeResponse(
     const matches = lowerText.match(new RegExp(termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "g"));
     if (matches) brandMentions += matches.length;
   }
-  // Normalized token fallback
+  // Normalized token fallback — strip ALL non-alphanumeric (including spaces)
+  // so multi-word brands like "Tata Tele Services" → "tatateleservices" match
   if (brandMentions === 0 && brandToken.length >= 3) {
-    const cleanText = lowerText.replace(/[^a-z0-9\s]/g, '');
+    const cleanText = lowerText.replace(/[^a-z0-9]/g, '');
     const tokenMatches = cleanText.match(new RegExp(brandToken, "g"));
     if (tokenMatches) brandMentions = tokenMatches.length;
   }
@@ -187,9 +188,9 @@ export function cleanAndAnalyzeResponse(
     // Exact match
     const exactMatches = lowerText.match(new RegExp(lowerComp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "g"));
     if (exactMatches) count = exactMatches.length;
-    // Normalized fallback
+    // Normalized fallback — strip spaces too for multi-word competitor names
     if (count === 0 && compToken.length >= 3) {
-      const cleanText = lowerText.replace(/[^a-z0-9\s]/g, '');
+      const cleanText = lowerText.replace(/[^a-z0-9]/g, '');
       const tokenMatches = cleanText.match(new RegExp(compToken, "g"));
       if (tokenMatches) count = tokenMatches.length;
     }
@@ -206,7 +207,8 @@ export function cleanAndAnalyzeResponse(
     // Check for list item start (e.g. "1.", "1)", "10.")
     const listMatch = trimmed.match(/^(\d+)[\.\)]\s*/);
     if (listMatch) {
-      currentRank = parseInt(listMatch[1], 10);
+      const parsed = parseInt(listMatch[1], 10);
+      if (!isNaN(parsed)) currentRank = parsed;
     }
     // Reset rank on headers (e.g. "### Summary") to avoid bleeding ranks into conclusions
     else if (trimmed.startsWith('#')) {
@@ -215,7 +217,7 @@ export function cleanAndAnalyzeResponse(
 
     if (currentRank !== null) {
       const lowerLine = line.toLowerCase();
-      const lowerLineClean = lowerLine.replace(/[^a-z0-9\s]/g, '');
+      const lowerLineClean = lowerLine.replace(/[^a-z0-9]/g, '');
 
       // Check Brand Rank (exact + normalized + brand_tags)
       if (brandRank === null) {
@@ -244,6 +246,21 @@ export function cleanAndAnalyzeResponse(
       });
     }
   });
+
+  // Fallback: if no numbered-list rank found but brand IS mentioned,
+  // derive rank from mention order (how many competitors appear before the brand)
+  if (brandRank === null && brandMentions > 0) {
+    const lowerCleaned = cleaned.toLowerCase();
+    const brandIdx = lowerCleaned.indexOf(brandName.toLowerCase());
+    if (brandIdx !== -1) {
+      let order = 1;
+      competitors.forEach(comp => {
+        const compIdx = lowerCleaned.indexOf(comp.toLowerCase());
+        if (compIdx !== -1 && compIdx < brandIdx) order++;
+      });
+      brandRank = order;
+    }
+  }
 
   return { cleanedResponse: cleaned, brandMentions, brandRank, competitorStats };
 }
@@ -535,13 +552,36 @@ function saveToStorage(key: string, value: unknown): void {
         localStorage.setItem(key, JSON.stringify(value));
         console.log('[Storage] Pruned old data and saved successfully.');
       } catch (retryErr) {
-        // If still failing, clear the results cache entirely
-        console.warn('[Storage] Still exceeding quota after pruning. Clearing results cache.');
+        // If still failing, try removing oldest client's data instead of clearing everything
+        console.warn('[Storage] Still exceeding quota after pruning. Removing oldest client data...');
         try {
-          localStorage.removeItem(STORAGE_KEYS.RESULTS);
+          const resultsKey = STORAGE_KEYS.RESULTS;
+          const stored = localStorage.getItem(resultsKey);
+          if (stored) {
+            const allResults: Record<string, any[]> = JSON.parse(stored);
+            const clientIds = Object.keys(allResults);
+            if (clientIds.length > 1) {
+              // Remove the client with the oldest data first
+              let oldestClient = clientIds[0];
+              let oldestTime = Infinity;
+              for (const cid of clientIds) {
+                const results = allResults[cid] || [];
+                const earliest = results.reduce((min: number, r: any) => {
+                  const t = new Date(r.created_at || 0).getTime();
+                  return t < min ? t : min;
+                }, Infinity);
+                if (earliest < oldestTime) { oldestTime = earliest; oldestClient = cid; }
+              }
+              delete allResults[oldestClient];
+              localStorage.setItem(resultsKey, JSON.stringify(allResults));
+              console.log(`[Storage] Removed oldest client ${oldestClient} data.`);
+            } else {
+              localStorage.removeItem(resultsKey);
+            }
+          }
           localStorage.setItem(key, JSON.stringify(value));
         } catch {
-          console.error('[Storage] Cannot save even after clearing results cache:', retryErr);
+          console.error('[Storage] Cannot save even after eviction:', retryErr);
         }
       }
     } else {
@@ -629,6 +669,7 @@ export function useClientDashboard() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [auditResults, setAuditResults] = useState<AuditResult[]>([]);
+  const auditResultsRef = useRef<AuditResult[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [selectedModels, setSelectedModelsState] = useState<string[]>(
     loadFromStorage(STORAGE_KEYS.SELECTED_MODELS, ["chatgpt", "google_ai_overview", "google_serp"])
@@ -666,6 +707,11 @@ export function useClientDashboard() {
     timestamp: number;
   }>>(new Map());
   const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+  // BUG-003 fix: Invalidate cache for a specific client so stale data isn't served after mutations
+  const invalidateClientCache = useCallback((clientId: string) => {
+    dataCache.current.delete(clientId);
+  }, []);
 
   // Ref to fetchSearchVolumes so audit functions can call it without circular deps
   const fetchSearchVolumesRef = useRef<(() => Promise<void>) | null>(null);
@@ -923,6 +969,12 @@ export function useClientDashboard() {
         const statusPriority: Record<string, number> = {
           verified: 5, partially_verified: 4, hallucinated: 3, error: 2, pending: 1
         };
+        // BUG-005 fix: Sort by priority descending so highest-priority row per domain is processed first
+        data.sort((a: any, b: any) => {
+          const aPri = statusPriority[a.verification_status || ''] || 0;
+          const bPri = statusPriority[b.verification_status || ''] || 0;
+          return bPri - aPri;
+        });
         data.forEach((row: any) => {
           const domain = (row.domain || '').replace(/^www\./, '');
           if (!domain) return;
@@ -1119,8 +1171,9 @@ export function useClientDashboard() {
     const newClients = [...clients, newClient];
     setClients(newClients);
     saveToStorage(STORAGE_KEYS.CLIENTS, newClients);
+    invalidateClientCache(newClient.id);
     return newClient;
-  }, [clients]);
+  }, [clients, invalidateClientCache]);
 
   const updateClient = useCallback(async (clientId: string, updates: Partial<Client>): Promise<Client | null> => {
     const clientIndex = clients.findIndex(c => c.id === clientId);
@@ -1144,9 +1197,10 @@ export function useClientDashboard() {
     newClients[clientIndex] = updatedClient;
     setClients(newClients);
     saveToStorage(STORAGE_KEYS.CLIENTS, newClients);
+    invalidateClientCache(clientId);
     if (selectedClient?.id === clientId) setSelectedClient(updatedClient);
     return updatedClient;
-  }, [clients, selectedClient]);
+  }, [clients, selectedClient, invalidateClientCache]);
 
   const deleteClient = useCallback(async (clientId: string): Promise<boolean> => {
     try {
@@ -1163,11 +1217,12 @@ export function useClientDashboard() {
     const newClients = clients.filter(c => c.id !== clientId);
     setClients(newClients);
     saveToStorage(STORAGE_KEYS.CLIENTS, newClients);
+    invalidateClientCache(clientId);
     if (selectedClient?.id === clientId) {
       setSelectedClient(newClients.length > 0 ? newClients[0] : null);
     }
     return true;
-  }, [clients, selectedClient]);
+  }, [clients, selectedClient, invalidateClientCache]);
 
   const switchClient = useCallback(async (client: Client) => {
     setSelectedClient(client);
@@ -1186,7 +1241,8 @@ export function useClientDashboard() {
     const newClients = clients.map(c => c.id === selectedClient.id ? updated : c);
     setClients(newClients);
     saveToStorage(STORAGE_KEYS.CLIENTS, newClients);
-  }, [selectedClient, clients]);
+    invalidateClientCache(selectedClient.id);
+  }, [selectedClient, clients, invalidateClientCache]);
 
   const updateCompetitors = useCallback(async (competitors: string[]) => {
     if (!selectedClient) return;
@@ -1198,7 +1254,8 @@ export function useClientDashboard() {
     const newClients = clients.map(c => c.id === selectedClient.id ? updated : c);
     setClients(newClients);
     saveToStorage(STORAGE_KEYS.CLIENTS, newClients);
-  }, [selectedClient, clients]);
+    invalidateClientCache(selectedClient.id);
+  }, [selectedClient, clients, invalidateClientCache]);
 
   // ============================================
   // PROMPT MANAGEMENT - Supabase Primary
@@ -1565,17 +1622,19 @@ export function useClientDashboard() {
 
       if (updateError) throw updateError;
 
-      // Update local state
-      const updatedPrompts = prompts.map(p => p.id === promptId ? { ...p, ...updateData } : p);
-      setPrompts(updatedPrompts);
-      const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
-      storedPrompts[selectedClient.id] = updatedPrompts;
-      saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+      // Use functional state update to avoid stale closure issues with concurrent calls
+      setPrompts(prev => {
+        const updatedPrompts = prev.map(p => p.id === promptId ? { ...p, ...updateData } : p);
+        const storedPrompts = loadFromStorage<Record<string, Prompt[]>>(STORAGE_KEYS.PROMPTS, {});
+        storedPrompts[selectedClient.id] = updatedPrompts;
+        saveToStorage(STORAGE_KEYS.PROMPTS, storedPrompts);
+        return updatedPrompts;
+      });
     } catch (err) {
       console.error("Supabase update prompt failed:", err);
       throw err;
     }
-  }, [selectedClient, prompts]);
+  }, [selectedClient]);
 
   const reactivatePrompt = useCallback(async (promptId: string) => {
     if (!selectedClient) return;
@@ -1676,6 +1735,13 @@ export function useClientDashboard() {
   // Keep a stable reference alias for places that need a useCallback-style ref
   const updateSummary = useCallback((results: AuditResult[]) => updateSummaryDirect(results), []);
 
+  // BUG-001 fix: Auto-update summary whenever auditResults changes — replaces unsafe setTimeout calls inside state updaters
+  // PERF-002: Keep ref in sync for collision detection without triggering re-renders
+  useEffect(() => {
+    auditResultsRef.current = auditResults;
+    updateSummaryDirect(auditResults);
+  }, [auditResults]);
+
   const runFullAudit = useCallback(async (promptsOverride?: Prompt[]) => {
     const promptsToRun = promptsOverride || prompts;
     if (!selectedClient || promptsToRun.length === 0) return;
@@ -1770,7 +1836,7 @@ export function useClientDashboard() {
             model_results: processedModelResults,
             summary: {
               share_of_voice: Math.round(summaries.sov),
-              average_rank: summaries.rankCount > 0 ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
+              average_rank: summaries.rankCount > 0 && isFinite(summaries.rankSum / summaries.rankCount) ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
               total_citations: summaries.citations,
               total_cost: summaries.cost
             },
@@ -1779,18 +1845,8 @@ export function useClientDashboard() {
 
           // Functional update to avoid race conditions
           setAuditResults(prev => {
-            // Check if result already exists (prevent dupes even if race)
             if (prev.find(r => r.prompt_id === prompt.id)) return prev;
-            const next = [...prev, result];
-            // Side-effect: update summary
-            // Note: calling updateSummary inside setState callback is bad practice, but we need updated list.
-            // We'll call updateSummary with the NEW list outside? 
-            // setAuditResults doesn't return the new value.
-            // We can re-calculate summary from 'next' here? 
-            // Better: use a separate useEffect for summary? 
-            // Or just update summary using 'next'.
-            setTimeout(() => updateSummaryDirect(next), 0);
-            return next;
+            return [...prev, result];
           });
 
           // Persistence handled by useEffect
@@ -1841,7 +1897,7 @@ export function useClientDashboard() {
 
     // Auto-categorize any new citation domains (fire-and-forget)
     autoCategorizeRef.current?.().catch(err => console.warn("[AutoCategorize] Post-audit failed:", err));
-  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
+  }, [selectedClient, prompts, selectedModels, updateSummary, includeTavily]);
 
   const runSinglePrompt = useCallback(async (promptOrId: string | Prompt) => {
     if (!selectedClient) return;
@@ -1928,7 +1984,7 @@ export function useClientDashboard() {
           model_results: processedModelResults,
           summary: {
             share_of_voice: Math.round(summaries.sov),
-            average_rank: summaries.rankCount > 0 ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
+            average_rank: summaries.rankCount > 0 && isFinite(summaries.rankSum / summaries.rankCount) ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
             total_citations: summaries.citations,
             total_cost: summaries.cost
           },
@@ -1937,15 +1993,12 @@ export function useClientDashboard() {
 
         setAuditResults(prev => {
           const index = prev.findIndex(r => r.prompt_id === prompt!.id);
-          let nextResults;
           if (index >= 0) {
-            nextResults = [...prev];
+            const nextResults = [...prev];
             nextResults[index] = result;
-          } else {
-            nextResults = [...prev, result];
+            return nextResults;
           }
-          setTimeout(() => updateSummaryDirect(nextResults), 0);
-          return nextResults;
+          return [...prev, result];
         });
 
         // Persistence handled by useEffect
@@ -1989,7 +2042,7 @@ export function useClientDashboard() {
 
     // Auto-categorize any new citation domains (fire-and-forget)
     autoCategorizeRef.current?.().catch(err => console.warn("[AutoCategorize] Post-single-audit failed:", err));
-  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
+  }, [selectedClient, prompts, selectedModels, updateSummary, includeTavily]);
 
   /**
    * Run multi-account schedule execution
@@ -2047,10 +2100,8 @@ export function useClientDashboard() {
       return;
     }
 
-    // 2. Run Prompts
-    // We don't necessarily need to update local auditResults immediately if the Campaign View fetches its own data.
-    // But updating it keeps the "Analytics" tab fresh too.
-    const newResults: AuditResult[] = [...auditResults];
+    // 2. Run Prompts — BUG-002 fix: accumulate results locally, set state once at end
+    const campaignResults: AuditResult[] = [];
 
     for (const promptId of promptIds) {
       const prompt = prompts.find(p => p.id === promptId);
@@ -2077,7 +2128,6 @@ export function useClientDashboard() {
         });
 
         if (!fnError && data?.success) {
-          // Process model results with cleanAndAnalyzeResponse for consistent brand detection
           const processedModelResults = data.data.model_results.map((mr: any) => {
             const analysis = cleanAndAnalyzeResponse(
               mr.raw_response || "",
@@ -2095,7 +2145,6 @@ export function useClientDashboard() {
             };
           });
 
-          // Recalculate summary based on processed results
           let summaries = { sov: 0, rankSum: 0, rankCount: 0, citations: 0, cost: 0 };
           processedModelResults.forEach((mr: any) => {
             if (mr.brand_mentioned) summaries.sov += (100 / processedModelResults.length);
@@ -2109,17 +2158,14 @@ export function useClientDashboard() {
             model_results: processedModelResults,
             summary: {
               share_of_voice: Math.round(summaries.sov),
-              average_rank: summaries.rankCount > 0 ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
+              average_rank: summaries.rankCount > 0 && isFinite(summaries.rankSum / summaries.rankCount) ? parseFloat((summaries.rankSum / summaries.rankCount).toFixed(1)) : null,
               total_citations: summaries.citations,
               total_cost: summaries.cost
             },
             created_at: data.data.timestamp,
           };
-          newResults.push(result);
-          // Update local state incremental
-          setAuditResults([...newResults]);
+          campaignResults.push(result);
 
-          // Run Tavily search if enabled
           if (includeTavily) {
             try {
               console.log("[Tavily] Running source analysis for campaign prompt:", prompt.prompt_text.substring(0, 50));
@@ -2154,22 +2200,20 @@ export function useClientDashboard() {
       } catch (err) {
         console.error("Campaign run error:", err);
       } finally {
-        // Ensure cleanup happens
         const pid = promptId;
         setLoadingPromptIds(prev => { const n = new Set(prev); n.delete(pid); return n; });
       }
     }
 
-
-    // Final state update
-    setAuditResults(newResults);
-    const storedResults = loadFromStorage<Record<string, AuditResult[]>>(STORAGE_KEYS.RESULTS, {});
-    storedResults[selectedClient.id] = newResults;
-    saveToStorage(STORAGE_KEYS.RESULTS, storedResults);
-    updateSummary(newResults);
+    // Single state update with dedup — summary auto-updates via useEffect (BUG-001 fix)
+    setAuditResults(prev => {
+      const existingIds = new Set(prev.map(r => r.prompt_id));
+      const deduped = campaignResults.filter(r => !existingIds.has(r.prompt_id));
+      return [...prev, ...deduped];
+    });
 
     setLoading(false);
-  }, [selectedClient, prompts, selectedModels, auditResults, updateSummary, includeTavily]);
+  }, [selectedClient, prompts, selectedModels, updateSummary, includeTavily]);
 
   // ============================================
   // EXPORT/IMPORT FUNCTIONS
@@ -2177,12 +2221,22 @@ export function useClientDashboard() {
 
   const exportToCSV = useCallback(() => {
     if (!selectedClient || auditResults.length === 0) return;
-    const rows = [["Prompt", "Category", "Niche Level", "SOV", "Rank", "Citations"]];
+    const rows = [["Prompt", "Category", "Niche Level", "SOV", "Position", "Citations", "Competitors Found"]];
     for (const r of auditResults) {
       const prompt = prompts.find(p => p.id === r.prompt_id);
+      // Collect competitors mentioned in this audit
+      const competitorsFound = new Set<string>();
+      if (selectedClient?.competitors) {
+        r.model_results.forEach(mr => {
+          const response = mr.raw_response?.toLowerCase() || '';
+          selectedClient.competitors.forEach(comp => {
+            if (response.includes(comp.toLowerCase())) competitorsFound.add(comp);
+          });
+        });
+      }
       rows.push([r.prompt_text, prompt?.category || "custom", prompt?.niche_level || "broad",
       `${r.summary.share_of_voice}%`, r.summary.average_rank?.toString() || "-",
-      r.summary.total_citations.toString()]);
+      r.summary.total_citations.toString(), Array.from(competitorsFound).join('; ')]);
     }
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -2217,29 +2271,38 @@ export function useClientDashboard() {
     const ins = getInsights();
     const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    let report = `FORZEO GEO VISIBILITY REPORT\n${"=".repeat(60)}\n\n`;
-    report += `Client: ${selectedClient.name}\nBrand: ${selectedClient.brand_name}\n`;
-    report += `Website: ${selectedClient.brand_domain || 'Not specified'}\n`;
-    report += `Industry: ${selectedClient.industry}\nRegion: ${selectedClient.target_region}\nDate: ${date}\n\n`;
-    report += `SUMMARY\n${"-".repeat(40)}\nShare of Voice: ${summary?.overall_sov || 0}%\n`;
-    report += `Average Rank: ${summary?.average_rank ? `#${summary.average_rank}` : 'N/A'}\n`;
-    report += `Total Citations: ${summary?.total_citations || 0}\n\n`;
-    report += `Status: ${ins.statusText}\n\nRecommendations:\n${ins.recommendations.map(r => `  • ${r}`).join('\n')}\n\n`;
-    report += `VISIBILITY BY MODEL\n${"-".repeat(40)}\n`;
+    let report = `# Forzeo GEO Visibility Report\n\n`;
+    report += `| Field | Value |\n|---|---|\n`;
+    report += `| **Client** | ${selectedClient.name} |\n`;
+    report += `| **Brand** | ${selectedClient.brand_name} |\n`;
+    report += `| **Website** | ${selectedClient.brand_domain || 'Not specified'} |\n`;
+    report += `| **Industry** | ${selectedClient.industry} |\n`;
+    report += `| **Region** | ${selectedClient.target_region} |\n`;
+    report += `| **Date** | ${date} |\n\n`;
+    report += `## Summary\n\n`;
+    report += `- **Share of Voice:** ${summary?.overall_sov || 0}%\n`;
+    report += `- **Average Position:** ${summary?.average_rank ? `#${summary.average_rank}` : 'N/A'}\n`;
+    report += `- **Total Citations:** ${summary?.total_citations || 0}\n`;
+    report += `- **Status:** ${ins.statusText}\n\n`;
+    report += `### Recommendations\n\n${ins.recommendations.map(r => `- ${r}`).join('\n')}\n\n`;
+    report += `## Visibility by Model\n\n`;
+    report += `| Model | Visible | Total | Rate |\n|---|---|---|---|\n`;
     AI_MODELS.forEach(model => {
       const s = stats[model.id] || { visible: 0, total: 0, cost: 0 };
       const pct = s.total > 0 ? Math.round((s.visible / s.total) * 100) : 0;
-      report += `${model.name.padEnd(20)} ${s.visible}/${s.total} (${pct}%)\n`;
+      report += `| ${model.name} | ${s.visible} | ${s.total} | ${pct}% |\n`;
     });
-    report += `\nCOMPETITOR ANALYSIS\n${"-".repeat(40)}\n`;
-    gap.forEach((c, idx) => { report += `${idx + 1}. ${c.name.padEnd(25)} ${c.percentage}% (${c.mentions})\n`; });
-    report += `\nTOP SOURCES\n${"-".repeat(40)}\n`;
-    sources.forEach((s, idx) => { report += `${idx + 1}. ${s.domain.padEnd(40)} ${s.count}\n`; });
+    report += `\n## Competitor Analysis\n\n`;
+    report += `| # | Competitor | SOV | Mentions |\n|---|---|---|---|\n`;
+    gap.forEach((c, idx) => { report += `| ${idx + 1} | ${c.name} | ${c.percentage}% | ${c.mentions} |\n`; });
+    report += `\n## Top Sources\n\n`;
+    report += `| # | Domain | Citations |\n|---|---|---|\n`;
+    sources.forEach((s, idx) => { report += `| ${idx + 1} | ${s.domain} | ${s.count} |\n`; });
 
     // Add Tavily Results section
     const tavilyEntries = Object.entries(tavilyResults).filter(([_, data]) => data);
     if (tavilyEntries.length > 0) {
-      report += `\n${"=".repeat(60)}\nTAVILY AI SOURCE ANALYSIS\n${"=".repeat(60)}\n\n`;
+      report += `\n---\n\n## Tavily AI Source Analysis\n\n`;
 
       tavilyEntries.forEach(([promptText, data]: [string, any]) => {
         report += `QUERY: "${promptText}"\n${"-".repeat(40)}\n`;
@@ -2289,7 +2352,7 @@ export function useClientDashboard() {
 
     // Add AI Visibility Insights section
     if (auditResults.length > 0) {
-      report += `\n${"=".repeat(60)}\nAI VISIBILITY INSIGHTS & RECOMMENDATIONS\n${"=".repeat(60)}\n\n`;
+      report += `\n---\n\n## AI Visibility Insights & Recommendations\n\n`;
 
       // Overall Summary
       const overallSov = auditResults.length > 0
@@ -2303,7 +2366,7 @@ export function useClientDashboard() {
       }).length;
       const lowPriorityCount = auditResults.filter(r => (r.summary?.share_of_voice || 0) >= 60).length;
 
-      report += `OVERALL VISIBILITY SUMMARY\n${"-".repeat(40)}\n`;
+      report += `### Overall Visibility Summary\n\n`;
       report += `Average Visibility: ${overallSov}%\n`;
       report += `Overall Priority: ${overallPriority}\n`;
       report += `Prompts by Priority:\n`;
@@ -2319,12 +2382,18 @@ export function useClientDashboard() {
 
       // Find top competitors mentioned across all audits
       const allCompMentions: Record<string, number> = {};
+      // Pre-compile regex patterns once outside the loop
+      const compRegexes = selectedClient.competitors.map(comp => ({
+        name: comp,
+        regex: new RegExp(comp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+      }));
       auditResults.forEach(result => {
         result.model_results.forEach(mr => {
-          const response = mr.raw_response?.toLowerCase() || '';
-          selectedClient.competitors.forEach(comp => {
-            const matches = response.match(new RegExp(comp.toLowerCase(), 'gi'));
-            if (matches) allCompMentions[comp] = (allCompMentions[comp] || 0) + matches.length;
+          const response = mr.raw_response || '';
+          compRegexes.forEach(({ name, regex }) => {
+            regex.lastIndex = 0; // Reset lastIndex before each match
+            const matches = response.match(regex);
+            if (matches) allCompMentions[name] = (allCompMentions[name] || 0) + matches.length;
           });
         });
       });
@@ -2431,11 +2500,11 @@ export function useClientDashboard() {
       });
     }
 
-    const blob = new Blob([report], { type: "text/plain" });
+    const blob = new Blob([report], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${selectedClient.slug}-report-${new Date().toISOString().split("T")[0]}.txt`;
+    a.download = `${selectedClient.slug}-report-${new Date().toISOString().split("T")[0]}.md`;
     a.click();
     URL.revokeObjectURL(url);
   }, [selectedClient, summary, auditResults, tavilyResults, getModelStats, getCompetitorGap, getTopSources, getInsights]);
@@ -2556,16 +2625,64 @@ Instructions:
 
   const generateContent = useCallback(async (topic: string, contentType: string, tone?: string, audience?: string, keywords?: string): Promise<string | null> => {
     if (!selectedClient) return null;
-    let prompt = `Write a ${contentType} about: ${topic}\n\nBrand: ${selectedClient.brand_name}\nIndustry: ${selectedClient.industry}\nCompetitors: ${selectedClient.competitors.join(", ")}\nRegion: ${selectedClient.target_region}`;
 
-    if (audience?.trim()) prompt += `\nTarget Audience: ${audience.trim()}`;
-    if (keywords?.trim()) prompt += `\nKey Selling Points / Keywords: ${keywords.trim()}`;
+    const contentTypeLabels: Record<string, string> = {
+      article: "in-depth article (1500-2000 words)",
+      listicle: "listicle / top-10 style article (1200-1800 words)",
+      comparison: "comprehensive comparison guide (1500-2000 words)",
+      guide: "how-to guide with step-by-step instructions (1500-2000 words)",
+      faq: "FAQ section with 8-12 detailed Q&A pairs",
+      press_release: "professional press release (600-800 words)",
+      product_description: "compelling product description (400-600 words)",
+    };
+
+    const typeLabel = contentTypeLabels[contentType] || contentType;
+
+    let prompt = `Write a ${typeLabel} about: ${topic}
+
+BRAND CONTEXT:
+- Brand: ${selectedClient.brand_name}
+- Industry: ${selectedClient.industry}
+- Region: ${selectedClient.target_region}
+- Competitors: ${selectedClient.competitors.join(", ")}`;
+
+    if (audience?.trim()) prompt += `\n- Target Audience: ${audience.trim()}`;
+    if (keywords?.trim()) prompt += `\n- Key Selling Points / Keywords: ${keywords.trim()}`;
 
     if (tone?.trim()) {
       prompt += `\n\nTONE OF VOICE / STYLE REFERENCE:\n"${tone.trim()}"\n\nINSTRUCTION: Analyze the style, vocabulary, and sentence structure of the reference text above. Generate the desired content strictly mimicking this tone and style.`;
     }
 
-    prompt += `\n\nMake it SEO-optimized. Format in Markdown.`;
+    prompt += `
+
+CONTENT QUALITY REQUIREMENTS:
+1. FORMAT: Use proper Markdown with clear hierarchy:
+   - # for the main title
+   - ## for major sections
+   - ### for subsections
+   - Use **bold** for key terms and brand names
+   - Use bullet points and numbered lists for scannable content
+   - Include a brief introduction and conclusion
+2. WRITING STYLE:
+   - Write in a natural, humanized tone with personality — avoid corporate jargon
+   - Use specific data points, examples, and micro-storytelling where relevant
+   - Vary sentence length: mix punchy short sentences with detailed longer ones
+   - Address the reader directly ("you") for engagement
+3. SEO OPTIMIZATION:
+   - Naturally weave the topic keywords throughout (no keyword stuffing)
+   - Use semantic variations of key terms
+   - Write compelling section headers that include relevant keywords
+4. BRAND INTEGRATION:
+   - Mention ${selectedClient.brand_name} naturally 3-5 times (not forced)
+   - Position the brand as a thought leader, not as a hard sell
+   - Reference competitors briefly for comparison context where appropriate
+5. E-E-A-T SIGNALS:
+   - Demonstrate Experience: Include practical tips and real-world scenarios
+   - Show Expertise: Use industry-specific terminology correctly
+   - Build Authority: Reference industry trends and best practices
+   - Establish Trust: Be transparent, cite reasoning, avoid hype`;
+
+    const systemPrompt = `You are an elite content strategist and writer specializing in ${selectedClient.industry}. You create content that ranks highly in both traditional search and AI-powered search engines. Your writing is engaging, authoritative, and optimized for E-E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness). You always output well-structured Markdown with proper headings, lists, and formatting.`;
 
     try {
       const { data, error } = await supabase.functions.invoke("generate-content", {
@@ -2578,7 +2695,7 @@ Instructions:
       const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
         body: {
           model: "llama-3.1-8b-instant",
-          messages: [{ role: "system", content: "You are an expert content writer." }, { role: "user", content: prompt }],
+          messages: [{ role: "system", content: systemPrompt }, { role: "user", content: prompt }],
           temperature: 0.7,
           max_tokens: 4096,
         },
@@ -3812,8 +3929,8 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
   // AI OPPORTUNITY SCORING
   // ============================================
 
-  const getAIOpportunity = useCallback((promptId: string): { score: number; tier: string; color: string } => {
-    const DEFAULT = { score: 0, tier: 'Minimal', color: '#9ca3af' };
+  const getAIOpportunity = useCallback((promptId: string): { score: number; tier: string; color: string; demandDataAvailable: boolean } => {
+    const DEFAULT = { score: 0, tier: 'Minimal', color: '#9ca3af', demandDataAvailable: false };
     const prompt = prompts.find(p => p.id === promptId);
     if (!prompt) return DEFAULT;
 
@@ -3824,7 +3941,8 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
       .sort((a, b) => a - b);
 
     let demandScore = 20; // default if no search volume data
-    if (prompt.estimated_search_volume != null && allVolumes.length > 0) {
+    const demandDataAvailable = prompt.estimated_search_volume != null && allVolumes.length > 0;
+    if (demandDataAvailable) {
       const rank = allVolumes.filter(v => v <= prompt.estimated_search_volume!).length;
       const percentile = (rank / allVolumes.length) * 100;
       if (percentile >= 90) demandScore = 92;
@@ -3882,7 +4000,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
     else if (finalScore >= 20) { tier = 'Low'; color = '#f97316'; }
     else { tier = 'Minimal'; color = '#9ca3af'; }
 
-    return { score: finalScore, tier, color };
+    return { score: finalScore, tier, color, demandDataAvailable };
   }, [prompts, auditResults]);
 
   // ============================================

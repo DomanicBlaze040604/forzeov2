@@ -830,11 +830,12 @@ export function VisibilityGraphs({ clientId, brandName }: VisibilityGraphsProps)
                                                 </span>
                                                 <div className="flex items-center gap-2">
                                                     {mr.brand_mentioned ? (
-                                                        <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-none">Visible</Badge>
+                                                        <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-none">
+                                                            Visible{mr.brand_rank ? ` #${mr.brand_rank}` : ''}
+                                                        </Badge>
                                                     ) : (
                                                         <Badge variant="outline" className="text-gray-500">Not Visible</Badge>
                                                     )}
-                                                    {mr.brand_rank && <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-200 border-none">#{mr.brand_rank}</Badge>}
                                                 </div>
                                             </div>
                                             <div className="p-4 bg-white">

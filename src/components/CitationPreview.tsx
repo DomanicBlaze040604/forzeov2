@@ -164,6 +164,7 @@ export function CitationPreview({ domain, url }: CitationPreviewProps) {
                 return {
                     icon: <ShieldCheck className="h-4 w-4" />,
                     label: 'Verified Citation',
+                    tooltip: 'Similarity score >= 70%. The cited page content strongly matches the AI response claim.',
                     bg: 'bg-emerald-500',
                     bgLight: 'bg-emerald-50',
                     border: 'border-emerald-200',
@@ -175,6 +176,7 @@ export function CitationPreview({ domain, url }: CitationPreviewProps) {
                 return {
                     icon: <ShieldAlert className="h-4 w-4" />,
                     label: 'Partially Verified',
+                    tooltip: 'Similarity score 40-69%. The cited page has some relevant content but doesn\'t fully support the claim.',
                     bg: 'bg-amber-500',
                     bgLight: 'bg-amber-50',
                     border: 'border-amber-200',
@@ -186,6 +188,7 @@ export function CitationPreview({ domain, url }: CitationPreviewProps) {
                 return {
                     icon: <ShieldX className="h-4 w-4" />,
                     label: 'Hallucinated',
+                    tooltip: 'Similarity score < 40%. The cited page content does not support the AI response claim — likely a hallucinated citation.',
                     bg: 'bg-red-500',
                     bgLight: 'bg-red-50',
                     border: 'border-red-200',
@@ -197,6 +200,7 @@ export function CitationPreview({ domain, url }: CitationPreviewProps) {
                 return {
                     icon: <AlertTriangle className="h-4 w-4" />,
                     label: 'Fetch Error',
+                    tooltip: 'Could not fetch the cited page for verification. The page may be behind a paywall, require authentication, or be temporarily unavailable.',
                     bg: 'bg-orange-500',
                     bgLight: 'bg-orange-50',
                     border: 'border-orange-200',
@@ -208,6 +212,7 @@ export function CitationPreview({ domain, url }: CitationPreviewProps) {
                 return {
                     icon: <Globe className="h-4 w-4" />,
                     label: 'Unknown',
+                    tooltip: 'This citation has not been verified yet. Run citation verification to check its accuracy.',
                     bg: 'bg-gray-500',
                     bgLight: 'bg-gray-50',
                     border: 'border-gray-200',
@@ -259,7 +264,7 @@ export function CitationPreview({ domain, url }: CitationPreviewProps) {
             <div className={`px-5 py-3 bg-gradient-to-r ${status.gradient} flex items-center justify-between`}>
                 <div className="flex items-center gap-2 text-white">
                     {status.icon}
-                    <span className="text-sm font-bold">{status.label}</span>
+                    <span className="text-sm font-bold" title={status.tooltip}>{status.label}</span>
                 </div>
                 <div className="flex items-center gap-3">
                     {entityMatch && (

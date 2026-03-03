@@ -11,7 +11,7 @@ import { AgencyOverview } from "@/components/AgencyOverview";
 import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
 import { useAuth } from "../hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { UserManagement } from "@/components/UserManagement";
+const UserManagement = React.lazy(() => import("@/components/UserManagement").then(m => ({ default: m.UserManagement })));
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -26,12 +26,16 @@ import { useClientDashboard, AI_MODELS, cleanAndAnalyzeResponse, PromptInsightRe
 import { MODEL_LOGOS } from "@/components/ModelLogos";
 import { ScheduleManager } from "@/components/ScheduleManager";
 import { UniversalImport } from "@/components/UniversalImport";
-import MultiAccountScheduler from "@/components/MultiAccountScheduler";
-// CampaignsList/CampaignDetail replaced by inline TopicsTab
-// import { CampaignsList } from "@/components/CampaignsList";
-// import { CampaignDetail } from "@/components/CampaignDetail";
-import { SignalsDashboard } from "@/components/SignalsDashboard";
+import { OverviewTab } from "@/components/tabs/OverviewTab";
+import { PromptsTab } from "@/components/tabs/PromptsTab";
+import { TopicsTab } from "@/components/tabs/TopicsTab";
+import SourcesTab from "@/components/tabs/SourcesTab";
+import { CitationsTab } from "@/components/tabs/CitationsTab";
+import { ContentTab } from "@/components/tabs/ContentTab";
+const MultiAccountScheduler = React.lazy(() => import("@/components/MultiAccountScheduler"));
+const SignalsDashboard = React.lazy(() => import("@/components/SignalsDashboard").then(m => ({ default: m.SignalsDashboard })));
 import { CitationPreview } from "@/components/CitationPreview";
+import { InsightsTab, type AiInsights } from "@/components/tabs/InsightsTab";
 
 import { toast } from "sonner";
 
@@ -54,13 +58,33 @@ function normalizeBrandToken(name: string): string {
  * Check if two brand names refer to the same entity using normalized tokens.
  * E.g. "monday.com" matches "Monday CRM", "Monday" matches "monday.com"
  */
+// Common English words that cause false positive brand matches
+const COMMON_WORD_SKIP = new Set([
+  "able", "also", "area", "back", "been", "best", "both", "call", "came", "case",
+  "come", "could", "data", "days", "does", "done", "down", "each", "even", "fact",
+  "find", "first", "form", "from", "full", "gave", "gets", "give", "goes", "good",
+  "great", "hack", "half", "hand", "hard", "have", "head", "help", "here", "high",
+  "home", "idea", "info", "into", "just", "keep", "kind", "know", "last", "lead",
+  "left", "less", "life", "like", "line", "link", "list", "live", "long", "look",
+  "made", "main", "make", "many", "meet", "mind", "more", "most", "much", "must",
+  "name", "near", "need", "next", "note", "once", "only", "open", "over", "page",
+  "part", "past", "plan", "play", "plus", "post", "push", "read", "real", "rest",
+  "rich", "role", "rule", "runs", "safe", "said", "same", "save", "seen", "send",
+  "show", "side", "sign", "site", "size", "some", "sort", "step", "stop", "sure",
+  "take", "talk", "team", "tell", "test", "text", "that", "them", "then", "they",
+  "this", "time", "tool", "turn", "type", "unit", "upon", "used", "user", "uses",
+  "very", "view", "want", "wave", "well", "went", "were", "what", "when", "will",
+  "with", "word", "work", "year", "your", "zero"
+]);
+
 function brandNamesMatch(a: string, b: string): boolean {
   if (!a || !b) return false;
   const na = normalizeBrandToken(a);
   const nb = normalizeBrandToken(b);
   if (!na || !nb) return false;
+  if (COMMON_WORD_SKIP.has(na) || COMMON_WORD_SKIP.has(nb)) return false;
   // Exact normalized match or one contains the other (for partial names)
-  return na === nb || (na.length >= 3 && nb.length >= 3 && (na.includes(nb) || nb.includes(na)));
+  return na === nb || (na.length >= 4 && nb.length >= 4 && (na.includes(nb) || nb.includes(na)));
 }
 
 /**
@@ -78,7 +102,7 @@ function brandMentionedInText(response: string, brandName: string, aliases: stri
   // Normalized token match: extract potential brand tokens from response
   // and compare against normalized brand name
   const brandToken = normalizeBrandToken(brandName);
-  if (brandToken.length >= 3) {
+  if (brandToken.length >= 4 && !COMMON_WORD_SKIP.has(brandToken)) {
     // Check if the normalized token appears as a word in the response
     const responseClean = lower.replace(/[^a-z0-9\s]/g, '');
     if (responseClean.includes(brandToken)) return true;
@@ -122,13 +146,18 @@ function computePositionForResult(
     return Math.round(ranksFromModels.reduce((a: number, b: number) => a + b, 0) / ranksFromModels.length * 10) / 10;
   }
 
-  // 3. Parse from raw_response
-  if (selectedClient) {
+  // 3. Parse rank from raw_response text using cleanAndAnalyzeResponse
+  if (selectedClient?.brand_name) {
     const parsedRanks: number[] = [];
     r.model_results.forEach((mr: any) => {
-      if (mr.brand_mentioned && mr.raw_response) {
-        const { brandRank } = cleanAndAnalyzeResponse(mr.raw_response, selectedClient.brand_name, selectedClient.competitors, selectedClient.brand_tags || []);
-        if (brandRank !== null) parsedRanks.push(brandRank);
+      if (mr.raw_response) {
+        const { brandRank } = cleanAndAnalyzeResponse(
+          mr.raw_response,
+          selectedClient.brand_name,
+          selectedClient.competitors || [],
+          selectedClient.brand_tags || []
+        );
+        if (brandRank) parsedRanks.push(brandRank);
       }
     });
     if (parsedRanks.length > 0) {
@@ -136,18 +165,35 @@ function computePositionForResult(
     }
   }
 
-  // 4. Extracted brands position fallback (DataForSEO)
-  if (selectedClient) {
-    const extractedRanks: number[] = [];
+  // 4. Use extracted_brands position from DataForSEO brand entities API
+  const ebPositions: number[] = [];
+  r.model_results.forEach((mr: any) => {
+    if (mr.extracted_brands) {
+      const ownBrand = mr.extracted_brands.find((eb: any) => eb.is_own_brand && eb.position);
+      if (ownBrand) ebPositions.push(ownBrand.position);
+    }
+  });
+  if (ebPositions.length > 0) {
+    return Math.round(ebPositions.reduce((a, b) => a + b, 0) / ebPositions.length * 10) / 10;
+  }
+
+  // 5. Final fallback: derive position from mention order in text
+  if (selectedClient?.brand_name) {
+    const mentionOrderRanks: number[] = [];
     r.model_results.forEach((mr: any) => {
-      (mr.extracted_brands || []).forEach((eb: any) => {
-        if (eb.is_own_brand && eb.positions && eb.positions.length > 0) {
-          extractedRanks.push(eb.position);
-        }
+      if (!mr.raw_response) return;
+      const text = mr.raw_response.toLowerCase();
+      const brandIdx = text.indexOf(selectedClient.brand_name.toLowerCase());
+      if (brandIdx === -1) return;
+      let rank = 1;
+      (selectedClient.competitors || []).forEach((comp: string) => {
+        const compIdx = text.indexOf(comp.toLowerCase());
+        if (compIdx !== -1 && compIdx < brandIdx) rank++;
       });
+      mentionOrderRanks.push(rank);
     });
-    if (extractedRanks.length > 0) {
-      return Math.round(extractedRanks.reduce((a: number, b: number) => a + b, 0) / extractedRanks.length * 10) / 10;
+    if (mentionOrderRanks.length > 0) {
+      return Math.round(mentionOrderRanks.reduce((a, b) => a + b, 0) / mentionOrderRanks.length * 10) / 10;
     }
   }
 
@@ -164,7 +210,7 @@ function formatAIOverviewForDisplay(text: string): string {
 
   let formatted = text;
 
-  // Clean DataForSEO artifacts: {Link: BrandName } → BrandName
+  // Clean DataForSEO artifacts: {Link: BrandName } â†’ BrandName
   formatted = formatted.replace(/\{Link:\s*([^}]+?)\s*\}/g, '$1');
 
   // Remove floating citation count markers (e.g., "CrowdStrike +2" before list items)
@@ -353,7 +399,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
   // Persist activeTab to localStorage
   useEffect(() => {
-    try { localStorage.setItem('forzeo_activeTab', activeTab); } catch { /* quota exceeded — non-critical */ }
+    try { localStorage.setItem('forzeo_activeTab', activeTab); } catch { /* quota exceeded â€” non-critical */ }
   }, [activeTab]);
   // selectedCampaignId removed - Topics tab replaced Campaigns
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -415,10 +461,12 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [sourcesTypeFilter, setSourcesTypeFilter] = useState<string>("all");
   const [sourcesModelFilter, setSourcesModelFilter] = useState<string[]>([]);
   const [sourcesModelFilterOpen, setSourcesModelFilterOpen] = useState(false);
+  const [sourcesPage, setSourcesPage] = useState(0);
+  const SOURCES_PAGE_SIZE = 25;
   const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" });
   const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", primary_color: "#3b82f6", logo_url: "", competitors: "", website: "" });
   const [isAutoFinding, setIsAutoFinding] = useState(false);
-  const [aiInsights, setAiInsights] = useState<{ recommendations: string[]; priority: 'high' | 'medium' | 'low'; summary: string; keyActions: string[] } | null>(null);
+  const [aiInsights, setAiInsights] = useState<AiInsights | null>(null);
   const [generatingAiInsights, setGeneratingAiInsights] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -456,14 +504,14 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       if (targetClient) {
         switchClient(targetClient);
       } else {
-        // Client not in list yet — dashboard may still be loading. 
+        // Client not in list yet â€” dashboard may still be loading. 
         // Refresh to pick up the new client.
         refreshData();
       }
       return; // Wait for next render when selectedClient matches
     }
 
-    // Now the right client is selected — wait for prompts to load
+    // Now the right client is selected â€” wait for prompts to load
     if (prompts.length > 0 && !loading) {
       console.log('[AutoRun] Triggering runFullAudit for new brand:', autoRunClientId, `(${prompts.length} prompts)`);
       toast.info(`Auto-starting audit for ${prompts.length} prompts...`);
@@ -480,8 +528,14 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const filteredAuditResults = useMemo(() => {
     let results = auditResults;
     if (dateRangeFilter === "custom") {
-      if (customDateStart) { const start = new Date(customDateStart); results = results.filter(r => new Date(r.created_at) >= start); }
-      if (customDateEnd) { const end = new Date(customDateEnd); end.setHours(23, 59, 59, 999); results = results.filter(r => new Date(r.created_at) <= end); }
+      // Auto-swap if start > end
+      let effectiveStart = customDateStart;
+      let effectiveEnd = customDateEnd;
+      if (effectiveStart && effectiveEnd && effectiveStart > effectiveEnd) {
+        [effectiveStart, effectiveEnd] = [effectiveEnd, effectiveStart];
+      }
+      if (effectiveStart) { const start = new Date(effectiveStart); results = results.filter(r => new Date(r.created_at) >= start); }
+      if (effectiveEnd) { const end = new Date(effectiveEnd); end.setHours(23, 59, 59, 999); results = results.filter(r => new Date(r.created_at) <= end); }
     } else if (dateRangeFilter !== "all") { const now = new Date(); const days = dateRangeFilter === "7d" ? 7 : dateRangeFilter === "30d" ? 30 : 90; const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000); results = results.filter(r => new Date(r.created_at) >= cutoff); }
     if (modelFilter.length > 0) { results = results.map(r => ({ ...r, model_results: r.model_results.filter(mr => modelFilter.includes(mr.model)) })).filter(r => r.model_results.length > 0); }
     return results;
@@ -844,11 +898,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         totalVisible += visibleCount;
         totalModels += r.model_results.length;
         totalCitations += r.summary.total_citations;
-        let pos = r.summary?.average_rank;
-        if (!pos && r.model_results && visibleCount > 0) {
-          const ranks = r.model_results.filter(mr => mr.brand_mentioned && mr.brand_rank != null).map(mr => mr.brand_rank as number);
-          if (ranks.length > 0) pos = ranks.reduce((a, b) => a + b, 0) / ranks.length;
-        }
+        const pos = computePositionForResult(r, selectedClient);
         if (pos) allPositions.push(pos);
         r.model_results.forEach(mr => {
           const response = (mr.raw_response || '').toLowerCase();
@@ -869,7 +919,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
       return {
         topic, promptCount: topicPrompts.length, prompts: topicPrompts,
-        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "—",
+        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "â€”",
         visibilityPct: totalModels > 0 ? Math.round((totalVisible / totalModels) * 100) : 0,
         avgPosition, citations: totalCitations,
         brands: Array.from(brandFreqMap.keys()),
@@ -897,11 +947,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         totalVisible += visibleCount;
         totalModels += r.model_results.length;
         totalCitations += r.summary.total_citations;
-        let pos = r.summary?.average_rank;
-        if (!pos && r.model_results && visibleCount > 0) {
-          const ranks = r.model_results.filter(mr => mr.brand_mentioned && mr.brand_rank != null).map(mr => mr.brand_rank as number);
-          if (ranks.length > 0) pos = ranks.reduce((a, b) => a + b, 0) / ranks.length;
-        }
+        const pos = computePositionForResult(r, selectedClient);
         if (pos) allPositions.push(pos);
         r.model_results.forEach(mr => {
           const response = (mr.raw_response || '').toLowerCase();
@@ -921,7 +967,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
       sorted.push({
         topic: "Others", promptCount: othersPrompts.length, prompts: othersPrompts,
-        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "—",
+        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "â€”",
         visibilityPct: totalModels > 0 ? Math.round((totalVisible / totalModels) * 100) : 0,
         avgPosition, citations: totalCitations,
         brands: Array.from(brandFreqMap.keys()),
@@ -1026,11 +1072,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
         // Auto-run audit for all users (admin or not)
         if (newPromptObj) {
-          toast.info("🚀 Prompt added! Running audit automatically...");
+          toast.info("ðŸš€ Prompt added! Running audit automatically...");
           setTimeout(() => runSinglePrompt(newPromptObj), 500); // Pass object directly
         }
       } catch (err: any) {
-        alert(err.message || "Failed to add prompt.");
+        toast.error(err.message || "Failed to add prompt.");
         // Keep input value so user can retry
       }
     }
@@ -1116,11 +1162,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
         // Auto-run full audit for non-admin users after bulk add
         if (!isAdmin && promptTexts.length > 0) {
-          toast.info(`🚀 ${promptTexts.length} prompts added! Running audits automatically...`);
+          toast.info(`ðŸš€ ${promptTexts.length} prompts added! Running audits automatically...`);
           setTimeout(() => runFullAudit(), 500);
         }
       } catch (err: any) {
-        alert(err.message || "Failed to add prompts.");
+        toast.error(err.message || "Failed to add prompts.");
       }
     }
   };
@@ -1134,7 +1180,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       setEditingLocationPromptId(null);
       setEditingLocationValue("");
     } catch (err: any) {
-      alert(err.message || "Failed to update location.");
+      toast.error(err.message || "Failed to update location.");
     }
   };
   const handleGeneratePrompts = async () => {
@@ -1201,14 +1247,13 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       setAddClientOpen(false);
     } catch (err: any) {
       console.error("Failed to create client:", err);
-      // Use explicit alert for user feedback since we don't have a toast component ready-to-hand in this file
-      alert(err.message || "Failed to create brand. Please check if you have reached your limit.");
+      toast.error(err.message || "Failed to create brand. Please check if you have reached your limit.");
     } finally {
       setIsCreatingClient(false);
     }
   };
   const handleUpdateClient = async () => { if (!selectedClient || !editClientForm.name.trim()) return; const comps = editClientForm.competitors.split(",").map(c => c.trim()).filter(Boolean); const finalIndustry = editClientForm.industry === "Custom" && editClientForm.customIndustry.trim() ? editClientForm.customIndustry.trim() : editClientForm.industry; await updateClient(selectedClient.id, { name: editClientForm.name, brand_name: editClientForm.brand_name || editClientForm.name, brand_domain: editClientForm.website.trim() || undefined, target_region: editClientForm.target_region, location_code: locations[editClientForm.target_region] || selectedClient.location_code, industry: finalIndustry, primary_color: editClientForm.primary_color, competitors: comps }); setEditClientOpen(false); };
-  const handleDeleteClient = async () => { if (!selectedClient) return; if (!isAdmin) { alert("Only administrators can delete brands."); return; } if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
+  const handleDeleteClient = async () => { if (!selectedClient) return; if (!isAdmin) { toast.error("Only administrators can delete brands."); return; } if (confirm(`Delete "${selectedClient.name}"?`)) await deleteClient(selectedClient.id); };
   const handleAddTag = () => { if (newTag.trim() && selectedClient) { updateBrandTags([...selectedClient.brand_tags, newTag.trim()]); setNewTag(""); } };
   const toggleModel = (id: string) => { if (selectedModels.includes(id)) { if (selectedModels.length > 1) setSelectedModels(selectedModels.filter(m => m !== id)); } else { setSelectedModels([...selectedModels, id]); } };
   const toggleModelFilter = (id: string) => { if (modelFilter.includes(id)) { setModelFilter(modelFilter.filter(m => m !== id)); } else { setModelFilter([...modelFilter, id]); } };
@@ -1310,7 +1355,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     prompts.forEach((p, i) => { const r = auditResults.find(x => x.prompt_id === p.id); const sov = r?.summary?.share_of_voice || 0; const pri = sov < 30 ? "[!]" : sov < 60 ? "[~]" : "[+]"; txt += (i + 1) + ". " + pri + " [" + (p.is_active ? "Active" : "Inactive") + "] " + p.prompt_text + "\n   Category: " + (p.category || "custom") + " | Niche: " + (p.niche_level || "N/A") + (r ? " | Visibility: " + sov + "%" : "") + "\n"; });
 
     txt += "\n" + "=".repeat(40) + "\n AUDIT RESULTS (" + auditResults.length + ")\n" + "=".repeat(40) + "\n";
-    auditResults.forEach((r, i) => { txt += "\n[" + (i + 1) + "] " + r.prompt_text + "\n" + "-".repeat(50) + "\nDate: " + new Date(r.created_at).toLocaleString() + "\nSOV: " + r.summary.share_of_voice + "% | Rank: " + (r.summary.average_rank || "N/A") + " | Citations: " + r.summary.total_citations + "\n\nModel Results:\n"; r.model_results.forEach(mr => { txt += "  - " + mr.model_name + ": " + (mr.brand_mentioned ? "Mentioned" : "Not mentioned") + (mr.brand_rank ? " (Rank #" + mr.brand_rank + ")" : "") + " - " + mr.brand_mention_count + " mentions, " + (mr.citations?.length || 0) + " citations\n"; }); txt += "\n"; });
+    auditResults.forEach((r, i) => { txt += "\n[" + (i + 1) + "] " + r.prompt_text + "\n" + "-".repeat(50) + "\nDate: " + new Date(r.created_at).toLocaleString() + "\nSOV: " + r.summary.share_of_voice + "% | Position: " + (r.summary.average_rank || "N/A") + " | Citations: " + r.summary.total_citations + "\n\nModel Results:\n"; r.model_results.forEach(mr => { txt += "  - " + mr.model_name + ": " + (mr.brand_mentioned ? "Mentioned" : "Not mentioned") + (mr.brand_rank ? " (Position #" + mr.brand_rank + ")" : "") + " - " + mr.brand_mention_count + " mentions, " + (mr.citations?.length || 0) + " citations\n"; }); txt += "\n"; });
 
     txt += "\n" + "-".repeat(40) + "\n TOP CITATIONS (" + Math.min(allCitations.length, 50) + ")\n" + "-".repeat(40) + "\n\n";
     allCitations.slice(0, 50).forEach((c, i) => { txt += (i + 1) + ". " + c.domain + " (" + c.count + "x)\n   " + c.url + "\n"; });
@@ -1380,7 +1425,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     if (!selectedClient || filteredAuditResults.length === 0) return;
 
     // Define CSV headers
-    const rows = [["Prompt", "Topic", "Model", "Visibility", "Rank", "Brands Mentioned", "Citations Found", "Raw Response"]];
+    const rows = [["Prompt", "Topic", "Model", "Visibility", "Position", "Brands Mentioned", "Citations Found", "Citation URLs", "Raw Response"]];
 
     for (const r of filteredAuditResults) {
       const promptInfo = prompts.find(p => p.id === r.prompt_id);
@@ -1396,6 +1441,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
         // Format brands list
         const brands = mr.extracted_brands?.map(b => b.title).join("; ") || "None";
+
+        // Format citation URLs as semicolon-separated list
+        const citationUrls = mr.citations?.map((c: any) => c.url || c).filter(Boolean).join("; ") || "";
 
         // Clean and escape raw response for CSV
         let rawContent = mr.raw_response || "No response data available";
@@ -1419,6 +1467,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           rank,
           `"${brands.replace(/"/g, '""')}"`,
           citationsCount,
+          `"${citationUrls.replace(/"/g, '""')}"`,
           escapedContent
         ]);
       });
@@ -1713,241 +1762,206 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           </div>
         )}
         {error && <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2 text-sm"><AlertTriangle className="h-4 w-4" /> {error}</div>}
+        <div className="print-header hidden" style={{ display: 'none' }}>
+          <div style={{ padding: '20px 0', borderBottom: '2px solid #e5e7eb', marginBottom: '20px' }}>
+            <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>Forzeo GEO Report</h1>
+            <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
+              {selectedClient?.brand_name || 'All Brands'} — {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} — {new Date().toLocaleDateString()}
+            </p>
+          </div>
+        </div>
         <div className="p-6">
-          {activeTab === "overview" && OverviewTab()}
+          {activeTab === "overview" && <OverviewTab
+            isAgency={isAgency}
+            clients={clients}
+            selectedClient={selectedClient}
+            prompts={prompts}
+            auditResults={auditResults}
+            filteredAuditResults={filteredAuditResults}
+            modelStats={modelStats}
+            competitorGap={competitorGap}
+            detailedBrandStats={detailedBrandStats}
+            sovTimeSeries={sovTimeSeries}
+            allCitations={allCitations}
+            domainStats={domainStats}
+            typeSegments={typeSegments}
+            recentPrompts={recentPrompts}
+            selectedModels={selectedModels}
+            sovTimeRange={sovTimeRange}
+            setSovTimeRange={setSovTimeRange}
+            showBrandOnly={showBrandOnly}
+            setShowBrandOnly={setShowBrandOnly}
+            showBrandVisibilityModal={showBrandVisibilityModal}
+            setShowBrandVisibilityModal={setShowBrandVisibilityModal}
+            switchClient={switchClient}
+            setManageBrandsOpen={setManageBrandsOpen}
+            setActiveTab={(tab: string) => setActiveTab(tab as any)}
+            setSelectedPromptDetail={setSelectedPromptDetail}
+            refreshData={refreshData}
+          />}
           {activeTab === "brands" && BrandsTab()}
-          {activeTab === "prompts" && PromptsTab()}
-          {activeTab === "schedules" && selectedClient && <ScheduleManager clientId={selectedClient.id} prompts={prompts} selectedModels={selectedModels} />}
-          {activeTab === "bulk_scheduler" && isAdmin && <MultiAccountScheduler clients={clients} selectedModels={selectedModels} />}
-          {activeTab === "future-citations" && selectedClient && <SignalsDashboard clientId={selectedClient.id} brandName={selectedClient.brand_name} />}
-          {activeTab === "topics" && selectedClient && TopicsTab()}
-          {activeTab === "citations" && CitationsTab()}
-          {activeTab === "sources" && SourcesTab()}
-          {activeTab === "content" && ContentTab()}
-          {activeTab === "insights" && InsightsTab()}
+          {activeTab === "prompts" && (
+            <PromptsTab
+              prompts={prompts}
+              auditResults={auditResults}
+              filteredPrompts={filteredPrompts}
+              selectedClient={selectedClient}
+              isAdmin={isAdmin}
+              isAgency={isAgency}
+              loading={loading}
+              loadingPromptIds={loadingPromptIds}
+              selectedPromptIds={selectedPromptIds}
+              setSelectedPromptIds={setSelectedPromptIds}
+              promptsTabView={promptsTabView}
+              setPromptsTabView={setPromptsTabView}
+              promptsFilterVisibility={promptsFilterVisibility}
+              setPromptsFilterVisibility={setPromptsFilterVisibility}
+              promptsFilterCompetitor={promptsFilterCompetitor}
+              setPromptsFilterCompetitor={setPromptsFilterCompetitor}
+              promptSortField={promptSortField}
+              setPromptSortField={setPromptSortField}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              inlineEditTopicId={inlineEditTopicId}
+              setInlineEditTopicId={setInlineEditTopicId}
+              inlineEditTopicValue={inlineEditTopicValue}
+              setInlineEditTopicValue={setInlineEditTopicValue}
+              setSelectedPromptDetail={setSelectedPromptDetail}
+              setBulkPromptsOpen={setBulkPromptsOpen}
+              setEditingPromptId={setEditingPromptId}
+              setEditingPromptText={setEditingPromptText}
+              setEditingPromptTopic={setEditingPromptTopic}
+              setEditPromptOpen={setEditPromptOpen}
+              setEditingLocationPromptId={setEditingLocationPromptId}
+              setEditingLocationValue={setEditingLocationValue}
+              setEditLocationOpen={setEditLocationOpen}
+              runSinglePrompt={runSinglePrompt}
+              bulkArchivePrompts={bulkArchivePrompts}
+              bulkDeletePrompts={bulkDeletePrompts}
+              reactivatePrompt={reactivatePrompt}
+              updatePrompt={updatePrompt}
+              getAIOpportunity={getAIOpportunity}
+              getPromptResult={getPromptResult}
+              tavilyResults={tavilyResults}
+              recsModalOpen={recsModalOpen}
+              setRecsModalOpen={setRecsModalOpen}
+              recsModalPromptId={recsModalPromptId}
+              setRecsModalPromptId={setRecsModalPromptId}
+              recsModalLoading={recsModalLoading}
+              setRecsModalLoading={setRecsModalLoading}
+              recsModalData={recsModalData}
+              setRecsModalData={setRecsModalData}
+              generateRecommendations={generateRecommendations}
+              bulkRunProgress={bulkRunProgress}
+              setBulkRunProgress={setBulkRunProgress}
+              exportToCSV={exportToCSV}
+              exportModelResponsesToCSV={exportModelResponsesToCSV}
+            />
+          )}
+          {activeTab === "schedules" && selectedClient && <React.Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>}><ScheduleManager clientId={selectedClient.id} prompts={prompts} selectedModels={selectedModels} /></React.Suspense>}
+          {activeTab === "bulk_scheduler" && isAdmin && <React.Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>}><MultiAccountScheduler clients={clients} selectedModels={selectedModels} /></React.Suspense>}
+          {activeTab === "future-citations" && selectedClient && <React.Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>}><SignalsDashboard clientId={selectedClient.id} brandName={selectedClient.brand_name} /></React.Suspense>}
+          {activeTab === "topics" && selectedClient && (
+            <TopicsTab
+              topicData={topicData}
+              unassignedPrompts={unassignedPrompts}
+              expandedTopic={expandedTopic}
+              setExpandedTopic={setExpandedTopic}
+              setActiveTab={(tab: string) => setActiveTab(tab as any)}
+              setBulkPromptsOpen={setBulkPromptsOpen}
+              getPromptResult={getPromptResult}
+              selectedClient={selectedClient}
+              setSelectedPromptDetail={setSelectedPromptDetail}
+              getAIOpportunity={getAIOpportunity}
+            />
+          )}
+          {activeTab === "citations" && (
+            <CitationsTab
+              allCitations={allCitations}
+              filteredCitations={filteredCitations}
+              citationSearch={citationSearch}
+              setCitationSearch={setCitationSearch}
+              selectedCitation={selectedCitation}
+              setSelectedCitation={setSelectedCitation}
+              exportCitations={exportCitations}
+              citationsByPrompt={citationsByPrompt}
+              citationMeta={citationMeta}
+              selectedClient={selectedClient}
+              prompts={prompts}
+              filteredAuditResults={filteredAuditResults}
+              selectedPromptDetail={selectedPromptDetail}
+              setSelectedPromptDetail={setSelectedPromptDetail}
+            />
+          )}
+          {activeTab === "sources" && (
+            <SourcesTab
+              selectedClient={selectedClient}
+              allCitations={allCitations}
+              domainStats={domainStats}
+              citationMeta={citationMeta}
+              filteredAuditResults={filteredAuditResults}
+              sourcesView={sourcesView}
+              setSourcesView={setSourcesView}
+              sourcesGapView={sourcesGapView}
+              setSourcesGapView={setSourcesGapView}
+              sourcesTypeFilter={sourcesTypeFilter}
+              setSourcesTypeFilter={setSourcesTypeFilter}
+              sourcesModelFilter={sourcesModelFilter}
+              setSourcesModelFilter={setSourcesModelFilter}
+              sourcesModelFilterOpen={sourcesModelFilterOpen}
+              setSourcesModelFilterOpen={setSourcesModelFilterOpen}
+              sourcesPage={sourcesPage}
+              setSourcesPage={setSourcesPage}
+              SOURCES_PAGE_SIZE={SOURCES_PAGE_SIZE}
+              categorizeCitations={categorizeCitations}
+              verifyCitations={verifyCitations}
+              categorizationProgress={categorizationProgress}
+              setCategorizationProgress={setCategorizationProgress}
+            />
+          )}
+          {activeTab === "content" && (
+            <ContentTab
+              contentTopic={contentTopic}
+              setContentTopic={setContentTopic}
+              contentType={contentType}
+              setContentType={setContentType}
+              targetAudience={targetAudience}
+              setTargetAudience={setTargetAudience}
+              contentKeywords={contentKeywords}
+              setContentKeywords={setContentKeywords}
+              toneOfVoice={toneOfVoice}
+              setToneOfVoice={setToneOfVoice}
+              generatingContent={generatingContent}
+              generatedContent={generatedContent}
+              selectedClient={selectedClient}
+              onGenerateContent={handleGenerateContent}
+              prompts={prompts}
+              industries={industries}
+              setEditClientForm={setEditClientForm}
+              setEditClientOpen={setEditClientOpen}
+            />
+          )}
+          {activeTab === "insights" && (
+            <InsightsTab
+              filteredAuditResults={filteredAuditResults}
+              selectedClient={selectedClient}
+              tavilyResults={tavilyResults}
+              aiInsights={aiInsights}
+              setAiInsights={setAiInsights}
+              generatingAiInsights={generatingAiInsights}
+              setGeneratingAiInsights={setGeneratingAiInsights}
+              generateOverallRecommendations={generateOverallRecommendations}
+              setSelectedPromptDetail={setSelectedPromptDetail}
+            />
+          )}
 
         </div>
       </main>
       {SettingsSheet()}{AddClientDialog()}{EditClientDialog()}{ManageBrandsDialog()}{BulkPromptsDialog()}{PromptDetailDialog()}{EditPromptDialog()}{EditLocationDialog()}{ImportDialog()}{RunCampaignDialog()}
-      <UserManagement open={userManagementOpen} onOpenChange={setUserManagementOpen} />
+      <React.Suspense fallback={null}><UserManagement open={userManagementOpen} onOpenChange={setUserManagementOpen} /></React.Suspense>
       <input ref={fileInputRef} type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileImport} />
     </div>
   );
-
-  function OverviewTab() {
-    if (isAgency && !selectedClient) {
-      return <AgencyOverview clients={clients} prompts={prompts} auditResults={auditResults} onNavigateToBrand={(id) => { const c = clients.find(x => x.id === id); if (c) switchClient(c); }} onViewAllBrands={() => setManageBrandsOpen(true)} />;
-    }
-
-    return (
-      <div className="space-y-6 fade-in">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Share of Voice</div>
-              <div className="p-2.5 bg-blue-50 rounded-lg"><Target className="h-5 w-5 text-blue-600" /></div>
-            </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-gray-950">{(() => {
-                const allResults = filteredAuditResults.flatMap(r => r.model_results || []);
-                // SOV = Brand Mentions / (Brand Mentions + Competitor Mentions) × 100
-                let brandMentionCount = 0;
-                let competitorMentionCount = 0;
-                const competitors = selectedClient?.competitors || [];
-                allResults.forEach(mr => {
-                  if (mr.brand_mentioned) brandMentionCount++;
-                  const response = (mr.raw_response || "").toLowerCase();
-                  competitors.forEach(c => {
-                    if (response.includes(c.toLowerCase())) competitorMentionCount++;
-                  });
-                });
-                const totalMentions = brandMentionCount + competitorMentionCount;
-                return totalMentions > 0 ? Math.round((brandMentionCount / totalMentions) * 100) : 0;
-              })()}%</span>
-              <TrendIndicator value={0} />
-            </div>
-            <div className="mt-3 text-xs font-medium text-gray-400">Brand vs competitors in AI</div>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Citation Rate</div>
-              <div className="p-2.5 bg-green-50 rounded-lg"><Link2 className="h-5 w-5 text-green-600" /></div>
-            </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-gray-950">{(() => {
-                const totalResults = filteredAuditResults.flatMap(r => r.model_results || []);
-                const brandDomain = selectedClient?.brand_domain?.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/.*$/, '') || '';
-                const citedResults = totalResults.filter(mr => (mr as any).is_cited || (brandDomain && mr.citations && mr.citations.some(c => c.domain.toLowerCase().includes(brandDomain) || brandDomain.includes(c.domain.toLowerCase()))));
-                return totalResults.length > 0 ? Math.round((citedResults.length / totalResults.length) * 100) : 0;
-              })()}%</span>
-              <TrendIndicator value={0} />
-            </div>
-            <div className="mt-3 text-xs font-medium text-gray-400">% of responses citing your site</div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Citations Found</div>
-              <div className="p-2.5 bg-purple-50 rounded-lg"><Link2 className="h-5 w-5 text-purple-600" /></div>
-            </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-gray-950">{allCitations.length}</span>
-              <span className="text-sm text-gray-500 font-medium">citations</span>
-            </div>
-            <div className="mt-3 text-xs font-medium text-gray-400">{domainStats.length} unique domains referenced</div>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Average Rank</div>
-              <div className="p-2.5 bg-amber-50 rounded-lg"><BarChart3 className="h-5 w-5 text-amber-600" /></div>
-            </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-gray-950">
-                {(() => {
-                  const positions = filteredAuditResults
-                    .map(r => computePositionForResult(r, selectedClient))
-                    .filter((p): p is number => p !== null);
-                  if (positions.length === 0) return "—";
-                  const avgRank = Math.round(positions.reduce((sum, p) => sum + p, 0) / positions.length * 10) / 10;
-                  return `#${avgRank}`;
-                })()}
-              </span>
-              <TrendIndicator value={0} />
-            </div>
-            <div className="mt-3 text-xs font-medium text-gray-400">{filteredAuditResults.length} audits completed</div>
-          </div>
-        </div>
-        {/* SOV Trend Graph */}
-        <div className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-1">
-            <div>
-              <h3 className="text-base font-semibold text-gray-900">Share of Voice</h3>
-              <p className="text-xs text-gray-400">Brand vs top competitors over time</p>
-            </div>
-            <div className="flex items-center bg-gray-100/80 p-1 rounded-xl">
-              {(["week", "month", "year"] as const).map(range => (
-                <button
-                  key={range}
-                  onClick={() => setSovTimeRange(range)}
-                  className={cn(
-                    "px-4 py-1.5 text-sm font-medium rounded-lg transition-all",
-                    sovTimeRange === range
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700"
-                  )}
-                >
-                  {range === "week" ? "Week" : range === "month" ? "Month" : "Year"}
-                </button>
-              ))}
-            </div>
-          </div>
-          <SOVLineChart labels={sovTimeSeries.labels} series={sovTimeSeries.series} height={240} />
-          {(selectedClient?.competitors || []).length === 0 && sovTimeSeries.series.length <= 1 && (
-            <p className="text-xs text-gray-400 mt-2">Add competitors in Settings to compare Share of Voice</p>
-          )}
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-          <div className="col-span-1 md:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
-            <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Eye className="h-4 w-4 text-gray-400" /> Visibility by Model</h3><p className="text-xs text-gray-500 mt-0.5">Percentage of responses mentioning your brand</p></div></div>
-            <div className="space-y-4 mt-6">{AI_MODELS.filter(m => selectedModels.includes(m.id)).map(model => { const stats = modelStats[model.id] || { visible: 0, total: 0, cost: 0 }; const pct = stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0; const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; return (<div key={model.id} className="flex items-center gap-3"><div className="w-32 flex items-center gap-2">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="text-sm text-gray-700 truncate">{model.name}</span></div><div className="flex-1 h-8 bg-gray-100 rounded-full overflow-hidden relative"><div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: color }} /><span className="absolute inset-0 flex items-center justify-center text-xs font-medium" style={{ color: pct > 50 ? "white" : "#374151" }}>{pct}%</span></div><span className="text-sm font-medium text-gray-600 w-16 text-right">{stats.visible}/{stats.total}</span></div>); })}</div>
-            {filteredAuditResults.length === 0 && <div className="text-center py-8 text-gray-500"><BarChart3 className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p className="text-sm">Run audits to see visibility data</p></div>}
-          </div>
-          <div className="col-span-1 md:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
-            <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Brand Visibility</h3><button onClick={() => setShowBrandVisibilityModal(true)} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">View All <ChevronRight className="h-3.5 w-3.5" /></button></div>
-            <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; const brandDomain = isBrand ? selectedClient?.brand_domain : `${c.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><img src={`https://www.google.com/s2/favicons?domain=${brandDomain}&sz=20`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }} /><Building2 className="h-5 w-5 text-gray-400 hidden" /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Globe className="h-4 w-4 text-gray-400" /> Top Sources</h3><p className="text-xs text-gray-500 mt-0.5">Most cited domains across all models</p></div><button onClick={() => setActiveTab("sources")} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">View All <ChevronRight className="h-3.5 w-3.5" /></button></div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="flex flex-col items-center justify-center">
-              <DonutChart value={allCitations.length} size={160} segments={typeSegments} />
-              <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 mt-4 text-xs">
-                {(() => {
-                  const otherOverflow = typeSegments.slice(6).reduce((sum, s) => sum + s.count, 0);
-                  // Merge overflow into existing "other" segment if present in top 6
-                  const hasOtherInTop6 = typeSegments.slice(0, 6).some(s => s.type === 'other');
-                  const displaySegs = typeSegments.slice(0, 6).map(s =>
-                    s.type === 'other' ? { ...s, count: s.count + otherOverflow } : s
-                  );
-                  const extraOtherCount = hasOtherInTop6 ? 0 : otherOverflow;
-                  const items = [
-                    ...displaySegs.map(s => ({ key: s.type, value: s.count })),
-                    ...(extraOtherCount > 0 ? [{ key: "__other__", value: extraOtherCount }] : []),
-                  ];
-                  const pctMap = roundToHundred(items);
-                  return (
-                    <>
-                      {displaySegs.map((seg) => {
-                        const t = DOMAIN_TYPES[seg.type] || DOMAIN_TYPES.other;
-                        return (
-                          <div key={seg.type} className="flex items-center gap-1.5">
-                            <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t.dot }} />
-                            <span className="text-gray-700 font-medium">{t.label}</span>
-                            <span className="text-gray-400">({pctMap.get(seg.type) || 0}%)</span>
-                          </div>
-                        );
-                      })}
-                      {extraOtherCount > 0 && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: "#6b7280" }} />
-                          <span className="text-gray-700 font-medium">Other</span>
-                          <span className="text-gray-400">({pctMap.get("__other__") || 0}%)</span>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
-            <div className="col-span-1 md:col-span-2 overflow-hidden overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-100">
-                    <th className="text-left py-3 pl-2">Domain</th>
-                    <th className="text-right py-3">Citations</th>
-                    <th className="text-right py-3">Prompts</th>
-                    <th className="text-right py-3 pr-2">Type</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm divide-y divide-gray-50">
-                  {domainStats.slice(0, 6).map((s, i) => {
-                    const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other;
-                    return (
-                      <tr key={i} className="group hover:bg-gray-50 transition-colors">
-                        <td className="py-3 pl-2">
-                          <div className="flex items-center gap-2">
-                            <img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} alt="" className="h-4 w-4 rounded opacity-70 group-hover:opacity-100 transition-opacity" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                            <span className="text-gray-900 font-medium">{s.domain}</span>
-                          </div>
-                        </td>
-                        <td className="py-3 text-right text-gray-600 font-medium">{s.count}</td>
-                        <td className="py-3 text-right text-gray-500">{s.promptCount}</td>
-                        <td className="py-3 text-right pr-2">
-                          <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border border-opacity-20", t.bg, t.color)}>{t.label}</span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {domainStats.length === 0 && <tr><td colSpan={4} className="py-8 text-center text-gray-500 italic">Run audits to see source data</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><MessageSquare className="h-4 w-4 text-gray-400" /> Recent Audits</h3><div className="flex items-center gap-2"><span className="text-sm text-gray-500 hidden sm:inline">{selectedClient?.brand_name} mentioned</span><button onClick={() => setShowBrandOnly(!showBrandOnly)} className={cn("relative w-10 h-5 rounded-full transition-colors", showBrandOnly ? "bg-blue-500" : "bg-gray-200")}><span className={cn("absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform", showBrandOnly ? "translate-x-5" : "translate-x-0.5")} /></button></div></div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{recentPrompts.filter(r => !showBrandOnly || r.summary.share_of_voice > 0).slice(0, 9).map((r, i) => (<div key={i} onClick={() => setSelectedPromptDetail(r.prompt_id)} className="bg-white rounded-xl border border-gray-200 p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer"><h4 className="font-medium text-gray-900 text-sm line-clamp-2 mb-2">{r.prompt_text}</h4><p className="text-xs text-gray-500 line-clamp-2 mb-3">{r.model_results[0]?.raw_response?.substring(0, 100) || "No response"}...</p><div className="flex items-center justify-between"><div className="flex items-center gap-1">{r.model_results.slice(0, 4).map((mr, j) => { const Logo = MODEL_LOGOS[mr.model]?.Logo; const color = MODEL_LOGOS[mr.model]?.color || "#666"; return Logo ? (<div key={j} className={cn("p-1 rounded", mr.brand_mentioned ? "bg-green-50" : "bg-gray-50")}><Logo className="h-3.5 w-3.5" style={{ color: mr.brand_mentioned ? color : "#9ca3af" }} /></div>) : null; })}</div><span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(r.created_at).toLocaleDateString()}</span></div></div>))}</div>
-          {recentPrompts.length === 0 && (<div className="bg-white rounded-xl border border-gray-200 p-12 text-center"><MessageSquare className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No recent audits. Run some prompts to see results here.</p></div>)}
-        </div>
-        {/* Import Section */}
-        <div className="mt-6">
-          {selectedClient && selectedClient.id && <UniversalImport clientId={selectedClient.id} onImportComplete={() => refreshData()} />}
-        </div>
-        <BrandVisibilityModal />
-      </div>
-    );
-  }
 
   function BrandsTab() {
     return (
@@ -1968,1465 +1982,6 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
     );
   }
 
-  function PromptsTab() {
-    const activeCount = prompts.filter(p => p.is_active !== false).length;
-    const runPromptIds = new Set(auditResults.map(r => r.prompt_id));
-    const suggestedCount = prompts.filter(p => p.is_active !== false && !runPromptIds.has(p.id)).length;
-    const inactiveCount = prompts.filter(p => p.is_active === false).length;
-    const isInactiveView = promptsTabView === "inactive";
-
-    return (
-      <div className="space-y-4">
-
-        {/* Header with Tabs */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3 overflow-x-auto pb-1 md:pb-0">
-            <div className="flex items-center bg-gray-100 rounded-lg p-1">
-              <button onClick={() => setPromptsTabView("active")} className={cn("px-4 py-2 rounded-md text-sm font-medium transition-all", promptsTabView === "active" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>
-                <span className="flex items-center gap-2">Active <span className={cn("px-1.5 py-0.5 rounded text-xs", promptsTabView === "active" ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500")}>{activeCount}</span></span>
-              </button>
-              <button onClick={() => setPromptsTabView("suggested")} className={cn("px-4 py-2 rounded-md text-sm font-medium transition-all", promptsTabView === "suggested" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>
-                <span className="flex items-center gap-2">Pending <span className={cn("px-1.5 py-0.5 rounded text-xs", suggestedCount > 0 ? "bg-orange-100 text-orange-600" : "bg-gray-200 text-gray-500")}>{suggestedCount}</span></span>
-              </button>
-              <button onClick={() => setPromptsTabView("inactive")} className={cn("px-4 py-2 rounded-md text-sm font-medium transition-all", promptsTabView === "inactive" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700")}>
-                <span className="flex items-center gap-2"><Archive className="h-3.5 w-3.5" /> Archived <span className="px-1.5 py-0.5 rounded text-xs bg-gray-200 text-gray-500">{inactiveCount}</span></span>
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* Filters - All Models filter removed per user request */}            <Select value={promptsFilterCompetitor} onValueChange={setPromptsFilterCompetitor}>
-              <SelectTrigger className="w-[130px] h-9 text-xs bg-white border-gray-200">
-                <SelectValue placeholder="Competitor" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Competitors</SelectItem>
-                {selectedClient?.competitors.map((c: string) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={promptsFilterVisibility} onValueChange={(v: any) => setPromptsFilterVisibility(v)}>
-              <SelectTrigger className="w-[130px] h-9 text-xs bg-white border-gray-200">
-                <SelectValue placeholder="Visibility" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Any Visibility</SelectItem>
-                <SelectItem value="visible">Visible Only</SelectItem>
-                <SelectItem value="not_visible">Not Visible</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Run Topic button removed */}
-            {isAdmin ? (
-              <span className="text-sm text-gray-500 hidden sm:inline"> {prompts.length} total prompts</span>
-            ) : (
-              <span className={cn("text-xs font-medium px-2 py-1 rounded-md border", prompts.length >= (isAgency ? 15 : 200) ? "text-red-600 bg-red-50 border-red-100" : "text-gray-600 bg-gray-50 border-gray-200")}>{prompts.length}/{isAgency ? 15 : 200} Prompts</span>
-            )}
-            <Button onClick={() => setBulkPromptsOpen(true)} className="bg-gray-900 hover:bg-gray-800 whitespace-nowrap" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 200)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
-          </div>
-        </div>
-
-        {/* Info banner for archived view */}
-        {
-          isInactiveView && inactiveCount > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-              <div className="p-2 bg-amber-100 rounded-lg"><Archive className="h-5 w-5 text-amber-600" /></div>
-              <div>
-                <h4 className="font-medium text-amber-900">Archived Prompts</h4>
-                <p className="text-sm text-amber-700 mt-0.5">These prompts are archived but their data is preserved. You can restore them anytime by clicking the restore button.</p>
-              </div>
-            </div>
-          )
-        }
-
-        {/* Search & Export */}
-        <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input placeholder="Search prompts..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-gray-50 border-transparent hover:bg-gray-100 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-colors" />
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="bg-white border-gray-200 hover:bg-gray-50 text-gray-700 font-medium shadow-sm transition-all duration-200">
-                <Download className="h-4 w-4 mr-2 text-gray-500" /> Export Data
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onClick={exportToCSV} className="cursor-pointer">
-                <FileText className="h-4 w-4 mr-2 text-gray-400" /> Export Summary (CSV)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={exportModelResponsesToCSV} className="cursor-pointer">
-                <FileText className="h-4 w-4 mr-2 text-blue-500" /> Export Raw Responses (CSV)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Table */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200">
-              <tr>
-                <th className="w-10 px-3 py-3 text-left" title="Select prompts for bulk actions"><Checkbox checked={selectedPromptIds.size === filteredPrompts.length && filteredPrompts.length > 0} onCheckedChange={(checked) => { if (checked) { setSelectedPromptIds(new Set(filteredPrompts.map(p => p.id))); } else { setSelectedPromptIds(new Set()); } }} /></th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" title="The question you want AI models to answer">
-                  <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Prompt <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32" title="Topic / seed keyword this prompt belongs to">Topic</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28 cursor-pointer hover:text-gray-900 group" title="AI Opportunity reflects the relative strategic upside of improving visibility for this prompt in AI-generated answers. Calculated using demand strength, AI answer depth, and intent signals." onClick={() => { setPromptSortField(prev => prev === 'ai_opportunity' ? null : 'ai_opportunity'); }}><div className="flex items-center justify-center gap-1">AI Opportunity <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div></th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24" title="How many AI models mentioned your brand vs total models tested">Visibility</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20" title="Your brand's average position in AI-generated ranked lists (#1 is best)">Position</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="Other brands that AI mentioned alongside or instead of yours">Brands</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24" title="Number of web sources the AI referenced in its response">Citations</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-36" title="AI-generated suggestions to improve your visibility">Recommendations</th>
-                {isAdmin && <th className="px-4 py-3 text-end text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="Run audits, edit, or archive prompts">Actions</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredPrompts.map((p) => {
-                const r = getPromptResult(p.id);
-                const isLoading = loadingPromptIds.has(p.id);
-                // Visibility: use backend brand_mentioned OR client-side normalized matching (catches brand_tags aliases)
-                const visibleCount = r?.model_results.filter(mr => {
-                  if (mr.brand_mentioned) return true;
-                  // Client-side fallback: check brand_tags and normalized name matching
-                  if (selectedClient && mr.raw_response) {
-                    return brandMentionedInText(mr.raw_response, selectedClient.brand_name, selectedClient.brand_tags);
-                  }
-                  return false;
-                }).length || 0;
-                const totalCount = r?.model_results.length || 0;
-                // Calculate position using shared helper (same logic as overview card)
-                const pos = computePositionForResult(r, selectedClient);
-                const cit = r?.summary.total_citations || 0;
-                const isInactive = p.is_active === false;
-
-                return (
-                  <tr key={p.id} className={cn("hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0", isInactive && "opacity-60")}>
-                    <td className="px-3 py-2.5"><Checkbox checked={selectedPromptIds.has(p.id)} onCheckedChange={(checked) => { const newSet = new Set(selectedPromptIds); if (checked) { newSet.add(p.id); } else { newSet.delete(p.id); } setSelectedPromptIds(newSet); }} /></td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {isInactive && <Archive className="h-4 w-4 text-gray-400 flex-shrink-0" />}
-                        <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isAdmin || r) {
-                              setSelectedPromptDetail(p.id);
-                            }
-                          }}
-                          className={cn(
-                            "text-sm font-medium transition-colors",
-                            (isAdmin || r) ? "cursor-pointer hover:text-blue-600 hover:underline underline-offset-2 text-gray-900" : "cursor-default text-gray-400",
-                            isInactive && "text-gray-500"
-                          )}
-                        >
-                          {p.prompt_text}
-                        </span>
-                        {p.niche_level && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 uppercase tracking-wide flex-shrink-0 bg-gray-50 text-gray-600 border-gray-200">{p.niche_level === "super_niche" ? "Super Niche" : p.niche_level === "niche" ? "Niche" : "Broad"}</Badge>}
-                        {p.location_name && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 flex-shrink-0 bg-blue-50 text-blue-600 border-blue-200 flex items-center gap-1"><Globe className="h-2.5 w-2.5" />{p.location_name}</Badge>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {inlineEditTopicId === p.id ? (
-                        <input
-                          autoFocus
-                          type="text"
-                          value={inlineEditTopicValue}
-                          onChange={(e) => setInlineEditTopicValue(e.target.value)}
-                          onBlur={async () => {
-                            const newTopic = inlineEditTopicValue.trim();
-                            if (newTopic !== (p.topic || "")) {
-                              try {
-                                await updatePrompt(p.id, { topic: newTopic || "" });
-                              } catch (err: any) {
-                                console.error("Failed to update topic:", err);
-                              }
-                            }
-                            setInlineEditTopicId(null);
-                          }}
-                          onKeyDown={async (e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              (e.target as HTMLInputElement).blur();
-                            }
-                            if (e.key === "Escape") {
-                              setInlineEditTopicId(null);
-                            }
-                          }}
-                          className="w-full text-xs px-2 py-1 border border-violet-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
-                          placeholder="Enter topic..."
-                        />
-                      ) : (
-                        <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setInlineEditTopicId(p.id);
-                            setInlineEditTopicValue(p.topic || "");
-                          }}
-                          className="cursor-pointer group/topic"
-                          title="Click to edit topic"
-                        >
-                          {p.topic ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-200 text-xs font-medium truncate max-w-[120px] group-hover/topic:border-violet-400 transition-colors">
-                              <Tag className="h-2.5 w-2.5 flex-shrink-0" />{p.topic}
-                            </span>
-                          ) : <span className="text-gray-300 text-xs hover:text-violet-400 transition-colors">+ Add topic</span>}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      {(() => {
-                        const op = getAIOpportunity(p.id);
-                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: op.color + '18', color: op.color, border: `1px solid ${op.color}40` }}>{op.tier}</span>;
-                      })()}
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className={cn("text-sm font-medium", visibleCount > 0 ? "text-gray-900" : "text-gray-400")}>
-                        {r ? `${visibleCount}/${totalCount}` : "—"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-center text-gray-500 font-medium text-sm">{pos ? (typeof pos === 'number' ? pos.toFixed(1) : pos) : "—"}</td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center justify-center gap-1">
-                        {(() => {
-                          // Extract brands mentioned in responses
-                          // Non-admin: only tracked competitor brands
-                          // Admin: all detected brands (competitors + extracted entities)
-                          if (!r) return <span className="text-xs text-gray-400 italic">Not run</span>;
-
-                          const trackedBrands = new Set<string>();
-                          const brandName = selectedClient?.brand_name || '';
-                          const brandTags = selectedClient?.brand_tags || [];
-                          const competitors = selectedClient?.competitors || [];
-
-                          // Check all model responses for tracked brand/competitor mentions
-                          r.model_results.forEach(mr => {
-                            const response = (mr.raw_response || '');
-                            // Own brand: check brand_name + brand_tags with normalized matching
-                            if (brandName && brandMentionedInText(response, brandName, brandTags)) {
-                              trackedBrands.add(brandName);
-                            }
-                            // Competitors: use normalized matching so "monday.com" matches "Monday CRM" etc.
-                            competitors.forEach(comp => {
-                              if (brandMentionedInText(response, comp)) {
-                                trackedBrands.add(comp);
-                              }
-                            });
-                            // Also check competitors_found from backend (already matched by geo-audit)
-                            (mr.competitors_found || []).forEach(cf => {
-                              if (cf.count > 0) {
-                                // Map back to the original competitor name
-                                const matchedComp = competitors.find(c => brandNamesMatch(c, cf.name));
-                                trackedBrands.add(matchedComp || cf.name);
-                              }
-                            });
-                          });
-
-                          // Admin: also include extracted brand entities from DataForSEO
-                          if (isAdmin) {
-                            r.model_results.forEach(mr => {
-                              (mr.extracted_brands || []).forEach(eb => {
-                                if (!eb.is_own_brand) {
-                                  // Check if this extracted brand matches any configured competitor
-                                  const matchedComp = competitors.find(c => brandNamesMatch(c, eb.title));
-                                  trackedBrands.add(matchedComp || eb.title);
-                                }
-                              });
-                            });
-                          }
-
-                          // Non-admin: only show competitor brands (exclude own brand)
-                          const brandsArray = isAdmin
-                            ? Array.from(trackedBrands)
-                            : Array.from(trackedBrands).filter(b => competitors.some(c => brandNamesMatch(c, b)));
-                          if (brandsArray.length === 0) {
-                            return <span className="text-xs text-gray-400 italic">None</span>;
-                          }
-
-                          const displayBrands = brandsArray.slice(0, 6);
-                          const overflowCount = brandsArray.length - displayBrands.length;
-
-                          return (
-                            <div className="flex items-center gap-1.5">
-                              {displayBrands.map((brand, idx) => {
-                                const isUserBrand = brandNamesMatch(brand, brandName) || brandTags.some(t => brandNamesMatch(brand, t));
-                                const domain = `${brand.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
-                                return (
-                                  <div
-                                    key={idx}
-                                    title={brand}
-                                    className={cn(
-                                      "flex items-center justify-center h-7 w-7 rounded-md border transition-all hover:scale-110",
-                                      isUserBrand
-                                        ? "bg-green-50 border-green-200 shadow-sm ring-1 ring-green-100"
-                                        : "bg-white border-gray-200 shadow-sm"
-                                    )}
-                                  >
-                                    <img
-                                      src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
-                                      alt={brand}
-                                      className="h-4 w-4 rounded-sm"
-                                      onError={(e) => {
-                                        // Fallback to first letter if favicon fails
-                                        e.currentTarget.style.display = 'none';
-                                        e.currentTarget.parentElement!.innerText = brand.charAt(0).toUpperCase();
-                                        e.currentTarget.parentElement!.className += " text-[10px] font-bold text-gray-500 uppercase";
-                                      }}
-                                    />
-                                  </div>
-                                );
-                              })}
-                              {overflowCount > 0 && (
-                                <div className="h-7 w-7 rounded-md bg-gray-50 border border-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500 shadow-sm whitespace-nowrap px-1">
-                                  +{overflowCount}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5 text-center">{cit > 0 ? <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs">{cit}</Badge> : <span className="text-gray-300">—</span>}</td>
-                    {/* Recommendations Button */}
-                    <td className="px-4 py-2.5 text-center">
-                      {r ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={recsModalLoading && recsModalPromptId === p.id}
-                          onClick={async () => {
-                            // Open recommendations modal
-                            setRecsModalPromptId(p.id);
-                            setRecsModalOpen(true);
-                            setRecsModalLoading(true);
-                            setRecsModalData(null);
-
-                            // Generate ACTUAL recommendations based on model results and Tavily data
-                            const result = getPromptResult(p.id);
-                            if (result) {
-                              try {
-                                const tData = tavilyResults[p.id];
-                                const recs = await generateRecommendations(
-                                  p.prompt_text,
-                                  result,
-                                  tData
-                                );
-                                if (recs && recs.recommendations) {
-                                  setRecsModalData(recs.recommendations);
-                                } else {
-                                  setRecsModalData([]);
-                                }
-                              } catch (err) {
-                                console.error("Error generating recommendations:", err);
-                                setRecsModalData([]);
-                              }
-                            } else {
-                              // If no result yet, show empty or handle
-                              setRecsModalData([]);
-                            }
-                            setRecsModalLoading(false);
-                          }}
-                          className="h-7 px-3 text-xs font-medium text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300 flex items-center gap-1.5"
-                        >
-                          {recsModalLoading && recsModalPromptId === p.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Lightbulb className="h-3.5 w-3.5" />
-                          )}
-                          Recommendations
-                        </Button>
-                      ) : (
-                        <span className="text-gray-300">—</span>
-                      )}
-                    </td>
-                    {isAdmin && (
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center justify-center gap-1">
-                          {isInactive ? (
-                            <>
-                              <Button variant="ghost" size="sm" onClick={() => reactivatePrompt(p.id)} className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Restore prompt">
-                                <RotateCcw className="h-3.5 w-3.5" />
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              <Button variant="ghost" size="sm" onClick={() => runSinglePrompt(p.id)} disabled={isLoading} className="h-7 px-2 text-gray-500 hover:text-blue-600" title="Run audit">
-                                <Loader2 className={cn("h-3.5 w-3.5", isLoading && "animate-spin")} />
-                                {!isLoading && <RefreshCw className="h-3.5 w-3.5" />}
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {filteredPrompts.length === 0 && (
-            <div className="p-16 text-center">
-              {promptsTabView === "suggested" ? (
-                <>
-                  <CheckCircle className="h-12 w-12 mx-auto mb-4 text-green-300" />
-                  <p className="text-gray-600 font-medium">All prompts have been run!</p>
-                  <p className="text-sm text-gray-500 mt-1">Great job keeping up with your audits.</p>
-                </>
-              ) : promptsTabView === "inactive" ? (
-                <>
-                  <Archive className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-600 font-medium">No archived prompts</p>
-                  <p className="text-sm text-gray-500 mt-1">Archived prompts will appear here. Their data is preserved for tracking.</p>
-                </>
-              ) : (
-                <>
-                  <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-600 font-medium">No prompts yet</p>
-                  <p className="text-sm text-gray-500 mt-1">Add your first prompt to get started with audits.</p>
-                  <Button onClick={() => setBulkPromptsOpen(true)} className="mt-4" disabled={!isAdmin && prompts.length >= (isAgency ? 15 : 200)}><Plus className="h-4 w-4 mr-1" /> Add Prompt</Button>
-                  {!isAdmin && prompts.length >= (isAgency ? 15 : 200) && <p className="text-xs text-red-500 mt-2">{isAgency ? 'Agency' : 'Free'} prompt limit reached ({isAgency ? '15/15' : '200/200'})</p>}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Floating Action Bar for Bulk Operations */}
-        {selectedPromptIds.size > 0 && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white rounded-xl shadow-2xl px-6 py-3 flex items-center gap-4 animate-in slide-in-from-bottom-4">
-            {bulkRunProgress ? (
-              <div className="flex items-center gap-4 min-w-[300px]">
-                <span className="text-sm font-medium whitespace-nowrap text-blue-200">Running...</span>
-                <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${(bulkRunProgress.current / bulkRunProgress.total) * 100}%` }}></div>
-                </div>
-                <span className="text-sm font-medium whitespace-nowrap">{bulkRunProgress.current} / {bulkRunProgress.total}</span>
-              </div>
-            ) : (
-              <>
-                <span className="text-sm font-medium">{selectedPromptIds.size} selected</span>
-                <div className="h-4 w-px bg-gray-600" />
-
-                {/* Run Audit Button */}
-                {isAdmin && (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        if (selectedPromptIds.size === 0) return;
-                        const idsToRun = Array.from(selectedPromptIds);
-                        setBulkRunProgress({ current: 0, total: idsToRun.length });
-
-                        for (let i = 0; i < idsToRun.length; i++) {
-                          try {
-                            await runSinglePrompt(idsToRun[i]);
-                          } catch (e) {
-                            console.error("Run error", e);
-                          }
-                          setBulkRunProgress({ current: i + 1, total: idsToRun.length });
-                        }
-
-                        setBulkRunProgress(null);
-                        setSelectedPromptIds(new Set());
-                        toast.success(`Completed ${idsToRun.length} audits`);
-                      }}
-                      className="text-green-400 hover:text-green-300 hover:bg-gray-800"
-                    >
-                      <Play className="h-4 w-4 mr-1.5" />
-                      Run Audit
-                    </Button>
-                    <div className="h-4 w-px bg-gray-600" />
-                  </>
-                )}
-
-                {selectedPromptIds.size === 1 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      const promptId = Array.from(selectedPromptIds)[0];
-                      const prompt = prompts.find(pr => pr.id === promptId);
-                      if (prompt) {
-                        setEditingPromptId(promptId);
-                        setEditingPromptText(prompt.prompt_text);
-                        setEditingPromptTopic(prompt.topic || "");
-                        setEditPromptOpen(true);
-                        setSelectedPromptIds(new Set());
-                      }
-                    }}
-                    className="text-white hover:bg-gray-700"
-                  >
-                    <Settings className="h-4 w-4 mr-1.5" />
-                    Edit
-                  </Button>
-                )}
-                {selectedPromptIds.size === 1 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      const promptId = Array.from(selectedPromptIds)[0];
-                      const prompt = prompts.find(pr => pr.id === promptId);
-                      if (prompt) {
-                        setEditingLocationPromptId(promptId);
-                        setEditingLocationValue(prompt.location_name || "");
-                        setEditLocationOpen(true);
-                      }
-                    }}
-                    className="text-white hover:bg-gray-700"
-                  >
-                    <Globe className="h-4 w-4 mr-1.5" />
-                    Location
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={async () => {
-                    const idsToArchive = Array.from(selectedPromptIds);
-                    await bulkArchivePrompts(idsToArchive);
-                    setSelectedPromptIds(new Set());
-                    toast.success(`Archived ${idsToArchive.length} prompt${idsToArchive.length > 1 ? 's' : ''}`);
-                  }}
-                  className="text-white hover:bg-gray-700"
-                >
-                  <Archive className="h-4 w-4 mr-1.5" />
-                  Archive{selectedPromptIds.size > 1 ? ` (${selectedPromptIds.size})` : ''}
-                </Button>
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={async () => {
-                      if (!confirm(`Permanently delete ${selectedPromptIds.size} prompt${selectedPromptIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
-                      const idsToDelete = Array.from(selectedPromptIds);
-                      await bulkDeletePrompts(idsToDelete);
-                      setSelectedPromptIds(new Set());
-                      toast.success(`Deleted ${idsToDelete.length} prompt${idsToDelete.length > 1 ? 's' : ''}`);
-                    }}
-                    className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1.5" />
-                    Delete{selectedPromptIds.size > 1 ? ` (${selectedPromptIds.size})` : ''}
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedPromptIds(new Set())}
-                  className="text-gray-400 hover:text-white hover:bg-gray-700"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Recommendations Modal */}
-        <Dialog open={recsModalOpen} onOpenChange={setRecsModalOpen}>
-          <DialogContent className="sm:max-w-lg bg-white max-h-[85vh] flex flex-col">
-            <DialogHeader className="pb-4 border-b flex-shrink-0">
-              <DialogTitle className="text-lg font-semibold flex items-center gap-2">
-                <Lightbulb className="h-5 w-5 text-blue-600" />
-                Recommendations
-              </DialogTitle>
-            </DialogHeader>
-            <div className="py-4 space-y-4 flex-1 overflow-y-auto min-h-0 pr-2">
-              {recsModalLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                </div>
-              ) : recsModalData && recsModalData.length > 0 ? (
-                recsModalData.map((rec, idx) => (
-                  <div
-                    key={idx}
-                    className="flex gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl"
-                  >
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
-                      {idx + 1}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h4 className="font-semibold text-gray-900">{rec.title}</h4>
-                        <Badge className={cn('text-xs', rec.type === 'High Impact' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-teal-100 text-teal-700 border-teal-200')}>{rec.type}</Badge>
-                      </div>
-                      <p className="text-sm text-gray-600">{rec.whyThisWorks}</p>
-                      {rec.timeline && <p className="text-xs text-gray-400 mt-1">⏱ {rec.timeline}</p>}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <Lightbulb className="h-10 w-10 mx-auto mb-3 text-gray-300" />
-                  <p>No recommendations available</p>
-                </div>
-              )}
-            </div>
-            <div className="pt-4 border-t flex justify-end flex-shrink-0">
-              <Button variant="outline" onClick={() => setRecsModalOpen(false)}>Close</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div >
-    );
-  }
-
-  function TopicsTab() {
-    // All hooks (expandedTopic, topicData, unassignedPrompts) are at parent level
-    // to avoid conditional hook calls when tab switches
-    return (
-      <div className="space-y-4 animate-in fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Topics</h2>
-            <p className="text-sm text-gray-500 mt-0.5">Cumulative metrics for all prompts grouped by topic</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-500">{topicData.length} topic{topicData.length !== 1 ? 's' : ''}</span>
-            {unassignedPrompts.length > 0 && (
-              <Badge variant="outline" className="text-xs text-amber-600 bg-amber-50 border-amber-200">
-                {unassignedPrompts.length} unassigned
-              </Badge>
-            )}
-          </div>
-        </div>
-
-        {topicData.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center shadow-sm">
-            <Layers className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-            <p className="text-gray-600 font-medium">No topics yet</p>
-            <p className="text-sm text-gray-500 mt-1">Assign topics to your prompts using the seed keyword field when adding prompts.</p>
-            <Button onClick={() => { setActiveTab("prompts"); setBulkPromptsOpen(true); }} className="mt-4"><Plus className="h-4 w-4 mr-1" /> Add Prompts with Topic</Button>
-          </div>
-        ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-            <table className="w-full">
-              <thead className="bg-gray-50/80 border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Topic</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Prompts</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28" title="AI Opportunity reflects the relative strategic upside of improving visibility for this prompt in AI-generated answers.">AI Opportunity</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Avg Position</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Visibility</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Citations</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Brands</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {topicData.map((td) => (
-                  <React.Fragment key={td.topic}>
-                    <tr
-                      className="hover:bg-gray-50 transition-colors cursor-pointer"
-                      onClick={() => setExpandedTopic(expandedTopic === td.topic ? null : td.topic)}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <ChevronRight className={cn("h-4 w-4 text-gray-400 transition-transform", expandedTopic === td.topic && "rotate-90")} />
-                          <Tag className="h-4 w-4 text-violet-500" />
-                          <span className="font-medium text-gray-900">{td.topic}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <Badge variant="secondary" className="bg-gray-100 text-gray-700 text-xs">{td.promptCount}</Badge>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {(() => {
-                          const op = (td as any).aiOpportunity || { tier: 'Minimal', color: '#9ca3af' };
-                          return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: op.color + '18', color: op.color, border: `1px solid ${op.color}40` }}>{op.tier}</span>;
-                        })()}
-                      </td>
-                      <td className="px-4 py-3 text-center text-sm font-medium text-gray-600">
-                        {td.avgPosition ? `#${td.avgPosition}` : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={cn("text-sm font-medium", td.visibilityPct > 0 ? "text-gray-900" : "text-gray-400")}>
-                          {td.visibility}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {td.citations > 0 ? (
-                          <Badge variant="secondary" className="bg-blue-50 text-blue-700 border border-blue-200 text-xs">{td.citations}</Badge>
-                        ) : <span className="text-gray-300">—</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-center gap-1">
-                          {td.brands.slice(0, 4).map((brand, idx) => {
-                            const domain = `${brand.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
-                            const freq = td.brandFrequencies?.[brand] || 0;
-                            return (
-                              <div key={idx} title={`${brand} (${freq}x)`} className="relative h-6 w-6 rounded-md border border-gray-200 bg-white shadow-sm flex items-center justify-center">
-                                <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`} alt={brand} className="h-3.5 w-3.5 rounded-sm"
-                                  onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerText = brand.charAt(0).toUpperCase(); e.currentTarget.parentElement!.className += " text-[9px] font-bold text-gray-500"; }}
-                                />
-                                {freq > 1 && <span className="absolute -top-1.5 -right-1.5 bg-blue-600 text-white text-[8px] font-bold rounded-full h-3.5 min-w-[14px] flex items-center justify-center px-0.5 leading-none">{freq}</span>}
-                              </div>
-                            );
-                          })}
-                          {td.brands.length > 4 && <span className="text-[10px] font-bold text-gray-500">+{td.brands.length - 4}</span>}
-                          {td.brands.length === 0 && <span className="text-xs text-gray-300">—</span>}
-                        </div>
-                      </td>
-                    </tr>
-
-                    {/* Expanded: show individual prompts */}
-                    {expandedTopic === td.topic && td.prompts.map((p) => {
-                      const r = getPromptResult(p.id);
-                      const vis = r ? `${r.model_results.filter(mr => mr.brand_mentioned).length}/${r.model_results.length}` : "—";
-                      const pos = computePositionForResult(r, selectedClient);
-                      const cit = r?.summary.total_citations || 0;
-
-                      return (
-                        <tr key={p.id} className="bg-gray-50/50 hover:bg-gray-100/50 transition-colors">
-                          <td className="px-4 py-2 pl-12">
-                            <span
-                              className="text-sm text-gray-700 cursor-pointer hover:text-blue-600 hover:underline underline-offset-2"
-                              onClick={(e) => { e.stopPropagation(); setSelectedPromptDetail(p.id); }}
-                            >
-                              {p.prompt_text}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 text-center text-xs text-gray-400">—</td>
-                          <td className="px-4 py-2 text-center">
-                            {(() => {
-                              const op = getAIOpportunity(p.id);
-                              return <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold" style={{ backgroundColor: op.color + '18', color: op.color, border: `1px solid ${op.color}40` }}>{op.tier}</span>;
-                            })()}
-                          </td>
-                          <td className="px-4 py-2 text-center text-xs text-gray-500">{pos ? `#${pos}` : "—"}</td>
-                          <td className="px-4 py-2 text-center text-xs text-gray-500">{vis}</td>
-                          <td className="px-4 py-2 text-center text-xs text-gray-500">{cit > 0 ? cit : "—"}</td>
-                          <td className="px-4 py-2 text-center text-xs text-gray-400">—</td>
-                        </tr>
-                      );
-                    })}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Unassigned prompts section */}
-        {unassignedPrompts.length > 0 && (
-          <div className="bg-amber-50/50 rounded-xl border border-amber-200 p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              <span className="text-sm font-medium text-amber-800">{unassignedPrompts.length} prompts without a topic</span>
-            </div>
-            <p className="text-xs text-amber-600">These prompts are not grouped into any topic. Edit them to assign a topic for aggregated analytics.</p>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function SourcesTab() {
-
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3"><div className="p-2 bg-blue-100 rounded-lg"><Globe className="h-5 w-5 text-blue-600" /></div><div><h4 className="font-medium text-blue-900">What are Sources?</h4><p className="text-sm text-blue-700 mt-0.5">Sources are the origin websites where AI models pull facts from. These are the domains that the AI references when generating responses - the places where the information comes from.</p></div></div>
-        <div className="flex items-center gap-2">
-          {sourcesView === "domains" && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!!categorizationProgress?.running}
-                onClick={async () => {
-                  const allDomains = domainStats.map(d => d.domain);
-
-                  if (allDomains.length === 0) {
-                    toast.success("No domains to categorize!");
-                    return;
-                  }
-
-                  setCategorizationProgress({ completed: 0, total: allDomains.length, currentBatch: 0, totalBatches: Math.ceil(allDomains.length / 100), running: true });
-
-                  await categorizeCitations(allDomains, (progress) => {
-                    setCategorizationProgress({ ...progress, running: progress.completed < progress.total });
-                  });
-
-                  setCategorizationProgress(null);
-                }}
-                className="hidden md:flex"
-              >
-                {categorizationProgress?.running ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5 mr-1 text-purple-600" />
-                )}
-                {categorizationProgress?.running
-                  ? `Categorizing... ${Math.round((categorizationProgress.completed / categorizationProgress.total) * 100)}%`
-                  : "Categorize with AI"}
-              </Button>
-              {categorizationProgress?.running && (
-                <div className="flex items-center gap-2 min-w-[200px]">
-                  <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500 ease-out rounded-full"
-                      style={{ width: `${Math.round((categorizationProgress.completed / categorizationProgress.total) * 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-500 whitespace-nowrap">
-                    {categorizationProgress.completed}/{categorizationProgress.total} · Batch {categorizationProgress.currentBatch}/{categorizationProgress.totalBatches}
-                  </span>
-                </div>
-              )}
-
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!!verificationProgress?.running}
-                onClick={async () => {
-                  // Get all citations that need verification
-                  const citationsToVerify = allCitations
-                    .filter(c => citationMeta?.[c.domain]?.verification_status === 'pending' || !citationMeta?.[c.domain]?.verification_status)
-                    .map(c => ({ url: c.url, citation_id: c.url }));
-
-                  if (citationsToVerify.length === 0) {
-                    toast.success("All citations verified!");
-                    return;
-                  }
-
-                  setVerificationProgress({ completed: 0, total: citationsToVerify.length, currentBatch: 0, totalBatches: Math.ceil(citationsToVerify.length / 10), running: true });
-
-                  // Use brand name as the claim for verification
-                  const claim = selectedClient?.brand_name || "brand mention";
-
-                  await verifyCitations(citationsToVerify, claim, (progress) => {
-                    setVerificationProgress({ ...progress, running: progress.completed < progress.total });
-                  });
-
-                  setVerificationProgress(null);
-                }}
-                className="hidden md:flex"
-              >
-                {verificationProgress?.running ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <Shield className="h-3.5 w-3.5 mr-1 text-green-600" />
-                )}
-                {verificationProgress?.running
-                  ? `Verifying... ${Math.round((verificationProgress.completed / verificationProgress.total) * 100)}%`
-                  : "Verify Citations"}
-              </Button>
-              {verificationProgress?.running && (
-                <div className="flex items-center gap-2 min-w-[200px]">
-                  <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-500 ease-out rounded-full"
-                      style={{ width: `${Math.round((verificationProgress.completed / verificationProgress.total) * 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-500 whitespace-nowrap">
-                    {verificationProgress.completed}/{verificationProgress.total} · Batch {verificationProgress.currentBatch}/{verificationProgress.totalBatches}
-                  </span>
-                </div>
-              )}
-            </>
-          )}
-          <button onClick={() => setSourcesView("domains")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "domains" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>Domains ({domainStats.length})</button>
-          <button onClick={() => setSourcesView("urls")} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-colors", sourcesView === "urls" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50")}>URLs ({allCitations.length})</button>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900">Source Usage by Domain</h3><div className="flex items-center gap-4 text-xs">{domainStats.slice(0, 5).map((s, i) => (<div key={i} className="flex items-center gap-1.5"><img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} alt="" className="h-3.5 w-3.5 rounded" /><span className="text-gray-600">{s.domain}</span></div>))}</div></div>
-          <div className="h-48 flex items-end gap-2 border-b border-gray-100 pb-4">{domainStats.slice(0, 15).map((s, i) => { const max = Math.max(...domainStats.slice(0, 15).map(x => x.count), 1); const h = (s.count / max) * 100; const t = DOMAIN_TYPES[s.type] || DOMAIN_TYPES.other; return (<div key={i} className="flex-1 flex flex-col items-center gap-1 group cursor-pointer" onClick={() => setExpandedDomain(expandedDomain === s.domain ? null : s.domain)}><div className="w-full rounded-t hover:opacity-80 transition-opacity relative" style={{ height: `${Math.max(h, 4)}%`, backgroundColor: t.dot, minHeight: 4 }}><div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">{s.domain}: {s.count}</div></div><span className="text-xs text-gray-500">{s.count}</span></div>); })}</div>
-          <div className="flex items-center justify-end gap-4 mt-4 text-xs">{Object.entries(DOMAIN_TYPES).slice(0, 6).map(([k, t]) => (<div key={k} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.dot }} /><span className="text-gray-600">{t.label}</span></div>))}</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b border-gray-100"><div className="flex items-center gap-3">{sourcesView === "domains" && <><button onClick={() => setSourcesGapView("all")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "all" ? "bg-gray-100 text-gray-700" : "text-gray-500 hover:bg-gray-50")}><Globe className="h-3.5 w-3.5" /> All Domains</button><button onClick={() => setSourcesGapView("gap")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", sourcesGapView === "gap" ? "bg-orange-100 text-orange-700" : "text-gray-500 hover:bg-gray-50")}><AlertTriangle className="h-3.5 w-3.5" /> Gap Analysis{gapDomains.length > 0 && <Badge variant="secondary" className="ml-1">{gapDomains.length}</Badge>}</button></>}{sourcesView === "urls" && <span className="text-sm font-medium text-gray-700">All URLs ({modelFilteredCitations.length})</span>}</div><div className="flex items-center gap-2">
-            {/* Multi-select LLM Model Filter */}
-            <div className="relative">
-              <button
-                onClick={() => setSourcesModelFilterOpen(!sourcesModelFilterOpen)}
-                className={cn(
-                  "h-9 px-3 rounded-lg border text-sm font-medium transition-colors flex items-center gap-2",
-                  sourcesModelFilter.length > 0
-                    ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                )}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {sourcesModelFilter.length === 0
-                  ? "All Models"
-                  : sourcesModelFilter.length === 1
-                    ? AI_MODELS.find(m => m.id === sourcesModelFilter[0])?.name || sourcesModelFilter[0]
-                    : `${sourcesModelFilter.length} Models`}
-                {sourcesModelFilter.length > 0 && (
-                  <span className="ml-0.5 px-1.5 py-0.5 bg-blue-200 text-blue-800 text-xs font-bold rounded-full">{sourcesModelFilter.length}</span>
-                )}
-                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", sourcesModelFilterOpen && "rotate-180")} />
-              </button>
-              {sourcesModelFilterOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setSourcesModelFilterOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 w-64 bg-white rounded-lg border border-gray-200 shadow-lg z-50 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Filter by AI Engine</span>
-                      <button
-                        onClick={() => setSourcesModelFilter(sourcesModelFilter.length === AI_MODELS.length ? [] : AI_MODELS.map(m => m.id))}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                      >
-                        {sourcesModelFilter.length === AI_MODELS.length ? "Clear All" : "Select All"}
-                      </button>
-                    </div>
-                    {AI_MODELS.map(model => {
-                      const Logo = MODEL_LOGOS[model.id]?.Logo;
-                      const color = MODEL_LOGOS[model.id]?.color || "#666";
-                      const isSelected = sourcesModelFilter.includes(model.id);
-                      return (
-                        <label
-                          key={model.id}
-                          className={cn(
-                            "flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors",
-                            isSelected ? "bg-blue-50/50" : "hover:bg-gray-50"
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {
-                              setSourcesModelFilter(prev =>
-                                prev.includes(model.id)
-                                  ? prev.filter(id => id !== model.id)
-                                  : [...prev, model.id]
-                              );
-                            }}
-                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <div className="flex items-center gap-2 flex-1">
-                            {Logo && <Logo className="h-4 w-4" style={{ color }} />}
-                            <span className="text-sm font-medium text-gray-700">{model.name}</span>
-                          </div>
-                          <span className="text-xs text-gray-400">{model.provider === "DataForSEO" ? "Google" : model.provider}</span>
-                        </label>
-                      );
-                    })}
-                    {sourcesModelFilter.length > 0 && (
-                      <div className="px-3 py-2 border-t border-gray-100">
-                        <button
-                          onClick={() => { setSourcesModelFilter([]); setSourcesModelFilterOpen(false); }}
-                          className="w-full text-center text-xs text-gray-500 hover:text-gray-700 font-medium py-1"
-                        >
-                          Reset to All Models
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            <select value={sourcesTypeFilter} onChange={(e) => setSourcesTypeFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"><option value="all">All Types</option>{Object.entries(DOMAIN_TYPES).map(([key, val]) => (<option key={key} value={key}>{val.label}</option>))}</select><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder={sourcesView === "urls" ? "Search URLs..." : "Search domains..."} value={sourceSearch} onChange={(e) => setSourceSearch(e.target.value)} className="pl-9 w-48 h-9" /></div><Button variant="outline" size="sm" onClick={exportSources}><Download className="h-3.5 w-3.5 mr-1" /> Export {sourcesView === "domains" ? "Domains" : "URLs"}</Button></div></div>
-          {sourcesGapView === "gap" && sourcesView === "domains" && (<div className="px-4 py-3 bg-orange-50 border-b border-orange-100"><p className="text-sm text-orange-700"><AlertTriangle className="h-4 w-4 inline mr-1" />These domains cite your competitors but not your brand.</p></div>)}
-          {sourcesView === "domains" ? (
-            <div className="max-h-[600px] overflow-y-auto">
-              <table className="w-full relative">
-                <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
-                  <tr>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-16">#</th>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
-                      <div className="flex items-center gap-1.5 cursor-pointer hover:text-gray-900 group" title="The domain where AI models found this information">
-                        <span>Source</span>
-                        <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" />
-                      </div>
-                    </th>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
-                      <div className="flex items-center gap-1" title="Category of the source (UGC, Editorial, Wikipedia, etc.)">
-                        <span>Type</span>
-                        <Info className="h-3 w-3 text-gray-400" />
-                      </div>
-                    </th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
-                      <div className="flex items-center justify-center gap-1" title="Basic check for suspicious domains">
-                        <span>Verified</span>
-                        <Info className="h-3 w-3 text-gray-400" />
-                      </div>
-                    </th>
-                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
-                      <div className="flex items-center justify-end gap-1" title="Total number of times this domain was cited across all model responses">
-                        <span>Citations</span>
-                        <Info className="h-3 w-3 text-gray-400" />
-                      </div>
-                    </th>
-                    <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
-                      <div className="flex items-center justify-end gap-1" title="Number of unique prompts where this domain appeared">
-                        <span>Prompts</span>
-                        <Info className="h-3 w-3 text-gray-400" />
-                      </div>
-                    </th>
-                    {sourcesGapView === "gap" && <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Competitors</th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(displayedStats as typeof domainStats).filter(s => { const nc = normalizeCitationCategory(citationMeta?.[s.domain]?.category); const ft = (nc && nc !== 'other') ? nc : classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name); return sourcesTypeFilter === "all" || ft === sourcesTypeFilter; }).map((s, i) => {
-                    const nc = normalizeCitationCategory(citationMeta?.[s.domain]?.category); const type = (nc && nc !== 'other') ? nc : classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
-                    const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
-                    const isExpanded = expandedDomain === s.domain;
-                    const domainCitations = allCitations.filter(c => c.domain === s.domain);
-                    return (
-                      <React.Fragment key={i}>
-                        <tr
-                          className={cn("hover:bg-gray-50 cursor-pointer transition-colors group", isExpanded && "bg-blue-50/50")}
-                          onClick={() => setExpandedDomain(isExpanded ? null : s.domain)}
-                          onMouseEnter={(e) => {
-                            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const previewWidth = 480;
-                            const leftPosition = Math.max(10, rect.left - previewWidth - 16);
-                            const topPosition = Math.min(rect.top, window.innerHeight - 250);
-                            hoverTimeoutRef.current = setTimeout(() => {
-                              setHoveredCitation({
-                                domain: s.domain,
-                                url: `https://${s.domain}`,
-                                mouseX: leftPosition,
-                                mouseY: topPosition
-                              });
-                            }, 400);
-                          }}
-                          onMouseLeave={() => {
-                            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-                            setHoveredCitation(null);
-                          }}
-                        >
-                          <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="p-1 bg-white rounded border border-gray-100 shadow-sm">
-                                <img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=32`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ccc"><circle cx="12" cy="12" r="10"/></svg>'; }} />
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <a href={`https://${s.domain}`} target="_blank" rel="noopener noreferrer" className="text-base font-semibold text-gray-900 hover:text-blue-600 hover:underline decoration-blue-300 underline-offset-2" onClick={(e) => e.stopPropagation()}>{s.domain}</a>
-                                <ChevronRight className={cn("h-4 w-4 text-gray-400 transition-transform duration-200", isExpanded && "rotate-90 text-blue-500")} />
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            {(() => {
-                              const nc = normalizeCitationCategory(citationMeta?.[s.domain]?.category); const type = (nc && nc !== 'other') ? nc : classifyDomain(s.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name);
-                              const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
-                              return <span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span>;
-                            })()}
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            {(() => {
-                              const meta = citationMeta?.[s.domain];
-                              const status = meta?.verification_status || 'pending';
-
-                              if (status === 'verified') {
-                                return (
-                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 flex items-center gap-1 w-fit mx-auto">
-                                    <CheckCircle className="h-3 w-3" />
-                                    Verified
-                                  </Badge>
-                                );
-                              } else if (status === 'partially_verified') {
-                                return (
-                                  <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 flex items-center gap-1 w-fit mx-auto">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Partial
-                                  </Badge>
-                                );
-                              } else if (status === 'hallucinated') {
-                                return (
-                                  <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200 flex items-center gap-1 w-fit mx-auto">
-                                    <X className="h-3 w-3" />
-                                    Hallucinated
-                                  </Badge>
-                                );
-                              } else if (status === 'error') {
-                                return (
-                                  <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200 flex items-center gap-1 w-fit mx-auto">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Error
-                                  </Badge>
-                                );
-                              } else {
-                                return (
-                                  <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200 flex items-center gap-1 w-fit mx-auto">
-                                    <Clock className="h-3 w-3" />
-                                    Pending
-                                  </Badge>
-                                );
-                              }
-                            })()}
-                          </td>
-                          <td className="px-6 py-4 text-right text-base font-medium text-gray-700">{s.count}</td>
-                          <td className="px-6 py-4 text-right text-sm text-gray-500">{s.promptCount}</td>
-                          {sourcesGapView === "gap" && (
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {((s as any).gapCompetitors || []).slice(0, 3).map((comp: string, j: number) => (
-                                  <span key={j} className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 border border-red-200 rounded text-xs text-red-700 font-medium whitespace-nowrap"><Building2 className="h-3 w-3" />{comp}</span>
-                                ))}
-                                {((s as any).gapCompetitors || []).length > 3 && (
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <button onClick={(e) => e.stopPropagation()} className="text-xs text-gray-500 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-gray-200">
-                                        +{(s as any).gapCompetitors.length - 3}
-                                      </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent onClick={(e) => e.stopPropagation()} align="start" className="w-48">
-                                      <div className="px-2 py-1.5 text-xs font-semibold text-gray-500">Other Competitors</div>
-                                      <DropdownMenuSeparator />
-                                      {((s as any).gapCompetitors || []).slice(3).map((comp: string, k: number) => (
-                                        <div key={k} className="px-2 py-1.5 text-sm flex items-center gap-2">
-                                          <Building2 className="h-3.5 w-3.5 text-gray-400" />
-                                          <span>{comp}</span>
-                                        </div>
-                                      ))}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                )}
-                              </div>
-                            </td>
-                          )}
-                        </tr>
-                        {isExpanded && (
-                          <tr className="bg-gray-50/50">
-                            <td colSpan={sourcesGapView === "gap" ? 7 : 6} className="px-0 py-0 border-b border-gray-200">
-                              <div className="p-6 bg-gray-50/50 space-y-6 animate-in slide-in-from-top-2 duration-200">
-                                <div>
-                                  <div className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                                    <div className="p-1 bg-blue-100 rounded text-blue-600"><Link2 className="h-3.5 w-3.5" /></div>
-                                    All Citations from {s.domain} ({domainCitations.length})
-                                  </div>
-                                  <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto pr-2">
-                                    {domainCitations.length > 0 ? domainCitations.map((c, j) => (
-                                      <div key={j} className="flex items-center gap-4 p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-200 hover:shadow-sm transition-all group/card">
-                                        <div className="flex-1 min-w-0">
-                                          <div className="text-sm font-medium text-gray-900 truncate group-hover/card:text-blue-600 transition-colors">{c.title || c.url}</div>
-                                          <div className="text-xs text-gray-500 truncate mt-0.5">{c.url}</div>
-                                        </div>
-                                        <span className="px-2.5 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-full border border-gray-200">{c.count}x</span>
-                                        <a href={c.url} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" onClick={(e) => e.stopPropagation()}>
-                                          <ExternalLink className="h-4 w-4" />
-                                        </a>
-                                      </div>
-                                    )) : <p className="text-sm text-gray-500 italic">No individual URLs tracked for this domain</p>}
-                                  </div>
-                                </div>
-                                {s.prompts && s.prompts.length > 0 && (
-                                  <div>
-                                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Cited in prompts ({s.prompts.length})</div>
-                                    <div className="flex flex-wrap gap-2">
-                                      {s.prompts.map((prompt: any, j: number) => (
-                                        <Badge key={j} variant="secondary" className={cn(
-                                          "text-xs max-w-full bg-white border transition-colors px-2 py-1 flex items-center gap-1.5 h-auto whitespace-normal text-left",
-                                          prompt.visible ? "border-green-200 hover:border-green-300 bg-green-50/30" : "border-gray-200 hover:border-blue-200 hover:bg-gray-50"
-                                        )}>
-                                          {prompt.visible ? (
-                                            <CheckCircle className="h-3 w-3 text-green-600 flex-shrink-0" />
-                                          ) : (
-                                            <Circle className="h-3 w-3 text-gray-300 flex-shrink-0" />
-                                          )}
-                                          <span className={cn("truncate max-w-[300px]", prompt.visible ? "text-green-900" : "text-gray-700")}>{prompt.text}</span>
-                                          {prompt.competitors && prompt.competitors.length > 0 && (
-                                            <span className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium border border-orange-200" title={`Competitors mentioned: ${prompt.competitors.join(", ")}`}>
-                                              <AlertTriangle className="h-3 w-3" />
-                                              {prompt.competitors.length}
-                                            </span>
-                                          )}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="max-h-[600px] overflow-y-auto">
-              <table className="w-full relative">
-                <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
-                  <tr>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-16">#</th>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
-                      <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group"><Link2 className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /> URL <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
-                    </th>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-48">Domain</th>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-32">Type</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Verified</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Count</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-20">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredUrlCitations.filter(c => { const nc = normalizeCitationCategory(citationMeta?.[c.domain]?.category); const ft = (nc && nc !== 'other') ? nc : classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors); return sourcesTypeFilter === "all" || ft === sourcesTypeFilter; }).map((c, i) => {
-                    const nc = normalizeCitationCategory(citationMeta?.[c.domain]?.category); const type = (nc && nc !== 'other') ? nc : classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors);
-                    const t = DOMAIN_TYPES[type] || DOMAIN_TYPES.other;
-                    return (
-                      <tr
-                        key={i}
-                        className="hover:bg-gray-50 transition-colors group"
-                        onMouseEnter={(e) => {
-                          if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const previewWidth = 480;
-                          const leftPosition = Math.max(10, rect.left - previewWidth - 16);
-                          const topPosition = Math.min(rect.top, window.innerHeight - 250);
-                          hoverTimeoutRef.current = setTimeout(() => {
-                            setHoveredCitation({
-                              domain: c.domain,
-                              url: c.url,
-                              mouseX: leftPosition,
-                              mouseY: topPosition
-                            });
-                          }, 400);
-                        }}
-                        onMouseLeave={() => {
-                          if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-                          setHoveredCitation(null);
-                        }}
-                      >
-                        <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=16`} alt="" className="h-4 w-4 rounded opacity-70" />
-                            <div className="min-w-0 max-w-lg">
-                              <div className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600 transition-colors">{c.title || c.url}</div>
-                              <div className="text-xs text-gray-500 truncate mt-0.5">{c.url}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">{c.domain}</td>
-                        <td className="px-6 py-4"><span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span></td>
-                        <td className="px-6 py-4 text-center">
-                          {(() => {
-                            try {
-                              const domain = new URL(c.url).hostname.replace('www.', '');
-                              const meta = citationMeta?.[domain];
-                              const status = meta?.verification_status || 'pending';
-
-                              if (status === 'verified') {
-                                return (
-                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 flex items-center gap-1 w-fit mx-auto">
-                                    <CheckCircle className="h-3 w-3" />
-                                    Verified
-                                  </Badge>
-                                );
-                              } else if (status === 'partially_verified') {
-                                return (
-                                  <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 flex items-center gap-1 w-fit mx-auto">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Partial
-                                  </Badge>
-                                );
-                              } else if (status === 'hallucinated') {
-                                return (
-                                  <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200 flex items-center gap-1 w-fit mx-auto">
-                                    <X className="h-3 w-3" />
-                                    Hallucinated
-                                  </Badge>
-                                );
-                              } else if (status === 'error') {
-                                return (
-                                  <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200 flex items-center gap-1 w-fit mx-auto">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Error
-                                  </Badge>
-                                );
-                              } else {
-                                return (
-                                  <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200 flex items-center gap-1 w-fit mx-auto">
-                                    <Clock className="h-3 w-3" />
-                                    Pending
-                                  </Badge>
-                                );
-                              }
-                            } catch {
-                              return <Badge variant="outline" className="bg-gray-50 text-gray-500 border-gray-200">Pending</Badge>;
-                            }
-                          })()}
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 bg-blue-50 text-blue-700 text-sm font-bold rounded-full">{c.count}</span>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Open URL">
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {displayedStats.length === 0 && sourcesView === "domains" && (<div className="p-12 text-center"><Globe className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">{sourcesGapView === "gap" ? "No gap opportunities found" : "No source data yet. Run audits to collect data."}</p></div>)}
-          {filteredUrlCitations.length === 0 && sourcesView === "urls" && (<div className="p-12 text-center"><Link2 className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No URLs yet. Run audits to collect data.</p></div>)}
-          {sourcesView === "urls" && filteredUrlCitations.length > 0 && <div className="p-3 text-center text-sm text-gray-500 border-t bg-gray-50">Showing all {filteredUrlCitations.length} URLs</div>}
-          {sourcesView === "domains" && displayedStats.length > 0 && <div className="p-3 text-center text-sm text-gray-500 border-t bg-gray-50">Showing all {displayedStats.length} domains</div>}
-
-          {/* Citation Preview on Hover */}
-          {hoveredCitation && (
-            <div
-              style={{
-                position: 'fixed',
-                left: `${hoveredCitation.mouseX}px`,
-                top: `${hoveredCitation.mouseY}px`,
-                zIndex: 99999
-              }}
-            >
-              <CitationPreview
-                domain={hoveredCitation.domain}
-                url={hoveredCitation.url}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  function CitationsTab() {
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 flex items-start gap-3"><div className="p-2 bg-purple-100 rounded-lg"><Link2 className="h-5 w-5 text-purple-600" /></div><div><h4 className="font-medium text-purple-900">What are Citations?</h4><p className="text-sm text-purple-700 mt-0.5">Citations are the specific URLs that AI shows to prove its responses. They're the evidence that the AI uses to back up what it says - citation-backed responses mean the answer is traceable.</p></div></div>
-        <div className="flex items-center justify-between"><div className="flex items-center gap-4"><h2 className="text-lg font-semibold text-gray-900">All Citations</h2><Badge variant="outline">{allCitations.length} total</Badge></div><div className="flex items-center gap-2"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><Input placeholder="Search citations..." value={citationSearch} onChange={(e) => setCitationSearch(e.target.value)} className="pl-9 w-64" /></div><Button variant="outline" size="sm" onClick={exportCitations}><Download className="h-4 w-4 mr-1" /> Export Citations</Button></div></div>
-        <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-2 bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="max-h-[600px] overflow-y-auto">
-              <table className="w-full relative">
-                <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
-                  <tr>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-16">#</th>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase">
-                      <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">URL <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
-                    </th>
-                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-48">Domain</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Count</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Type</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-28">Hallucinated?</th>
-                    <th className="text-center px-6 py-4 text-xs font-semibold text-gray-500 uppercase w-24">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredCitations.map((c, i) => {
-                    const nc3 = normalizeCitationCategory(citationMeta?.[c.domain]?.category); const t = DOMAIN_TYPES[(nc3 && nc3 !== 'other') ? nc3 : classifyDomain(c.domain, selectedClient?.brand_domain, selectedClient?.competitors, selectedClient?.brand_name)] || DOMAIN_TYPES.other;
-                    return (
-                      <tr key={i} className={cn("hover:bg-gray-50 transition-colors group cursor-pointer border-b border-gray-50 last:border-0", selectedCitation === c.url && "bg-blue-50/50")} onClick={() => setSelectedCitation(c.url)}>
-                        <td className="px-6 py-4 text-sm text-gray-400 font-mono">{i + 1}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="p-1 bg-white rounded border border-gray-100 shadow-sm flex-shrink-0">
-                              <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" className="h-4 w-4 rounded opacity-80" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ccc"><circle cx="12" cy="12" r="10"/></svg>'; }} />
-                            </div>
-                            <div className="min-w-0 max-w-lg">
-                              <div className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600 transition-colors">{c.title || c.url}</div>
-                              <div className="text-xs text-gray-500 truncate mt-0.5">{c.url}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">{c.domain}</td>
-                        <td className="px-6 py-4 text-center">
-                          <span className="inline-flex items-center justify-center min-w-[32px] px-2 py-1 bg-blue-50 text-blue-700 text-sm font-bold rounded-full border border-blue-100">{c.count}</span>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <span className={cn("px-2.5 py-1 rounded-full text-xs font-medium border", t.bg, t.color, "border-opacity-20")}>{t.label}</span>
-                        </td>
-                        {/* Hallucination Detection - Basic heuristics */}
-                        <td className="px-6 py-4 text-center">
-                          {(() => {
-                            // Basic hallucination detection heuristics
-                            const url = c.url?.toLowerCase() || "";
-                            const domain = c.domain?.toLowerCase() || "";
-
-                            // Likely hallucinated patterns
-                            const suspiciousPatterns = [
-                              /example\.com/,
-                              /test\./,
-                              /fake\./,
-                              /sample\./,
-                              /placeholder/,
-                              /lorem/,
-                              /xxx\./,
-                            ];
-                            const hasRandomString = /[a-z]{20,}/.test(url);
-                            const hasSuspiciousPattern = suspiciousPatterns.some(p => p.test(url));
-                            const hasMissingScheme = !url.startsWith('http://') && !url.startsWith('https://');
-
-                            // Detection logic
-                            let status: 'yes' | 'no' | 'maybe' = 'no';
-                            if (hasSuspiciousPattern || hasRandomString) {
-                              status = 'yes';
-                            } else if (hasMissingScheme || domain.length < 4) {
-                              status = 'maybe';
-                            }
-
-                            return (
-                              <Badge className={cn(
-                                "text-xs",
-                                status === 'yes' && "bg-red-100 text-red-700 hover:bg-red-100 border-red-200",
-                                status === 'no' && "bg-green-100 text-green-700 hover:bg-green-100 border-green-200",
-                                status === 'maybe' && "bg-yellow-100 text-yellow-700 hover:bg-yellow-100 border-yellow-200"
-                              )}>
-                                {status === 'yes' ? 'Yes' : status === 'no' ? 'No' : 'Maybe'}
-                              </Badge>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" onClick={(e) => e.stopPropagation()} title="Open URL">
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {filteredCitations.length === 0 && (<div className="p-12 text-center"><Link2 className="h-10 w-10 mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No citations yet. Run audits to collect citation data.</p></div>)}
-            {filteredCitations.length > 0 && <div className="p-3 text-center text-sm text-gray-500 border-t bg-gray-50">Showing all {filteredCitations.length} citations</div>}
-          </div>
-          <div className="space-y-4">
-            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-4">Citations by Prompt</h3><div className="space-y-3 max-h-96 overflow-y-auto">{Object.entries(citationsByPrompt).map(([promptId, citations]) => { const prompt = prompts.find(p => p.id === promptId); const result = filteredAuditResults.find(r => r.prompt_id === promptId); return (<div key={promptId} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer border border-gray-200" onClick={() => setSelectedPromptDetail(promptId)}><div className="text-sm font-medium text-gray-900 line-clamp-2">{prompt?.prompt_text || result?.prompt_text}</div><div className="flex items-center gap-3 mt-2"><div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(citations.length * 10, 100)}%` }} /></div><span className="text-xs font-medium text-gray-700 whitespace-nowrap">{citations.length} citations</span></div></div>); })}{Object.keys(citationsByPrompt).length === 0 && <p className="text-sm text-gray-500 text-center py-4">No citations collected yet</p>}</div></div>
-            {selectedCitation && (<div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Citation Details</h3>{(() => { const c = allCitations.find(x => x.url === selectedCitation); if (!c) return null; return (<div className="space-y-3"><div><Label className="text-xs text-gray-500">Title</Label><p className="text-sm text-gray-900">{c.title || "No title"}</p></div><div><Label className="text-xs text-gray-500">URL</Label><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all">{c.url}</a></div><div><Label className="text-xs text-gray-500">Domain</Label><p className="text-sm text-gray-900">{c.domain}</p></div><div><Label className="text-xs text-gray-500">Cited in {c.prompts.length} prompt(s)</Label><div className="mt-1 space-y-1">{c.prompts.slice(0, 5).map((p, i) => <p key={i} className="text-xs text-gray-600 truncate">{p}</p>)}{c.prompts.length > 5 && <p className="text-xs text-blue-600 font-medium">+{c.prompts.length - 5} more prompts</p>}</div></div><Button variant="outline" size="sm" className="w-full" onClick={() => navigator.clipboard.writeText(c.url)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy URL</Button></div>); })()}</div>)}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function ContentTab() {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold text-gray-900">Content Generator</h2><p className="text-sm text-gray-500">Generate SEO-optimized content based on your brand and audit insights</p></div></div>
-        <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-6">
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="article">Article</SelectItem><SelectItem value="listicle">Listicle (Top 10)</SelectItem><SelectItem value="comparison">Comparison Guide</SelectItem><SelectItem value="guide">How-To Guide</SelectItem><SelectItem value="faq">FAQ Section</SelectItem><SelectItem value="press_release">Press Release</SelectItem><SelectItem value="product_description">Product Description</SelectItem></SelectContent></Select></div></div>
-              <div className="grid grid-cols-2 gap-4"><div><Label>Target Audience</Label><Input placeholder="e.g., Millennials, CTOs, Stay-at-home parents" value={targetAudience} onChange={(e) => setTargetAudience(e.target.value)} className="mt-1" /></div><div><Label>Keywords / Key Selling Points</Label><Input placeholder="e.g., affordable, AI-powered, 24/7 support" value={contentKeywords} onChange={(e) => setContentKeywords(e.target.value)} className="mt-1" /></div></div>
-              <div><Label>Tone of Voice Reference</Label><Textarea placeholder="Paste a sample press release or product description here. The AI will analyze and mimic its style." value={toneOfVoice} onChange={(e) => setToneOfVoice(e.target.value)} className="mt-1 h-24" /></div>
-              <div className="p-4 bg-gray-50 rounded-lg"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Content will include:</Label><Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(selectedClient?.industry || "") ? selectedClient?.industry : "Custom"; const customInd = Object.keys(industries).includes(selectedClient?.industry || "") ? "" : selectedClient?.industry || ""; setEditClientForm({ name: selectedClient?.name || "", brand_name: selectedClient?.brand_name || "", target_region: selectedClient?.target_region || "", industry: clientIndustry || "Custom", customIndustry: customInd, primary_color: selectedClient?.primary_color || "#3b82f6", logo_url: "", competitors: selectedClient?.competitors?.join(", ") || "", website: selectedClient?.brand_domain || "" }); setEditClientOpen(true); }} className="text-xs"><Settings className="h-3 w-3 mr-1" />Edit</Button></div><div className="flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><Building2 className="h-3.5 w-3.5" />{c}</span>)}</div></div>
-              <Button onClick={handleGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : "Generate Content"}</Button>
-              {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="prose prose-sm max-w-none p-4 bg-gray-50 rounded-lg border max-h-[500px] overflow-y-auto"><ReactMarkdown remarkPlugins={[remarkGfm]}>{generatedContent}</ReactMarkdown></div></div>)}
-            </div>
-          </div>
-          <div className="space-y-4">
-            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Quick Topics</h3><p className="text-xs text-gray-500 mb-3">Based on your prompts and audit results</p><div className="space-y-2">{prompts.slice(0, 5).map((p, i) => (<button key={i} onClick={() => setContentTopic(p.prompt_text)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg truncate">{p.prompt_text}</button>))}{prompts.length === 0 && <p className="text-sm text-gray-500 text-center py-2">Add prompts to see suggestions</p>}</div></div>
-            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Content Ideas</h3><div className="space-y-2">{[`Why ${selectedClient?.brand_name} is the best choice in ${selectedClient?.target_region}`, `${selectedClient?.brand_name} vs ${selectedClient?.competitors[0] || "Competitors"}: Complete Comparison`, `Top 10 reasons to choose ${selectedClient?.brand_name}`, `How ${selectedClient?.brand_name} solves common ${selectedClient?.industry} problems`].map((idea, i) => (<button key={i} onClick={() => setContentTopic(idea)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">{idea}</button>))}</div></div>
-            <div className="bg-blue-50 rounded-xl border border-blue-200 p-5"><h3 className="font-semibold text-blue-900 mb-2">Pro Tip</h3><p className="text-sm text-blue-700">Generate content for topics where your brand has low visibility to improve your AI search presence.</p></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function SettingsSheet() {
     return (
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
@@ -3440,7 +1995,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 {selectedClient?.brand_tags.map((t, i) => (
                   <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">
                     {t}
-                    <button onClick={() => updateBrandTags(selectedClient.brand_tags.filter((_, j) => j !== i))} className="ml-1 text-blue-600 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
+                    <button aria-label={`Remove tag ${t}`} onClick={() => updateBrandTags(selectedClient.brand_tags.filter((_, j) => j !== i))} className="ml-1 text-blue-600 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
                   </span>
                 ))}
                 {(!selectedClient?.brand_tags || selectedClient.brand_tags.length === 0) && <span className="text-sm text-gray-400 italic">No tags added</span>}
@@ -3458,7 +2013,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-900 font-medium">
                     <Building2 className="h-4 w-4 text-gray-400" />
                     <span>{c}</span>
-                    <button onClick={() => updateCompetitors(selectedClient.competitors.filter((_, j) => j !== i))} className="ml-1 text-gray-500 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
+                    <button aria-label={`Remove competitor ${c}`} onClick={() => updateCompetitors(selectedClient.competitors.filter((_, j) => j !== i))} className="ml-1 text-gray-500 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
                   </span>
                 ))}
                 {(!selectedClient?.competitors || selectedClient.competitors.length === 0) && <span className="text-sm text-gray-400 italic">No competitors added</span>}
@@ -3621,7 +2176,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         const combined = Array.from(new Set([...current, ...results]));
                         setNewClientForm(prev => ({ ...prev, competitors: combined.join(", ") }));
                       } else {
-                        alert("No competitors found.");
+                        toast.info("No competitors found.");
                       }
                     } catch (err) {
                       console.error("Auto-find failed:", err);
@@ -3795,7 +2350,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         const combined = Array.from(new Set([...current, ...results]));
                         setEditClientForm(prev => ({ ...prev, competitors: combined.join(", ") }));
                       } else {
-                        alert("No competitors found. Please try manually.");
+                        toast.info("No competitors found. Please try manually.");
                       }
                     } catch (err) {
                       console.error("Auto-find failed:", err);
@@ -3919,7 +2474,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   });
                   setEditPromptOpen(false);
                 } catch (err: any) {
-                  alert(err.message || "Failed to update prompt");
+                  toast.error(err.message || "Failed to update prompt");
                 }
               }
             }} disabled={!editingPromptText.trim()}>Save Changes</Button>
@@ -3952,7 +2507,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     {client.id === selectedClient?.id && <Badge className="bg-blue-100 text-blue-700">Active</Badge>}
                     <Button variant="outline" size="sm" onClick={() => { switchClient(client); setManageBrandsOpen(false); }} className="text-gray-600"><Eye className="h-4 w-4 mr-1" /> View</Button>
                     <Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(client.industry) ? client.industry : "Custom"; const customInd = Object.keys(industries).includes(client.industry) ? "" : client.industry; setEditClientForm({ name: client.name, brand_name: client.brand_name, target_region: client.target_region, industry: clientIndustry, customIndustry: customInd, primary_color: client.primary_color, logo_url: "", competitors: client.competitors?.join(", ") || "", website: client.brand_domain || "" }); switchClient(client); setManageBrandsOpen(false); setEditClientOpen(true); }} className="text-gray-600"><Settings className="h-4 w-4 mr-1" /> Edit</Button>
-                    {isAdmin && <Button variant="outline" size="sm" onClick={() => { if (confirm("Delete " + client.name + "?")) deleteClient(client.id); }} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>}
+                    {isAdmin && <Button variant="outline" size="sm" aria-label={`Delete ${client.name}`} onClick={() => { if (confirm("Delete " + client.name + "?")) deleteClient(client.id); }} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>}
                   </div>
                 </div>
               ))}
@@ -3976,20 +2531,20 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         <Select value={promptLocation || "__default__"} onValueChange={(v) => setPromptLocation(v === "__default__" ? "" : v)}>
           <SelectTrigger className="bg-white h-8 text-sm mt-1.5"><SelectValue placeholder="Use brand's default location" /></SelectTrigger>
           <SelectContent className="max-h-80">
-            <SelectItem value="__default__">📍 Use brand's default location</SelectItem>
+            <SelectItem value="__default__">ðŸ“ Use brand's default location</SelectItem>
             {/* Countries */}
             <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50">Countries</div>
-            <SelectItem value="United States">🇺🇸 United States</SelectItem>
-            <SelectItem value="United Kingdom">🇬🇧 United Kingdom</SelectItem>
-            <SelectItem value="India">🇮🇳 India</SelectItem>
-            <SelectItem value="Thailand">🇹🇭 Thailand</SelectItem>
-            <SelectItem value="Australia">🇦🇺 Australia</SelectItem>
-            <SelectItem value="Germany">🇩🇪 Germany</SelectItem>
-            <SelectItem value="UAE">🇦🇪 UAE</SelectItem>
-            <SelectItem value="Canada">🇨🇦 Canada</SelectItem>
-            <SelectItem value="Singapore">🇸🇬 Singapore</SelectItem>
+            <SelectItem value="United States">ðŸ‡ºðŸ‡¸ United States</SelectItem>
+            <SelectItem value="United Kingdom">ðŸ‡¬ðŸ‡§ United Kingdom</SelectItem>
+            <SelectItem value="India">ðŸ‡®ðŸ‡³ India</SelectItem>
+            <SelectItem value="Thailand">ðŸ‡¹ðŸ‡­ Thailand</SelectItem>
+            <SelectItem value="Australia">ðŸ‡¦ðŸ‡º Australia</SelectItem>
+            <SelectItem value="Germany">ðŸ‡©ðŸ‡ª Germany</SelectItem>
+            <SelectItem value="UAE">ðŸ‡¦ðŸ‡ª UAE</SelectItem>
+            <SelectItem value="Canada">ðŸ‡¨ðŸ‡¦ Canada</SelectItem>
+            <SelectItem value="Singapore">ðŸ‡¸ðŸ‡¬ Singapore</SelectItem>
             {/* US Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇺🇸 US Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡ºðŸ‡¸ US Cities</div>
             <SelectItem value="US: New York">New York, NY</SelectItem>
             <SelectItem value="US: Los Angeles">Los Angeles, CA</SelectItem>
             <SelectItem value="US: Chicago">Chicago, IL</SelectItem>
@@ -4001,33 +2556,33 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             <SelectItem value="US: Austin">Austin, TX</SelectItem>
             <SelectItem value="US: Denver">Denver, CO</SelectItem>
             {/* UK Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇬🇧 UK Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¬ðŸ‡§ UK Cities</div>
             <SelectItem value="UK: London">London</SelectItem>
             <SelectItem value="UK: Manchester">Manchester</SelectItem>
             <SelectItem value="UK: Birmingham">Birmingham</SelectItem>
             <SelectItem value="UK: Edinburgh">Edinburgh</SelectItem>
             {/* India Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇮🇳 India Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡®ðŸ‡³ India Cities</div>
             <SelectItem value="India: Mumbai">Mumbai</SelectItem>
             <SelectItem value="India: Delhi">Delhi</SelectItem>
             <SelectItem value="India: Bangalore">Bangalore</SelectItem>
             <SelectItem value="India: Hyderabad">Hyderabad</SelectItem>
             <SelectItem value="India: Chennai">Chennai</SelectItem>
             {/* Thailand Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇹🇭 Thailand Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¹ðŸ‡­ Thailand Cities</div>
             <SelectItem value="Thailand: Bangkok">Bangkok</SelectItem>
             <SelectItem value="Thailand: Chiang Mai">Chiang Mai</SelectItem>
             <SelectItem value="Thailand: Phuket">Phuket</SelectItem>
             {/* Australia Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇦🇺 Australia Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¦ðŸ‡º Australia Cities</div>
             <SelectItem value="Australia: Sydney">Sydney</SelectItem>
             <SelectItem value="Australia: Melbourne">Melbourne</SelectItem>
             {/* UAE Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇦🇪 UAE Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¦ðŸ‡ª UAE Cities</div>
             <SelectItem value="UAE: Dubai">Dubai</SelectItem>
             <SelectItem value="UAE: Abu Dhabi">Abu Dhabi</SelectItem>
             {/* Canada Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇨🇦 Canada Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¨ðŸ‡¦ Canada Cities</div>
             <SelectItem value="Canada: Toronto">Toronto</SelectItem>
             <SelectItem value="Canada: Vancouver">Vancouver</SelectItem>
           </SelectContent>
@@ -4089,289 +2644,6 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       </DialogFooter>
     </DialogContent>
     </Dialog>
-    );
-  }
-
-  function InsightsTab() {
-    // Calculate overall visibility metrics
-    const overallSov = filteredAuditResults.length > 0
-      ? Math.round(filteredAuditResults.reduce((sum, r) => sum + (r.summary?.share_of_voice || 0), 0) / filteredAuditResults.length)
-      : 0;
-    const overallPriority = overallSov < 30 ? 'high' : overallSov < 60 ? 'medium' : 'low';
-
-    // Group prompts by priority
-    const highPriorityPrompts = filteredAuditResults.filter(r => (r.summary?.share_of_voice || 0) < 30);
-    const mediumPriorityPrompts = filteredAuditResults.filter(r => {
-      const sov = r.summary?.share_of_voice || 0;
-      return sov >= 30 && sov < 60;
-    });
-    const lowPriorityPrompts = filteredAuditResults.filter(r => (r.summary?.share_of_voice || 0) >= 60);
-
-    // Aggregate recommendations
-    const aggregatedRecommendations: string[] = [];
-
-    // Add overall recommendations based on data
-    if (overallSov < 30) {
-      aggregatedRecommendations.push(`Critical: Overall brand visibility is very low (${overallSov}%). Focus on building authoritative content across all target queries.`);
-    }
-
-    // Find top competitors mentioned
-    const allCompetitorMentions: Record<string, number> = {};
-    filteredAuditResults.forEach(result => {
-      result.model_results.forEach(mr => {
-        const response = mr.raw_response?.toLowerCase() || '';
-        selectedClient?.competitors.forEach(comp => {
-          const matches = response.match(new RegExp(comp.toLowerCase(), 'gi'));
-          if (matches) {
-            allCompetitorMentions[comp] = (allCompetitorMentions[comp] || 0) + matches.length;
-          }
-        });
-      });
-    });
-    const topCompetitors = Object.entries(allCompetitorMentions)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
-    if (topCompetitors.length > 0) {
-      aggregatedRecommendations.push(`Top competitors appearing across audits: ${topCompetitors.map(([name, count]) => `${name} (${count}x)`).join(', ')}. Analyze their content strategies for differentiation opportunities.`);
-    }
-
-    // Find top cited domains across all audits
-    const allDomains: Record<string, number> = {};
-    filteredAuditResults.forEach(result => {
-      result.model_results.forEach(mr => {
-        mr.citations.forEach(c => {
-          allDomains[c.domain] = (allDomains[c.domain] || 0) + 1;
-        });
-      });
-    });
-    const topDomains = Object.entries(allDomains)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([domain]) => domain);
-    if (topDomains.length > 0) {
-      aggregatedRecommendations.push(`High-value citation sources to target: ${topDomains.join(', ')}. Build relationships and create content worthy of citation.`);
-    }
-
-    // Add Tavily-based insights
-    const tavilyInsights: string[] = [];
-    Object.values(tavilyResults).forEach((data: any) => {
-      if (data?.analysis?.insights) {
-        data.analysis.insights.forEach((insight: string) => {
-          if (!tavilyInsights.includes(insight)) {
-            tavilyInsights.push(insight);
-          }
-        });
-      }
-    });
-    if (tavilyInsights.length > 0) {
-      tavilyInsights.slice(0, 3).forEach(insight => {
-        aggregatedRecommendations.push(`Discovery Engine insight: ${insight}`);
-      });
-    }
-
-    // High-priority prompts need attention
-    if (highPriorityPrompts.length > 0) {
-      aggregatedRecommendations.push(`${highPriorityPrompts.length} prompt${highPriorityPrompts.length > 1 ? 's' : ''} with critical visibility gaps require immediate content creation attention.`);
-    }
-
-    // Handler to generate AI-powered pinpoint recommendations
-    const handleGenerateAiInsights = async () => {
-      setGeneratingAiInsights(true);
-      try {
-        const topComps = Object.entries(allCompetitorMentions)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([name, count]) => ({ name, count }));
-
-        const result = await generateOverallRecommendations({
-          overallSov,
-          totalPrompts: filteredAuditResults.length,
-          highPriorityCount: highPriorityPrompts.length,
-          mediumPriorityCount: mediumPriorityPrompts.length,
-          lowPriorityCount: lowPriorityPrompts.length,
-          topCompetitors: topComps,
-          topDomains,
-          tavilyInsights
-        });
-        if (result) setAiInsights(result);
-      } catch (err) {
-        console.error("Error generating AI insights:", err);
-      } finally {
-        setGeneratingAiInsights(false);
-      }
-    };
-
-    return (
-      <div className="space-y-6 animate-in fade-in">
-        {/* Overall Status Header */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className={cn(
-                "p-3 rounded-xl shadow-lg",
-                overallPriority === 'high' ? "bg-gradient-to-br from-red-500 to-rose-600" :
-                  overallPriority === 'medium' ? "bg-gradient-to-br from-amber-500 to-orange-600" :
-                    "bg-gradient-to-br from-green-500 to-emerald-600"
-              )}>
-                <Lightbulb className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">AI Visibility Insights</h2>
-                <p className="text-sm text-gray-500">Aggregated analysis across {filteredAuditResults.length} audited prompts</p>
-              </div>
-            </div>
-            <div className={cn(
-              "px-4 py-2 rounded-full font-semibold text-sm",
-              overallPriority === 'high' ? "bg-red-100 text-red-700" :
-                overallPriority === 'medium' ? "bg-amber-100 text-amber-700" :
-                  "bg-green-100 text-green-700"
-            )}>
-              Priority: {overallPriority.toUpperCase()}
-            </div>
-          </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-4 gap-4">
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 text-center">
-              <div className="text-3xl font-bold text-blue-700">{overallSov}%</div>
-              <div className="text-sm font-medium text-blue-600 mt-1">Avg Visibility</div>
-            </div>
-            <div className="bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 rounded-xl p-4 text-center">
-              <div className="text-3xl font-bold text-red-700">{highPriorityPrompts.length}</div>
-              <div className="text-sm font-medium text-red-600 mt-1">Critical</div>
-            </div>
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 text-center">
-              <div className="text-3xl font-bold text-amber-700">{mediumPriorityPrompts.length}</div>
-              <div className="text-sm font-medium text-amber-600 mt-1">Needs Work</div>
-            </div>
-            <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 text-center">
-              <div className="text-3xl font-bold text-green-700">{lowPriorityPrompts.length}</div>
-              <div className="text-sm font-medium text-green-600 mt-1">Good</div>
-            </div>
-          </div>
-        </div>
-
-        {/* AI-Powered Pinpoint Recommendations */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-
-                  AI-Powered Pinpoint Insights
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">Strategic recommendations using Advanced AI + aggregated data</p>
-              </div>
-              <Button
-                onClick={handleGenerateAiInsights}
-                disabled={generatingAiInsights || filteredAuditResults.length === 0}
-                className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white shadow-md"
-              >
-                {generatingAiInsights ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                {generatingAiInsights ? "Generating..." : aiInsights ? "Refresh" : "Generate AI Insights"}
-              </Button>
-            </div>
-          </div>
-          <div className="p-5">
-            {aiInsights ? (
-              <div className="space-y-4">
-                <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border border-purple-200">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-semibold text-gray-900">Executive Summary</span>
-                    <span className={cn(
-                      "px-2 py-1 rounded text-xs font-semibold",
-                      aiInsights?.priority === 'high' ? "bg-red-100 text-red-700" :
-                        aiInsights?.priority === 'medium' ? "bg-amber-100 text-amber-700" :
-                          "bg-green-100 text-green-700"
-                    )}>{aiInsights?.priority?.toUpperCase() || 'N/A'}</span>
-                  </div>
-                  <p className="text-sm text-gray-700">{aiInsights?.summary || 'No summary available'}</p>
-                </div>
-
-                <div className="space-y-3">
-                  <h4 className="font-semibold text-gray-900 flex items-center gap-2"><Lightbulb className="h-4 w-4 text-purple-600" /> Strategic Recommendations</h4>
-                  {(aiInsights?.recommendations || []).map((rec, idx) => (
-                    <div key={idx} className="flex items-start gap-3 p-3 bg-gradient-to-r from-gray-50 to-white rounded-lg border border-gray-100 hover:border-purple-200 transition-colors">
-                      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-                        {idx + 1}
-                      </div>
-                      <p className="text-sm text-gray-700">{rec}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {aiInsights?.keyActions && aiInsights.keyActions.length > 0 && (
-                  <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
-                    <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2"><Target className="h-4 w-4 text-green-600" /> Key Actions</h4>
-                    {aiInsights.keyActions.map((action, idx) => (
-                      <p key={idx} className="text-sm text-gray-700 flex items-center gap-2 mb-1">
-                        <CheckCircle className="h-3.5 w-3.5 text-green-600" /> {action}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <div className="p-4 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                  <Lightbulb className="h-8 w-8 text-purple-600" />
-                </div>
-                <h4 className="font-semibold text-gray-900">Get AI-Powered Insights</h4>
-                <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">
-                  Click "Generate AI Insights" to get strategic, pinpoint recommendations combining your audit data with Groq AI analysis.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Aggregated Recommendations */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-amber-50 via-yellow-50 to-orange-50">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Lightbulb className="h-5 w-5 text-amber-600" />
-              Top Recommendations
-            </h3>
-            <p className="text-sm text-gray-500 mt-1">Actionable insights aggregated from all audits</p>
-          </div>
-          <div className="p-5 space-y-3">
-            {aggregatedRecommendations.length > 0 ? aggregatedRecommendations.map((rec, idx) => (
-              <div key={idx} className="flex items-start gap-3 p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-100 hover:border-amber-200 transition-colors">
-                <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-sm font-bold shadow-sm">
-                  {idx + 1}
-                </div>
-                <p className="text-sm text-gray-700 leading-relaxed">{rec}</p>
-              </div>
-            )) : (
-              <div className="text-center py-8 text-gray-500">
-                <Lightbulb className="h-10 w-10 mx-auto mb-3 text-gray-300" />
-                <p>Run audits to generate insights</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Priority Breakdown */}
-        {highPriorityPrompts.length > 0 && (
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-red-50 to-rose-50">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
-                Critical Visibility Gaps ({highPriorityPrompts.length})
-              </h3>
-              <p className="text-sm text-gray-500 mt-1">Prompts with &lt;30% visibility requiring immediate attention</p>
-            </div>
-            <div className="p-4 space-y-2 max-h-64 overflow-y-auto">
-              {highPriorityPrompts.slice(0, 10).map((result, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 bg-red-50/50 rounded-lg border border-red-100 hover:bg-red-50 transition-colors cursor-pointer" onClick={() => setSelectedPromptDetail(result.prompt_id)}>
-                  <span className="text-sm text-gray-800 flex-1 truncate pr-4">{result.prompt_text}</span>
-                  <span className="text-sm font-semibold text-red-700 flex-shrink-0">{result.summary?.share_of_voice || 0}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
     );
   }
 
@@ -4478,7 +2750,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 </div>
                 <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-2 text-center">
                   <div className="text-2xl font-bold text-blue-700">{computedAvgRank ? `#${computedAvgRank}` : "--"}</div>
-                  <div className="text-xs font-medium text-blue-600 mt-0.5">Avg Rank</div>
+                  <div className="text-xs font-medium text-blue-600 mt-0.5">Avg Position</div>
                 </div>
                 <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-2 text-center">
                   <div className="text-2xl font-bold text-purple-700">{displayResult?.summary.total_citations || 0}</div>
@@ -4584,7 +2856,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     const color = MODEL_LOGOS[mr.model]?.color || "#666";
 
                     // Clean response text for display and analysis (handles historical data)
-                    const { cleanedResponse } = cleanAndAnalyzeResponse(
+                    const { cleanedResponse, brandRank: computedRank } = cleanAndAnalyzeResponse(
                       mr.raw_response || "",
                       selectedClient?.brand_name || "",
                       selectedClient?.competitors || [],
@@ -4668,7 +2940,26 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                             ) : (
                               <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-sm font-medium">Not Visible</span>
                             )}
-                            {mr.brand_rank && <span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">#{mr.brand_rank}</span>}
+                            {(() => {
+                              // Layer 1: DB brand_rank, Layer 2: parsed from numbered list, Layer 3: extracted_brands position, Layer 4: mention order
+                              let rank: number | null = mr.brand_rank || computedRank || null;
+                              if (!rank && mr.extracted_brands) {
+                                const ownBrand = mr.extracted_brands.find((eb: any) => eb.is_own_brand && eb.position);
+                                if (ownBrand) rank = ownBrand.position;
+                              }
+                              if (!rank && mr.brand_mentioned && mr.raw_response && selectedClient) {
+                                const text = mr.raw_response.toLowerCase();
+                                const brandIdx = text.indexOf(selectedClient.brand_name.toLowerCase());
+                                if (brandIdx !== -1) {
+                                  rank = 1;
+                                  (selectedClient.competitors || []).forEach((comp: string) => {
+                                    const compIdx = text.indexOf(comp.toLowerCase());
+                                    if (compIdx !== -1 && compIdx < brandIdx) rank!++;
+                                  });
+                                }
+                              }
+                              return rank ? <span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">#{rank}</span> : null;
+                            })()}
                             <span className="px-2.5 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">{mr.citations.length} citations</span>
                           </div>
                         </div>
@@ -4764,7 +3055,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         {/* Show indicator for AI Overview source type */}
                         {mr.model === "google_ai_overview" && mr.raw_response && mr.is_ai_overview === false && (
                           <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
-                            ⚠️ This content is from <strong>Featured Snippet</strong>, not Google's AI Overview. AI Overview was not available for this query.
+                            âš ï¸ This content is from <strong>Featured Snippet</strong>, not Google's AI Overview. AI Overview was not available for this query.
                           </div>
                         )}
                         {/* Show 'No AI Overview available' message when Google AI Overview has no response */}
@@ -4887,7 +3178,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                             </div>
                           </div>
                           <div className="flex gap-1.5">
-                            <button onClick={() => navigator.clipboard.writeText(c.url)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"><Copy className="h-4 w-4" /></button>
+                            <button aria-label="Copy URL to clipboard" onClick={() => navigator.clipboard.writeText(c.url)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"><Copy className="h-4 w-4" /></button>
                             <a href={c.url} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><ExternalLink className="h-4 w-4" /></a>
                           </div>
                         </div>
@@ -5035,7 +3326,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                       "inline-flex items-center justify-center min-w-[32px] h-8 rounded-lg font-bold",
                                       avgRank ? (avgRank <= 3 ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-gray-50 text-gray-600 border border-gray-100") : "text-gray-300"
                                     )}>
-                                      {avgRank ? `#${avgRank}` : "—"}
+                                      {avgRank ? `#${avgRank}` : "â€”"}
                                     </div>
                                   </td>
                                   {/* Brands Column */}
@@ -5314,7 +3605,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 </div>
               )}
 
-              {/* AI Insights/Recommendations Tab — AI Visibility Strategist */}
+              {/* AI Insights/Recommendations Tab â€” AI Visibility Strategist */}
               {detailTab === "insights" && (
                 <div className="space-y-4">
                   {recommendations ? (
@@ -5361,7 +3652,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                       <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
                                         <CheckCircle className="h-3 w-3" />Present
                                       </span>
-                                      {p.rank && <span className="text-xs text-gray-500">Rank #{p.rank}</span>}
+                                      {p.rank && <span className="text-xs text-gray-500">Position #{p.rank}</span>}
                                     </>
                                   ) : (
                                     <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
@@ -5395,7 +3686,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                   </div>
                                 </div>
                                 {rec.targetPlatforms && (
-                                  <p className="text-xs text-purple-600 mt-1">🎯 {rec.targetPlatforms}</p>
+                                  <p className="text-xs text-purple-600 mt-1">ðŸŽ¯ {rec.targetPlatforms}</p>
                                 )}
                               </div>
                               <div className="p-4 space-y-3">
@@ -5418,7 +3709,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                         <p className="text-xs text-gray-500 mb-1">Key claims to include:</p>
                                         <ul className="space-y-0.5">
                                           {rec.exactAction.keyClaims.map((claim, ci) => (
-                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-indigo-400 mt-0.5">•</span>{claim}</li>
+                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-indigo-400 mt-0.5">â€¢</span>{claim}</li>
                                           ))}
                                         </ul>
                                       </div>
@@ -5484,7 +3775,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                   </div>
                                 </div>
                                 {rec.targetPlatforms && (
-                                  <p className="text-xs text-teal-600 mt-1">🎯 {rec.targetPlatforms}</p>
+                                  <p className="text-xs text-teal-600 mt-1">ðŸŽ¯ {rec.targetPlatforms}</p>
                                 )}
                               </div>
                               <div className="p-4 space-y-3">
@@ -5507,7 +3798,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                         <p className="text-xs text-gray-500 mb-1">Key claims to include:</p>
                                         <ul className="space-y-0.5">
                                           {rec.exactAction.keyClaims.map((claim, ci) => (
-                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-teal-400 mt-0.5">•</span>{claim}</li>
+                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-teal-400 mt-0.5">â€¢</span>{claim}</li>
                                           ))}
                                         </ul>
                                       </div>
@@ -5572,7 +3863,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         <Target className="h-10 w-10 text-indigo-500" />
                       </div>
                       <p className="text-gray-800 font-semibold text-lg mb-2">AI Visibility Strategist</p>
-                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Analyze why competitors get cited in AI responses for this query, and get 6 precise, actionable recommendations to close the gap — split into High Impact strategies and Quick Wins.</p>
+                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Analyze why competitors get cited in AI responses for this query, and get 6 precise, actionable recommendations to close the gap â€” split into High Impact strategies and Quick Wins.</p>
                       <Button onClick={handleGenerateRecommendations} disabled={generatingRecommendations} size="lg" className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-lg shadow-indigo-200 transition-all">
                         {generatingRecommendations ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Analyzing Citation Gaps...</> : <><Zap className="h-4 w-4 mr-2" />Generate Visibility Strategy</>}
                       </Button>
@@ -5621,30 +3912,30 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               <Select value={editingLocationValue || "__default__"} onValueChange={setEditingLocationValue}>
                 <SelectTrigger className="mt-1.5"><SelectValue placeholder="Choose location" /></SelectTrigger>
                 <SelectContent className="max-h-80">
-                  <SelectItem value="__default__">📍 Use brand's default location</SelectItem>
+                  <SelectItem value="__default__">ðŸ“ Use brand's default location</SelectItem>
                   <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50">Countries</div>
-                  <SelectItem value="United States">🇺🇸 United States</SelectItem>
-                  <SelectItem value="United Kingdom">🇬🇧 United Kingdom</SelectItem>
-                  <SelectItem value="India">🇮🇳 India</SelectItem>
-                  <SelectItem value="Thailand">🇹🇭 Thailand</SelectItem>
-                  <SelectItem value="Australia">🇦🇺 Australia</SelectItem>
-                  <SelectItem value="Germany">🇩🇪 Germany</SelectItem>
-                  <SelectItem value="UAE">🇦🇪 UAE</SelectItem>
-                  <SelectItem value="Canada">🇨🇦 Canada</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇺🇸 US Cities</div>
+                  <SelectItem value="United States">ðŸ‡ºðŸ‡¸ United States</SelectItem>
+                  <SelectItem value="United Kingdom">ðŸ‡¬ðŸ‡§ United Kingdom</SelectItem>
+                  <SelectItem value="India">ðŸ‡®ðŸ‡³ India</SelectItem>
+                  <SelectItem value="Thailand">ðŸ‡¹ðŸ‡­ Thailand</SelectItem>
+                  <SelectItem value="Australia">ðŸ‡¦ðŸ‡º Australia</SelectItem>
+                  <SelectItem value="Germany">ðŸ‡©ðŸ‡ª Germany</SelectItem>
+                  <SelectItem value="UAE">ðŸ‡¦ðŸ‡ª UAE</SelectItem>
+                  <SelectItem value="Canada">ðŸ‡¨ðŸ‡¦ Canada</SelectItem>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡ºðŸ‡¸ US Cities</div>
                   <SelectItem value="US: New York">New York, NY</SelectItem>
                   <SelectItem value="US: Los Angeles">Los Angeles, CA</SelectItem>
                   <SelectItem value="US: Chicago">Chicago, IL</SelectItem>
                   <SelectItem value="US: San Francisco">San Francisco, CA</SelectItem>
                   <SelectItem value="US: Miami">Miami, FL</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇬🇧 UK Cities</div>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¬ðŸ‡§ UK Cities</div>
                   <SelectItem value="UK: London">London</SelectItem>
                   <SelectItem value="UK: Manchester">Manchester</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇮🇳 India Cities</div>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡®ðŸ‡³ India Cities</div>
                   <SelectItem value="India: Mumbai">Mumbai</SelectItem>
                   <SelectItem value="India: Delhi">Delhi</SelectItem>
                   <SelectItem value="India: Bangalore">Bangalore</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇹🇭 Thailand Cities</div>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¹ðŸ‡­ Thailand Cities</div>
                   <SelectItem value="Thailand: Bangkok">Bangkok</SelectItem>
                   <SelectItem value="Thailand: Phuket">Phuket</SelectItem>
                 </SelectContent>
@@ -5696,11 +3987,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             <table className="w-full relative">
               <thead className="sticky top-0 bg-white z-10 border-b border-gray-200">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-16">Rank</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-16">Position</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Brand</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Mentions</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-1/3 pl-8">Visibility Share</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Avg Rank</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Avg Position</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
