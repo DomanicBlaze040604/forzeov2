@@ -8,6 +8,7 @@ interface SOVSeriesItem {
   isClient: boolean;
   domain: string;
   data: (number | null)[];
+  latestPct?: number; // Override for legend badge — use same value as top card/Brand Visibility
 }
 
 interface SOVLineChartProps {
@@ -203,7 +204,7 @@ export function SOVLineChart({ labels, series, height = 240 }: SOVLineChartProps
               />
               <div className="flex flex-col">
                 <span className="text-[11px] text-gray-500 leading-tight truncate max-w-[100px]">{s.name}</span>
-                <span className="text-sm font-bold leading-tight" style={{ color }}>{val}%</span>
+                <span className="text-sm font-bold leading-tight" style={{ color }}>{s.latestPct !== undefined ? s.latestPct : val}%</span>
               </div>
             </div>
           );

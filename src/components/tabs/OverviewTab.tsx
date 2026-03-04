@@ -363,7 +363,14 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             ))}
           </div>
         </div>
-        <SOVLineChart labels={sovTimeSeries.labels} series={sovTimeSeries.series} height={240} />
+        <SOVLineChart
+          labels={sovTimeSeries.labels}
+          series={sovTimeSeries.series.map(s => ({
+            ...s,
+            latestPct: competitorGap.find(c => c.name === s.name)?.percentage,
+          }))}
+          height={240}
+        />
         {(selectedClient?.competitors || []).length === 0 && sovTimeSeries.series.length <= 1 && (
           <p className="text-xs text-gray-400 mt-2">Add competitors in Settings to compare Share of Voice</p>
         )}
