@@ -54,31 +54,31 @@ function DonutChart({
   const arcs =
     segments.length > 0
       ? segments.map((s) => {
-          const pct = s.count / total;
-          const dash = circumference * pct;
-          const offset = circumference * currentOffset;
-          currentOffset += pct;
-          const typeColor =
-            (DOMAIN_TYPES as any)[s.type]?.dot || "#6b7280";
-          return {
-            dash,
-            offset,
-            color: typeColor,
-            type: s.type,
-            count: s.count,
-            pct: Math.round(pct * 100),
-          };
-        })
+        const pct = s.count / total;
+        const dash = circumference * pct;
+        const offset = circumference * currentOffset;
+        currentOffset += pct;
+        const typeColor =
+          (DOMAIN_TYPES as any)[s.type]?.dot || "#6b7280";
+        return {
+          dash,
+          offset,
+          color: typeColor,
+          type: s.type,
+          count: s.count,
+          pct: Math.round(pct * 100),
+        };
+      })
       : [
-          {
-            dash: circumference * 0.75,
-            offset: 0,
-            color: "#3b82f6",
-            type: "default",
-            count: value,
-            pct: 100,
-          },
-        ];
+        {
+          dash: circumference * 0.75,
+          offset: 0,
+          color: "#3b82f6",
+          type: "default",
+          count: value,
+          pct: 100,
+        },
+      ];
 
   return (
     <div className="relative" style={{ width: size, height: size }}>
@@ -282,20 +282,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-4xl font-bold text-gray-950">{(() => {
-              const allResults = filteredAuditResults.flatMap(r => r.model_results || []);
-              // SOV = Brand Mentions / (Brand Mentions + Competitor Mentions) x 100
-              let brandMentionCount = 0;
-              let competitorMentionCount = 0;
-              const competitors = selectedClient?.competitors || [];
-              allResults.forEach(mr => {
-                if (mr.brand_mentioned) brandMentionCount++;
-                const response = (mr.raw_response || "").toLowerCase();
-                competitors.forEach(c => {
-                  if (response.includes(c.toLowerCase())) competitorMentionCount++;
-                });
-              });
-              const totalMentions = brandMentionCount + competitorMentionCount;
-              return totalMentions > 0 ? Math.round((brandMentionCount / totalMentions) * 100) : 0;
+              // Use the same percentage as Brand Visibility for consistency
+              const brandEntry = competitorGap.find(c => c.name === selectedClient?.brand_name);
+              return brandEntry?.percentage ?? 0;
             })()}%</span>
             <TrendIndicator value={0} />
           </div>
@@ -382,7 +371,49 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
         <div className="col-span-1 md:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4"><div><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Eye className="h-4 w-4 text-gray-400" /> Visibility by Model</h3><p className="text-xs text-gray-500 mt-0.5">Percentage of responses mentioning your brand</p></div></div>
-          <div className="space-y-4 mt-6">{AI_MODELS.filter(m => selectedModels.includes(m.id)).map(model => { const stats = modelStats[model.id] || { visible: 0, total: 0, cost: 0 }; const pct = stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0; const Logo = MODEL_LOGOS[model.id]?.Logo; const color = MODEL_LOGOS[model.id]?.color || "#666"; return (<div key={model.id} className="flex items-center gap-3"><div className="w-32 flex items-center gap-2">{Logo && <Logo className="h-4 w-4" style={{ color }} />}<span className="text-sm text-gray-700 truncate">{model.name}</span></div><div className="flex-1 h-8 bg-gray-100 rounded-full overflow-hidden relative"><div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: color }} /><span className="absolute inset-0 flex items-center justify-center text-xs font-medium" style={{ color: pct > 50 ? "white" : "#374151" }}>{pct}%</span></div><span className="text-sm font-medium text-gray-600 w-16 text-right">{stats.visible}/{stats.total}</span></div>); })}</div>
+          <div className="space-y-4 mt-6">{AI_MODELS.filter(m => selectedModels.includes(m.id)).map(model => {
+            const stats = modelStats[model.id] || { visible: 0, total: 0, cost: 0 };
+            const pct = stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0;
+            const isLowData = stats.total > 0 && stats.total < 5;
+            const Logo = MODEL_LOGOS[model.id]?.Logo;
+            const color = MODEL_LOGOS[model.id]?.color || "#666";
+            const tooltipText = stats.total > 0
+              ? `${stats.visible} of ${stats.total} successful run${stats.total !== 1 ? "s" : ""} mentioned your brand`
+              : "No data yet";
+            return (
+              <div
+                key={model.id}
+                className="flex items-center gap-3 group"
+                title={tooltipText}
+              >
+                <div className="w-32 flex items-center gap-2 flex-shrink-0">
+                  {Logo && <Logo className="h-4 w-4" style={{ color }} />}
+                  <span className="text-sm text-gray-700 truncate">{model.name}</span>
+                </div>
+                <div className="flex-1 h-8 bg-gray-100 rounded-full overflow-hidden relative">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${Math.max(stats.total > 0 ? pct : 0, stats.total > 0 ? 2 : 0)}%`, backgroundColor: isLowData ? "#9ca3af" : color }}
+                  />
+                  <span
+                    className="absolute inset-0 flex items-center justify-center text-xs font-medium"
+                    style={{ color: pct > 50 && !isLowData ? "white" : "#374151" }}
+                  >
+                    {stats.total > 0 ? `${pct}%` : "—"}
+                  </span>
+                </div>
+                {isLowData && (
+                  <span className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap">
+                    Low Data
+                  </span>
+                )}
+                {/* Tooltip hint visible on hover */}
+                <span className="flex-shrink-0 text-[11px] text-gray-400 w-20 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  {stats.total > 0 ? `${stats.visible}/${stats.total} runs` : ""}
+                </span>
+              </div>
+            );
+          })}</div>
           {filteredAuditResults.length === 0 && <div className="text-center py-8 text-gray-500"><BarChart3 className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p className="text-sm">Run audits to see visibility data</p></div>}
         </div>
         <div className="col-span-1 md:col-span-2 bg-white rounded-xl border border-gray-200 p-5">

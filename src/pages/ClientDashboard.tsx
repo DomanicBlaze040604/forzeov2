@@ -450,6 +450,46 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [contentTopic, setContentTopic] = useState("");
   const [generatedContent, setGeneratedContent] = useState("");
   const [generatingContent, setGeneratingContent] = useState(false);
+
+  // Content history — persisted per client in localStorage
+  const [generatedContentHistory, setGeneratedContentHistory] = useState<import('@/components/tabs/ContentTab').GeneratedContentHistoryItem[]>(() => {
+    try {
+      const key = `forzeo_content_history_${selectedClient?.id || 'default'}`;
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  // Reload history when client changes
+  useEffect(() => {
+    try {
+      const key = `forzeo_content_history_${selectedClient?.id || 'default'}`;
+      const saved = localStorage.getItem(key);
+      setGeneratedContentHistory(saved ? JSON.parse(saved) : []);
+    } catch { setGeneratedContentHistory([]); }
+  }, [selectedClient?.id]);
+
+  const saveToContentHistory = (item: import('@/components/tabs/ContentTab').GeneratedContentHistoryItem) => {
+    setGeneratedContentHistory(prev => {
+      const updated = [item, ...prev].slice(0, 50); // cap at 50 items
+      try {
+        const key = `forzeo_content_history_${selectedClient?.id || 'default'}`;
+        localStorage.setItem(key, JSON.stringify(updated));
+      } catch { /* quota */ }
+      return updated;
+    });
+  };
+
+  const deleteContentHistoryItem = (id: string) => {
+    setGeneratedContentHistory(prev => {
+      const updated = prev.filter(x => x.id !== id);
+      try {
+        const key = `forzeo_content_history_${selectedClient?.id || 'default'}`;
+        localStorage.setItem(key, JSON.stringify(updated));
+      } catch { /* quota */ }
+      return updated;
+    });
+  };
   const [showBrandOnly, setShowBrandOnly] = useState(false);
   const [sovTimeRange, setSovTimeRange] = useState<"week" | "month" | "year">("week");
   const [dateRangeFilter, setDateRangeFilter] = useState<"7d" | "30d" | "90d" | "all" | "custom">("all");
@@ -1210,7 +1250,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       setGeneratingPrompts(false);
     }
   };
-  const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType, toneOfVoice, targetAudience, contentKeywords); if (c) setGeneratedContent(c); } finally { setGeneratingContent(false); } };
+  const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType, toneOfVoice, targetAudience, contentKeywords); if (c) { setGeneratedContent(c); saveToContentHistory({ id: Date.now().toString(), title: contentTopic, content: c, createdAt: new Date().toISOString(), source: 'content_tab' }); } } finally { setGeneratingContent(false); } };
 
   const handleAddCompetitor = async (competitorName: string) => {
     if (!selectedClient) return;
@@ -1939,6 +1979,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               industries={industries}
               setEditClientForm={setEditClientForm}
               setEditClientOpen={setEditClientOpen}
+              generatedContentHistory={generatedContentHistory}
+              onDeleteHistoryItem={deleteContentHistoryItem}
+              isAdmin={isAdmin}
             />
           )}
           {activeTab === "insights" && (
@@ -2707,7 +2750,17 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           tavilyData
         );
         setGeneratedVisibilityContent(content);
-        if (content) setDetailTab("content");
+        if (content) {
+          setDetailTab("content");
+          saveToContentHistory({
+            id: Date.now().toString(),
+            title: prompt?.prompt_text || result?.prompt_text || "Generated Article",
+            content,
+            createdAt: new Date().toISOString(),
+            source: 'prompt_detail',
+            promptText: prompt?.prompt_text || result?.prompt_text,
+          });
+        }
       } catch (err) {
         console.error("Error generating content:", err);
       } finally {
@@ -2805,7 +2858,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   {generatingVisibilityContent ? (
                     <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating...</>
                   ) : (
-                    <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>
+                    <><Wand2 className="h-4 w-4 mr-2" />Generate Article</>
                   )}
                 </Button>
               </div>
@@ -3573,6 +3626,15 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                           </div>
                         </article>
                       </div>
+                      {/* AI Disclaimer */}
+                      <div className="px-6 py-3 border-t border-amber-100 bg-amber-50">
+                        <div className="flex items-start gap-2">
+                          <svg className="h-3.5 w-3.5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                          <p className="text-[11px] text-amber-800 leading-relaxed">
+                            <span className="font-semibold">Important Notice:</span> This content is AI-generated and engineered for high-intent visibility across Large Language Models. While optimized for brand tone and relevance, all outputs must be reviewed, fact-checked, and verified by a human editor or professional writer prior to publishing to ensure absolute accuracy and compliance with brand standards.
+                          </p>
+                        </div>
+                      </div>
                       <div className="p-4 border-t border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
                         <div className="flex items-start gap-3">
                           <div className="p-2 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg flex-shrink-0 shadow-sm">
@@ -3590,15 +3652,26 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                       <div className="bg-gradient-to-br from-purple-100 to-indigo-100 h-20 w-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
                         <Wand2 className="h-10 w-10 text-purple-500" />
                       </div>
-                      <p className="text-gray-800 font-semibold text-lg mb-2">Generate AI-Optimized Content</p>
+                      <p className="text-gray-800 font-semibold text-lg mb-2">Generate AI-Optimized Article</p>
                       <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Create humanized, E-E-A-T optimized content based on your audit results, Discovery Engine source analysis, and competitor insights.</p>
                       <Button onClick={handleGenerateVisibilityContent} disabled={generatingVisibilityContent} size="lg" className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-lg shadow-purple-200 transition-all">
-                        {generatingVisibilityContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating humanized content...</> : "Generate Content"}
+                        {generatingVisibilityContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating humanized content...</> : "Generate Article"}
                       </Button>
                       <div className="flex items-center justify-center gap-4 mt-6 text-xs text-gray-400">
                         <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Audit-based</span>
                         <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Tavily insights</span>
                         <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3" /> E-E-A-T optimized</span>
+                      </div>
+                      {/* AI Disclaimer Notice */}
+                      <div className="mt-6 mx-auto max-w-2xl bg-amber-50 border border-amber-200 rounded-xl p-4 text-left">
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0 mt-0.5">
+                            <svg className="h-4 w-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                          </div>
+                          <p className="text-xs text-amber-800 leading-relaxed">
+                            <span className="font-semibold">Important Notice:</span> This content is AI-generated and engineered for high-intent visibility across Large Language Models. While optimized for brand tone and relevance, all outputs must be reviewed, fact-checked, and verified by a human editor or professional writer prior to publishing to ensure absolute accuracy and compliance with brand standards.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   )}

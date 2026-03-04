@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -8,11 +8,18 @@ import {
   Settings,
   Building2,
   Wand2,
+  ChevronDown,
+  ChevronUp,
+  Trash2,
+  Clock,
+  FileText,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -34,6 +41,15 @@ export interface EditClientFormData {
   website: string;
 }
 
+export interface GeneratedContentHistoryItem {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  source: "content_tab" | "prompt_detail";
+  promptText?: string;
+}
+
 export interface ContentTabProps {
   contentTopic: string;
   setContentTopic: (value: string) => void;
@@ -53,6 +69,11 @@ export interface ContentTabProps {
   industries: Record<string, { competitors: string[]; prompts: string[]; nichePrompts: string[]; superNichePrompts: string[] }>;
   setEditClientForm: React.Dispatch<React.SetStateAction<EditClientFormData>>;
   setEditClientOpen: (open: boolean) => void;
+  // History storage
+  generatedContentHistory: GeneratedContentHistoryItem[];
+  onDeleteHistoryItem: (id: string) => void;
+  // Access control
+  isAdmin: boolean;
 }
 
 export function ContentTab({
@@ -74,7 +95,12 @@ export function ContentTab({
   industries,
   setEditClientForm,
   setEditClientOpen,
+  generatedContentHistory,
+  onDeleteHistoryItem,
+  isAdmin,
 }: ContentTabProps) {
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold text-gray-900">Content Generator</h2><p className="text-sm text-gray-500">Generate SEO-optimized content based on your brand and audit insights</p></div></div>
@@ -85,25 +111,33 @@ export function ContentTab({
             <div className="grid grid-cols-2 gap-4"><div><Label>Target Audience</Label><Input placeholder="e.g., Millennials, CTOs, Stay-at-home parents" value={targetAudience} onChange={(e) => setTargetAudience(e.target.value)} className="mt-1" /></div><div><Label>Keywords / Key Selling Points</Label><Input placeholder="e.g., affordable, AI-powered, 24/7 support" value={contentKeywords} onChange={(e) => setContentKeywords(e.target.value)} className="mt-1" /></div></div>
             <div><Label>Tone of Voice Reference</Label><Textarea placeholder="Paste a sample press release or product description here. The AI will analyze and mimic its style." value={toneOfVoice} onChange={(e) => setToneOfVoice(e.target.value)} className="mt-1 h-24" /></div>
             <div className="p-4 bg-gray-50 rounded-lg"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Content will include:</Label><Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(selectedClient?.industry || "") ? selectedClient?.industry : "Custom"; const customInd = Object.keys(industries).includes(selectedClient?.industry || "") ? "" : selectedClient?.industry || ""; setEditClientForm({ name: selectedClient?.name || "", brand_name: selectedClient?.brand_name || "", target_region: selectedClient?.target_region || "", industry: clientIndustry || "Custom", customIndustry: customInd, primary_color: selectedClient?.primary_color || "#3b82f6", logo_url: "", competitors: selectedClient?.competitors?.join(", ") || "", website: selectedClient?.brand_domain || "" }); setEditClientOpen(true); }} className="text-xs"><Settings className="h-3 w-3 mr-1" />Edit</Button></div><div className="flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><Building2 className="h-3.5 w-3.5" />{c}</span>)}</div></div>
-            <Button onClick={onGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : "Generate Content"}</Button>
+            <Button onClick={onGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>}</Button>
             {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="max-w-none p-6 bg-white rounded-lg border max-h-[600px] overflow-y-auto"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-                        p: ({ node, ...props }) => <p className="mb-4 text-gray-700 leading-relaxed text-[15px] max-w-3xl" {...props} />,
-                        a: ({ node, ...props }) => <a className="text-blue-600 hover:text-blue-700 hover:underline font-medium transition-colors" target="_blank" rel="noopener noreferrer" {...props} />,
-                        ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-5 space-y-2.5 text-[15px] max-w-3xl" {...props} />,
-                        ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-5 space-y-2.5 text-[15px] max-w-3xl" {...props} />,
-                        li: ({ node, ...props }) => <li className="pl-1 text-gray-700 marker:text-gray-400" {...props} />,
-                        h1: ({ node, ...props }) => <h1 className="text-2xl font-bold mt-8 mb-4 text-gray-900 tracking-tight border-b border-gray-200 pb-3" {...props} />,
-                        h2: ({ node, ...props }) => <h2 className="text-xl font-bold mt-7 mb-3 text-gray-900 tracking-tight" {...props} />,
-                        h3: ({ node, ...props }) => <h3 className="text-lg font-semibold mt-6 mb-2 text-gray-800 tracking-tight" {...props} />,
-                        h4: ({ node, ...props }) => <h4 className="text-base font-semibold mt-5 mb-2 text-gray-800" {...props} />,
-                        blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-blue-300 pl-4 py-1 my-4 bg-blue-50/50 rounded-r-lg text-gray-700 italic" {...props} />,
-                        code: ({ node, ...props }) => <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[13px] font-mono text-slate-800 border border-slate-200" {...props} />,
-                        strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
-                        hr: ({ node, ...props }) => <hr className="my-6 border-gray-200" {...props} />,
-                        table: ({ node, ...props }) => <div className="overflow-x-auto my-4"><table className="min-w-full border border-gray-200 rounded-lg text-sm" {...props} /></div>,
-                        th: ({ node, ...props }) => <th className="px-4 py-2 bg-gray-50 text-left font-semibold text-gray-700 border-b border-gray-200" {...props} />,
-                        td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 text-gray-700" {...props} />,
-                      }}>{generatedContent}</ReactMarkdown></div></div>)}
+              p: ({ node, ...props }) => <p className="mb-4 text-gray-700 leading-relaxed text-[15px] max-w-3xl" {...props} />,
+              a: ({ node, ...props }) => <a className="text-blue-600 hover:text-blue-700 hover:underline font-medium transition-colors" target="_blank" rel="noopener noreferrer" {...props} />,
+              ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-5 space-y-2.5 text-[15px] max-w-3xl" {...props} />,
+              ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-5 space-y-2.5 text-[15px] max-w-3xl" {...props} />,
+              li: ({ node, ...props }) => <li className="pl-1 text-gray-700 marker:text-gray-400" {...props} />,
+              h1: ({ node, ...props }) => <h1 className="text-2xl font-bold mt-8 mb-4 text-gray-900 tracking-tight border-b border-gray-200 pb-3" {...props} />,
+              h2: ({ node, ...props }) => <h2 className="text-xl font-bold mt-7 mb-3 text-gray-900 tracking-tight" {...props} />,
+              h3: ({ node, ...props }) => <h3 className="text-lg font-semibold mt-6 mb-2 text-gray-800 tracking-tight" {...props} />,
+              h4: ({ node, ...props }) => <h4 className="text-base font-semibold mt-5 mb-2 text-gray-800" {...props} />,
+              blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-blue-300 pl-4 py-1 my-4 bg-blue-50/50 rounded-r-lg text-gray-700 italic" {...props} />,
+              code: ({ node, ...props }) => <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[13px] font-mono text-slate-800 border border-slate-200" {...props} />,
+              strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
+              hr: ({ node, ...props }) => <hr className="my-6 border-gray-200" {...props} />,
+              table: ({ node, ...props }) => <div className="overflow-x-auto my-4"><table className="min-w-full border border-gray-200 rounded-lg text-sm" {...props} /></div>,
+              th: ({ node, ...props }) => <th className="px-4 py-2 bg-gray-50 text-left font-semibold text-gray-700 border-b border-gray-200" {...props} />,
+              td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 text-gray-700" {...props} />,
+            }}>{generatedContent}</ReactMarkdown></div>
+              {/* AI Disclaimer */}
+              <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                <svg className="h-3.5 w-3.5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  <span className="font-semibold">Important Notice:</span> This content is AI-generated and engineered for high-intent visibility across Large Language Models. While optimized for brand tone and relevance, all outputs must be reviewed, fact-checked, and verified by a human editor or professional writer prior to publishing to ensure absolute accuracy and compliance with brand standards.
+                </p>
+              </div>
+            </div>)}
           </div>
         </div>
         <div className="space-y-4">
@@ -112,6 +146,106 @@ export function ContentTab({
           <div className="bg-blue-50 rounded-xl border border-blue-200 p-5"><h3 className="font-semibold text-blue-900 mb-2">Pro Tip</h3><p className="text-sm text-blue-700">Generate content for topics where your brand has low visibility to improve your AI search presence.</p></div>
         </div>
       </div>
+
+      {/* Generated Content Library */}
+      {generatedContentHistory.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BookOpen className="h-4 w-4 text-gray-500" />
+              <h3 className="font-semibold text-gray-900">Generated Content Library</h3>
+              <Badge variant="secondary" className="text-xs">{generatedContentHistory.length}</Badge>
+            </div>
+            <p className="text-xs text-gray-400">All previously generated articles, stored locally</p>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {generatedContentHistory.map((item) => (
+              <div key={item.id} className="group">
+                <div className="flex items-center gap-4 px-6 py-4 hover:bg-gray-50/60 transition-colors">
+                  <div className="p-2 bg-purple-50 rounded-lg flex-shrink-0">
+                    <FileText className="h-4 w-4 text-purple-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-medium text-gray-900 text-sm truncate">{item.title}</span>
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] h-4 flex-shrink-0 ${item.source === "prompt_detail"
+                          ? "bg-indigo-50 text-indigo-600 border-indigo-200"
+                          : "bg-gray-50 text-gray-500 border-gray-200"
+                          }`}
+                      >
+                        {item.source === "prompt_detail" ? "Prompt Article" : "Content Tab"}
+                      </Badge>
+                    </div>
+                    {item.promptText && (
+                      <p className="text-xs text-gray-400 truncate">Prompt: {item.promptText}</p>
+                    )}
+                    <div className="flex items-center gap-1 mt-0.5 text-[11px] text-gray-400">
+                      <Clock className="h-3 w-3" />
+                      {new Date(item.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => navigator.clipboard.writeText(item.content)}
+                    >
+                      <Copy className="h-3.5 w-3.5 mr-1" />Copy
+                    </Button>
+                    {isAdmin && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
+                        onClick={() => onDeleteHistoryItem(item.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setExpandedHistoryId(expandedHistoryId === item.id ? null : item.id)}
+                    >
+                      {expandedHistoryId === item.id ? (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                {expandedHistoryId === item.id && (
+                  <div className="px-6 pb-6 bg-gray-50/40">
+                    <div className="max-w-none p-5 bg-white rounded-lg border border-gray-200 max-h-[500px] overflow-y-auto shadow-sm">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ node, ...props }) => <p className="mb-3 text-gray-700 leading-relaxed text-sm" {...props} />,
+                          h1: ({ node, ...props }) => <h1 className="text-xl font-bold mt-6 mb-3 text-gray-900 border-b border-gray-100 pb-2" {...props} />,
+                          h2: ({ node, ...props }) => <h2 className="text-lg font-bold mt-5 mb-2 text-gray-900" {...props} />,
+                          h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-4 mb-2 text-gray-800" {...props} />,
+                          ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-4 space-y-1.5 text-sm" {...props} />,
+                          ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-4 space-y-1.5 text-sm" {...props} />,
+                          li: ({ node, ...props }) => <li className="text-gray-700" {...props} />,
+                          strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
+                          hr: ({ node, ...props }) => <hr className="my-4 border-gray-200" {...props} />,
+                        }}
+                      >
+                        {item.content}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
