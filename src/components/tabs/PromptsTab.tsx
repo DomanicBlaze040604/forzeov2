@@ -333,17 +333,17 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
           <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
             <tr className="flex w-full">
               <th className="w-10 flex-none px-3 py-3 text-left" title="Select prompts for bulk actions"><Checkbox checked={selectedPromptIds.size === filteredPrompts.length && filteredPrompts.length > 0} onCheckedChange={(checked) => { if (checked) { setSelectedPromptIds(new Set(filteredPrompts.map(p => p.id))); } else { setSelectedPromptIds(new Set()); } }} /></th>
-              <th className="flex-1 min-w-0 px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" title="The question you want AI models to answer">
+              <th className="flex-1 min-w-0 px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" title="The question you want AI models to answer">
                 <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900 group">Prompt <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div>
               </th>
-              <th className="w-32 flex-none px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" title="Topic / seed keyword this prompt belongs to">Topic</th>
-              <th className="w-28 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 group" title="AI Opportunity reflects the relative strategic upside of improving visibility for this prompt in AI-generated answers." onClick={() => { setPromptSortField(prev => prev === 'ai_opportunity' ? null : 'ai_opportunity'); }}><div className="flex items-center justify-center gap-1">AI Opportunity <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div></th>
+              <th className="w-28 flex-none px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" title="Topic / seed keyword this prompt belongs to">Topic</th>
+              <th className="w-32 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 group" title="AI Opportunity reflects the relative strategic upside of improving visibility for this prompt in AI-generated answers." onClick={() => { setPromptSortField(prev => prev === 'ai_opportunity' ? null : 'ai_opportunity'); }}><div className="flex items-center justify-center gap-1">AI Opportunity <ArrowUpDown className="h-3 w-3 text-gray-400 group-hover:text-gray-600" /></div></th>
               <th className="w-20 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" title="How many AI models mentioned your brand vs total models tested">Visibility</th>
               <th className="w-20 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" title="Your brand's average position in AI-generated ranked lists (#1 is best)">Position</th>
-              <th className="w-44 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" title="Other brands that AI mentioned alongside or instead of yours">Brands</th>
+              <th className="w-36 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" title="Other brands that AI mentioned alongside or instead of yours">Brands</th>
               <th className="w-20 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" title="Number of web sources the AI referenced in its response">Citations</th>
               <th className="w-36 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" title="AI-generated suggestions to improve your visibility">Recommendations</th>
-              {isAdmin && <th className="w-20 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" title="Run audits, edit, or archive prompts">Actions</th>}
+              {isAdmin && <th className="w-16 flex-none px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider" title="Run audits, edit, or archive prompts">Actions</th>}
             </tr>
           </thead>
           <tbody
@@ -380,8 +380,8 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                 >
-                  <td className="w-10 flex-none px-3 py-2.5"><Checkbox checked={selectedPromptIds.has(p.id)} onCheckedChange={(checked) => { const newSet = new Set(selectedPromptIds); if (checked) { newSet.add(p.id); } else { newSet.delete(p.id); } setSelectedPromptIds(newSet); }} /></td>
-                  <td className="flex-1 min-w-0 px-4 py-2.5">
+                  <td className="w-10 flex-none px-3 py-3"><Checkbox checked={selectedPromptIds.has(p.id)} onCheckedChange={(checked) => { const newSet = new Set(selectedPromptIds); if (checked) { newSet.add(p.id); } else { newSet.delete(p.id); } setSelectedPromptIds(newSet); }} /></td>
+                  <td className="flex-1 min-w-0 px-3 py-3">
                     <div className="flex items-center gap-2 flex-wrap">
                       {isInactive && <Archive className="h-4 w-4 text-gray-400 flex-shrink-0" />}
                       <span
@@ -403,7 +403,7 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                       {p.location_name && <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 flex-shrink-0 bg-blue-50 text-blue-600 border-blue-200 flex items-center gap-1"><Globe className="h-2.5 w-2.5" />{p.location_name}</Badge>}
                     </div>
                   </td>
-                  <td className="w-32 flex-none px-4 py-2.5">
+                  <td className="w-28 flex-none px-3 py-3">
                     {inlineEditTopicId === p.id ? (
                       <input
                         autoFocus
@@ -451,7 +451,7 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                       </span>
                     )}
                   </td>
-                  <td className="w-28 flex-none px-3 py-2.5 text-center">
+                  <td className="w-32 flex-none px-3 py-3 text-center">
                     {(() => {
                       const op = getAIOpportunity(p.id);
                       return (
@@ -462,13 +462,13 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                       );
                     })()}
                   </td>
-                  <td className="w-20 flex-none px-3 py-2.5 text-center overflow-hidden">
+                  <td className="w-20 flex-none px-3 py-3 text-center overflow-hidden">
                     <span className={cn("text-sm font-medium", visibleCount > 0 ? "text-gray-900" : "text-gray-400")}>
                       {r ? `${visibleCount}/${totalCount}` : "\u2014"}
                     </span>
                   </td>
-                  <td className="w-20 flex-none px-3 py-2.5 text-center overflow-hidden font-medium text-sm"><span className={pos ? "text-blue-600" : "text-gray-400"}>{pos ? `#${typeof pos === 'number' ? pos.toFixed(1) : pos}` : "\u2014"}</span></td>
-                  <td className="w-44 flex-none px-3 py-2.5 overflow-hidden">
+                  <td className="w-20 flex-none px-3 py-3 text-center overflow-hidden font-medium text-sm"><span className={pos ? "text-blue-600" : "text-gray-400"}>{pos ? `#${typeof pos === 'number' ? pos.toFixed(1) : pos}` : "\u2014"}</span></td>
+                  <td className="w-36 flex-none px-3 py-3 overflow-hidden">
                     <div className="flex items-center justify-center gap-1">
                       {(() => {
                         // Extract brands mentioned in responses
@@ -567,9 +567,9 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                       })()}
                     </div>
                   </td>
-                  <td className="w-20 flex-none px-3 py-2.5 text-center">{cit > 0 ? <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs">{cit}</Badge> : <span className="text-gray-300">{"\u2014"}</span>}</td>
+                  <td className="w-20 flex-none px-3 py-3 text-center">{cit > 0 ? <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs">{cit}</Badge> : <span className="text-gray-300">{"\u2014"}</span>}</td>
                   {/* Recommendations Button */}
-                  <td className="w-36 flex-none px-3 py-2.5 text-center">
+                  <td className="w-36 flex-none px-3 py-3 text-center">
                     {r ? (
                       <Button
                         variant="outline"
@@ -621,7 +621,7 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                     )}
                   </td>
                   {isAdmin && (
-                    <td className="w-20 flex-none px-3 py-2.5">
+                    <td className="w-16 flex-none px-3 py-3">
                       <div className="flex items-center justify-center gap-1">
                         {isInactive ? (
                           <>
