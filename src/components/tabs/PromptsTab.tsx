@@ -374,7 +374,7 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                   key={p.id}
                   data-index={virtualRow.index}
                   ref={rowVirtualizer.measureElement}
-                  className={cn("hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0 absolute w-full flex", isInactive && "opacity-60")}
+                  className={cn("hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0 absolute w-full flex items-center", isInactive && "opacity-60")}
                   style={{
                     top: 0,
                     transform: `translateY(${virtualRow.start}px)`,
@@ -382,7 +382,7 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                 >
                   <td className="w-10 flex-none px-3 py-3"><Checkbox checked={selectedPromptIds.has(p.id)} onCheckedChange={(checked) => { const newSet = new Set(selectedPromptIds); if (checked) { newSet.add(p.id); } else { newSet.delete(p.id); } setSelectedPromptIds(newSet); }} /></td>
                   <td className="flex-1 min-w-0 px-3 py-3">
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
                       {isInactive && <Archive className="h-4 w-4 text-gray-400 flex-shrink-0" />}
                       <span
                         onClick={(e) => {
@@ -392,10 +392,11 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
                           }
                         }}
                         className={cn(
-                          "text-sm font-medium transition-colors",
+                          "text-sm font-medium transition-colors truncate",
                           (isAdmin || r) ? "cursor-pointer hover:text-blue-600 hover:underline underline-offset-2 text-gray-900" : "cursor-default text-gray-400",
                           isInactive && "text-gray-500"
                         )}
+                        title={p.prompt_text}
                       >
                         {p.prompt_text}
                       </span>
