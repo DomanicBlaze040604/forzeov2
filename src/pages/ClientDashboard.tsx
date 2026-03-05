@@ -34,8 +34,11 @@ import { CitationsTab } from "@/components/tabs/CitationsTab";
 import { ContentTab } from "@/components/tabs/ContentTab";
 const MultiAccountScheduler = React.lazy(() => import("@/components/MultiAccountScheduler"));
 const SignalsDashboard = React.lazy(() => import("@/components/SignalsDashboard").then(m => ({ default: m.SignalsDashboard })));
+const TrafficTab = React.lazy(() => import("@/components/tabs/TrafficTab").then(m => ({ default: m.TrafficTab })));
 import { CitationPreview } from "@/components/CitationPreview";
 import { InsightsTab, type AiInsights } from "@/components/tabs/InsightsTab";
+import { GA4ConnectorPanel } from "@/components/GA4ConnectorPanel";
+import { useGA4Connector } from "@/hooks/useGA4Connector";
 
 import { toast } from "sonner";
 
@@ -388,11 +391,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress, getAIOpportunity } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler">(() => {
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler" | "traffic">(() => {
     // Restore from localStorage on mount
     try {
       const saved = localStorage.getItem('forzeo_activeTab');
-      const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler"];
+      const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler", "traffic"];
       return (saved && validTabs.includes(saved)) ? saved as any : "overview";
     } catch { return "overview"; }
   });
@@ -459,6 +462,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
+
+  const ga4 = useGA4Connector(selectedClient?.id);
+  const { integration, totalLLMSessionsLast7, trafficData } = ga4;
 
   // Reload history when client changes
   useEffect(() => {
@@ -891,7 +897,13 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         const r = auditResults.find(ar => ar.prompt_id === p.id);
         if (!r) return false;
         // Check if brand mentioned in ANY model
-        const isVisible = r.model_results.some(mr => mr.brand_mentioned);
+        const isVisible = r.model_results.some(mr => {
+          if (mr.brand_mentioned) return true;
+          if (selectedClient && mr.raw_response) {
+            return brandMentionedInText(mr.raw_response, selectedClient.brand_name, selectedClient.brand_tags || []);
+          }
+          return false;
+        });
         return promptsFilterVisibility === "visible" ? isVisible : !isVisible;
       });
     }
@@ -900,7 +912,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       result = result.filter(p => {
         const r = auditResults.find(ar => ar.prompt_id === p.id);
         if (!r) return false;
-        return r.model_results.some(mr => mr.raw_response?.toLowerCase().includes(promptsFilterCompetitor.toLowerCase()));
+        // Also check competitors_found array in addition to text search
+        return r.model_results.some(mr => {
+          if (mr.competitors_found?.some(c => c.name.toLowerCase() === promptsFilterCompetitor.toLowerCase() && c.count > 0)) return true;
+          return mr.raw_response && brandMentionedInText(mr.raw_response, promptsFilterCompetitor);
+        });
       });
     }
 
@@ -1563,6 +1579,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             { id: "bulk_scheduler", label: "Bulk Scheduler", icon: Calendar },
             { id: "future-citations", label: "Future Citations", icon: Zap, betaBadge: true },
             { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null },
+            { id: "traffic", label: "Traffic", icon: BarChart3 },
             { id: "content", label: "Content", icon: FileText }
           ].filter(item => {
             // Admin sees all tabs
@@ -1670,8 +1687,29 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 {sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
               </button>
               <h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2 truncate">
-                <FileText className="h-5 w-5 text-gray-400 hidden sm:block" />
-                <span className="truncate">{activeTab === "overview" ? "Overview" : activeTab === "prompts" ? "Prompts" : activeTab === "schedules" ? "Auto-Run Schedules" : activeTab === "bulk_scheduler" ? "Bulk Scheduler" : activeTab === "future-citations" ? "Future Citations" : activeTab === "topics" ? "Topics" : activeTab === "content" ? "Content Generator" : activeTab === "insights" ? "Insights" : "Citations"}</span>
+                {(() => {
+                  const Icon = activeTab === "overview" ? Eye :
+                    activeTab === "prompts" ? Target :
+                      activeTab === "schedules" || activeTab === "bulk_scheduler" ? Calendar :
+                        activeTab === "traffic" ? BarChart3 :
+                          activeTab === "sources" ? Globe :
+                            activeTab === "insights" ? TrendingUp :
+                              FileText;
+                  return <Icon className="h-5 w-5 text-gray-400 hidden sm:block" />;
+                })()}
+                <span className="truncate">
+                  {activeTab === "overview" ? "Overview" :
+                    activeTab === "prompts" ? "Prompts" :
+                      activeTab === "schedules" ? "Auto-Run Schedules" :
+                        activeTab === "bulk_scheduler" ? "Bulk Scheduler" :
+                          activeTab === "future-citations" ? "Future Citations" :
+                            activeTab === "topics" ? "Topics" :
+                              activeTab === "content" ? "Content Generator" :
+                                activeTab === "insights" ? "Insights" :
+                                  activeTab === "traffic" ? "AI Traffic" :
+                                    activeTab === "sources" ? "Citations" :
+                                      "Dashboard"}
+                </span>
               </h1>
               {(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs hidden sm:inline-flex">Filtered</Badge>}
             </div>
@@ -1811,35 +1849,37 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           </div>
         </div>
         <div className="p-6">
-          {activeTab === "overview" && <OverviewTab
-            isAgency={isAgency}
-            clients={clients}
-            selectedClient={selectedClient}
-            prompts={prompts}
-            auditResults={auditResults}
-            filteredAuditResults={filteredAuditResults}
-            modelStats={modelStats}
-            competitorGap={competitorGap}
-            detailedBrandStats={detailedBrandStats}
-            sovTimeSeries={sovTimeSeries}
-            allCitations={allCitations}
-            domainStats={domainStats}
-            typeSegments={typeSegments}
-            recentPrompts={recentPrompts}
-            selectedModels={selectedModels}
-            sovTimeRange={sovTimeRange}
-            setSovTimeRange={setSovTimeRange}
-            showBrandOnly={showBrandOnly}
-            setShowBrandOnly={setShowBrandOnly}
-            showBrandVisibilityModal={showBrandVisibilityModal}
-            setShowBrandVisibilityModal={setShowBrandVisibilityModal}
-            switchClient={switchClient}
-            setManageBrandsOpen={setManageBrandsOpen}
-            setActiveTab={(tab: string) => setActiveTab(tab as any)}
-            setSelectedPromptDetail={setSelectedPromptDetail}
-            refreshData={refreshData}
-          />}
-          {activeTab === "brands" && BrandsTab()}
+          {activeTab === "overview" && (
+            <OverviewTab
+              isAgency={isAgency}
+              clients={clients}
+              selectedClient={selectedClient}
+              prompts={prompts}
+              auditResults={auditResults}
+              filteredAuditResults={filteredAuditResults}
+              modelStats={modelStats}
+              competitorGap={competitorGap}
+              detailedBrandStats={detailedBrandStats}
+              sovTimeSeries={sovTimeSeries}
+              allCitations={allCitations}
+              domainStats={domainStats}
+              typeSegments={typeSegments}
+              recentPrompts={recentPrompts}
+              selectedModels={selectedModels}
+              sovTimeRange={sovTimeRange}
+              setSovTimeRange={setSovTimeRange}
+              showBrandOnly={showBrandOnly}
+              setShowBrandOnly={setShowBrandOnly}
+              showBrandVisibilityModal={showBrandVisibilityModal}
+              setShowBrandVisibilityModal={setShowBrandVisibilityModal}
+              switchClient={switchClient}
+              setManageBrandsOpen={setManageBrandsOpen}
+              setActiveTab={(tab: any) => setActiveTab(tab)}
+              setSelectedPromptDetail={setSelectedPromptDetail}
+              refreshData={refreshData}
+              totalAiTraffic={totalLLMSessionsLast7}
+            />
+          )}{activeTab === "brands" && BrandsTab()}
           {activeTab === "prompts" && (
             <PromptsTab
               prompts={prompts}
@@ -1997,6 +2037,16 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               setSelectedPromptDetail={setSelectedPromptDetail}
             />
           )}
+          {activeTab === "traffic" && (
+            <React.Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>}>
+              <TrafficTab
+                selectedClient={selectedClient}
+                sovTimeSeries={sovTimeSeries}
+                onOpenSettings={() => setSettingsOpen(true)}
+                ga4={ga4}
+              />
+            </React.Suspense>
+          )}
 
         </div>
       </main>
@@ -2087,6 +2137,14 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                   );
                 })}
               </div>
+            </div>
+            <div className="pt-4 border-t">
+              <Label className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-blue-600" />
+                Integrations
+              </Label>
+              <p className="text-xs text-gray-500 mb-3">Connect external data sources to enrich your dashboard</p>
+              <GA4ConnectorPanel selectedClient={selectedClient} ga4={ga4} />
             </div>
             <div className="pt-4 border-t">
               <Label className="text-sm font-medium text-red-600">Danger Zone</Label>
@@ -2574,20 +2632,20 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         <Select value={promptLocation || "__default__"} onValueChange={(v) => setPromptLocation(v === "__default__" ? "" : v)}>
           <SelectTrigger className="bg-white h-8 text-sm mt-1.5"><SelectValue placeholder="Use brand's default location" /></SelectTrigger>
           <SelectContent className="max-h-80">
-            <SelectItem value="__default__">ðŸ“ Use brand's default location</SelectItem>
+            <SelectItem value="__default__">📍 Use brand's default location</SelectItem>
             {/* Countries */}
             <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50">Countries</div>
-            <SelectItem value="United States">ðŸ‡ºðŸ‡¸ United States</SelectItem>
-            <SelectItem value="United Kingdom">ðŸ‡¬ðŸ‡§ United Kingdom</SelectItem>
-            <SelectItem value="India">ðŸ‡®ðŸ‡³ India</SelectItem>
-            <SelectItem value="Thailand">ðŸ‡¹ðŸ‡­ Thailand</SelectItem>
-            <SelectItem value="Australia">ðŸ‡¦ðŸ‡º Australia</SelectItem>
-            <SelectItem value="Germany">ðŸ‡©ðŸ‡ª Germany</SelectItem>
-            <SelectItem value="UAE">ðŸ‡¦ðŸ‡ª UAE</SelectItem>
-            <SelectItem value="Canada">ðŸ‡¨ðŸ‡¦ Canada</SelectItem>
-            <SelectItem value="Singapore">ðŸ‡¸ðŸ‡¬ Singapore</SelectItem>
+            <SelectItem value="United States">🇺🇸 United States</SelectItem>
+            <SelectItem value="United Kingdom">🇬🇧 United Kingdom</SelectItem>
+            <SelectItem value="India">🇮🇳 India</SelectItem>
+            <SelectItem value="Thailand">🇹🇭 Thailand</SelectItem>
+            <SelectItem value="Australia">🇦🇺 Australia</SelectItem>
+            <SelectItem value="Germany">🇩🇪 Germany</SelectItem>
+            <SelectItem value="UAE">🇦🇪 UAE</SelectItem>
+            <SelectItem value="Canada">🇨🇦 Canada</SelectItem>
+            <SelectItem value="Singapore">🇸🇬 Singapore</SelectItem>
             {/* US Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡ºðŸ‡¸ US Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇺🇸 US Cities</div>
             <SelectItem value="US: New York">New York, NY</SelectItem>
             <SelectItem value="US: Los Angeles">Los Angeles, CA</SelectItem>
             <SelectItem value="US: Chicago">Chicago, IL</SelectItem>
@@ -2599,33 +2657,33 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             <SelectItem value="US: Austin">Austin, TX</SelectItem>
             <SelectItem value="US: Denver">Denver, CO</SelectItem>
             {/* UK Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¬ðŸ‡§ UK Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇬🇧 UK Cities</div>
             <SelectItem value="UK: London">London</SelectItem>
             <SelectItem value="UK: Manchester">Manchester</SelectItem>
             <SelectItem value="UK: Birmingham">Birmingham</SelectItem>
             <SelectItem value="UK: Edinburgh">Edinburgh</SelectItem>
             {/* India Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡®ðŸ‡³ India Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇮🇳 India Cities</div>
             <SelectItem value="India: Mumbai">Mumbai</SelectItem>
             <SelectItem value="India: Delhi">Delhi</SelectItem>
             <SelectItem value="India: Bangalore">Bangalore</SelectItem>
             <SelectItem value="India: Hyderabad">Hyderabad</SelectItem>
             <SelectItem value="India: Chennai">Chennai</SelectItem>
             {/* Thailand Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¹ðŸ‡­ Thailand Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇹🇭 Thailand Cities</div>
             <SelectItem value="Thailand: Bangkok">Bangkok</SelectItem>
             <SelectItem value="Thailand: Chiang Mai">Chiang Mai</SelectItem>
             <SelectItem value="Thailand: Phuket">Phuket</SelectItem>
             {/* Australia Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¦ðŸ‡º Australia Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇦🇺 Australia Cities</div>
             <SelectItem value="Australia: Sydney">Sydney</SelectItem>
             <SelectItem value="Australia: Melbourne">Melbourne</SelectItem>
             {/* UAE Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¦ðŸ‡ª UAE Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇦🇪 UAE Cities</div>
             <SelectItem value="UAE: Dubai">Dubai</SelectItem>
             <SelectItem value="UAE: Abu Dhabi">Abu Dhabi</SelectItem>
             {/* Canada Cities */}
-            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¨ðŸ‡¦ Canada Cities</div>
+            <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇨🇦 Canada Cities</div>
             <SelectItem value="Canada: Toronto">Toronto</SelectItem>
             <SelectItem value="Canada: Vancouver">Vancouver</SelectItem>
           </SelectContent>

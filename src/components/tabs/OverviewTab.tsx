@@ -233,6 +233,7 @@ export interface OverviewTabProps {
   setActiveTab: (tab: string) => void;
   setSelectedPromptDetail: (id: string) => void;
   refreshData: () => void;
+  totalAiTraffic?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +267,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   setActiveTab,
   setSelectedPromptDetail,
   refreshData,
+  totalAiTraffic = 0,
 }) => {
   // ---- Agency landing (no selected brand) ----
   if (isAgency && !selectedClient) {
@@ -274,7 +276,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
 
   return (
     <div className="space-y-6 fade-in">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">Share of Voice</div>
@@ -316,7 +318,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             <span className="text-4xl font-bold text-gray-950">{allCitations.length}</span>
             <span className="text-sm text-gray-500 font-medium">citations</span>
           </div>
-          <div className="mt-3 text-xs font-medium text-gray-400">{domainStats.length} unique domains referenced</div>
+          <div className="mt-3 text-[10px] font-medium text-gray-400 whitespace-nowrap overflow-hidden text-ellipsis">{domainStats.length} unique domains referenced</div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
@@ -336,7 +338,20 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             </span>
             <TrendIndicator value={0} />
           </div>
-          <div className="mt-3 text-xs font-medium text-gray-400">{filteredAuditResults.length} audits completed</div>
+          <div className="mt-3 text-[10px] font-medium text-gray-400 whitespace-nowrap overflow-hidden text-ellipsis">{filteredAuditResults.length} audits completed</div>
+        </div>
+        <div onClick={() => setActiveTab("traffic")} className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow cursor-pointer group">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">AI Traffic</div>
+            <div className="p-2.5 bg-indigo-50 rounded-lg group-hover:bg-indigo-100 transition-colors"><BarChart3 className="h-5 w-5 text-indigo-600" /></div>
+          </div>
+          <div className="mt-4 flex items-baseline gap-2">
+            <span className="text-4xl font-bold text-gray-950">{totalAiTraffic.toLocaleString()}</span>
+            <TrendIndicator value={0} />
+          </div>
+          <div className="mt-3 text-xs font-medium text-indigo-600 flex items-center gap-1">
+            View Analytics <ChevronRight className="h-3 w-3" />
+          </div>
         </div>
       </div>
       {/* SOV Trend Graph */}
