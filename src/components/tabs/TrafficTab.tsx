@@ -282,17 +282,6 @@ export function TrafficTab({ sovTimeSeries, onOpenSettings, ga4 }: TrafficTabPro
     const totalSessions = conversionTableData.reduce((s, r) => s + r.sessions, 0);
     const totalConversions = conversionTableData.reduce((s, r) => s + r.conversions, 0);
 
-    // ── Not connected ─────────────────────────────────────────────────────────
-    if (!isConnected) {
-        return (
-            <div className="space-y-6 fade-in">
-                <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                    <DisconnectedState onOpenSettings={onOpenSettings} />
-                </div>
-            </div>
-        );
-    }
-
     // ── Dynamic source aggregation based on rangeFilter ───────────────────────
     const sessionsBySource = useMemo(() => {
         const days = rangeFilter === "7d" ? 7 : rangeFilter === "30d" ? 30 : 90;
@@ -325,6 +314,17 @@ export function TrafficTab({ sovTimeSeries, onOpenSettings, ga4 }: TrafficTabPro
         }
         return totals;
     }, [trafficData, rangeFilter]);
+
+    // ── Not connected ─────────────────────────────────────────────────────────
+    if (!isConnected) {
+        return (
+            <div className="space-y-6 fade-in">
+                <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                    <DisconnectedState onOpenSettings={onOpenSettings} />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6 fade-in relative">
