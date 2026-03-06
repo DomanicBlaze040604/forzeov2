@@ -16,10 +16,10 @@
  * 
  * | Model      | Endpoint                                    | internal_model           |
  * |------------|---------------------------------------------|--------------------------|
- * | ChatGPT    | /ai_optimization/chat_gpt/llm_responses/live| gpt-4.1-mini             |
- * | Gemini     | /ai_optimization/gemini/llm_responses/live  | gemini-2.5-flash         |
- * | Claude     | /ai_optimization/claude/llm_responses/live  | claude-sonnet-4-0        |
- * | Perplexity | /ai_optimization/perplexity/llm_responses/live| sonar-pro              |
+ * | ChatGPT    | /ai_optimization/chat_gpt/llm_scraper/live/advanced | gpt-5-nano        |
+ * | Gemini     | /ai_optimization/gemini/llm_scraper/live/advanced   | gemini-2.0-flash  |
+ * | Claude     | /ai_optimization/claude/llm_responses/live          | claude-haiku-4-5  |
+ * | Perplexity | /ai_optimization/perplexity/llm_responses/live      | sonar             |
  * 
  * These are REAL-TIME responses from actual AI providers - NOT simulated!
  * 
@@ -939,10 +939,10 @@ async function getLiveLLMResponse(
 
   // Map model IDs to DataForSEO endpoints and model names
   const modelConfig: Record<string, { endpoint: string; modelName: string }> = {
-    chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", modelName: "gpt-4.1-mini" },
-    gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", modelName: "gemini-2.5-flash" },
-    claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-sonnet-4-0" },
-    perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", modelName: "sonar-pro" },
+    chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", modelName: "gpt-5-nano" },
+    gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", modelName: "gemini-2.0-flash" },
+    claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-haiku-4-5" },
+    perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", modelName: "sonar" },
   };
 
   const config = modelConfig[model];

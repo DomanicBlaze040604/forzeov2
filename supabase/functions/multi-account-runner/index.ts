@@ -693,7 +693,7 @@ async function runClientPrompts(
             competitors: client.competitors,
             location_code: prompt.location_code || client.location_code || 2840,
             location_name: client.target_region,
-            models: schedule.models || ['gemini-2.0-flash', 'gpt-4o-mini'],
+            models: schedule.models || ['gemini-2.0-flash', 'gpt-5-nano'],
             save_to_db: true,
             skip_cache: true
           }

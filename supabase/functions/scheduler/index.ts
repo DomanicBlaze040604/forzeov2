@@ -76,7 +76,8 @@ interface Client {
     brand_name: string;
     brand_tags: string[];
     competitors: string[];
-    location_code: number;
+    location_code: number
+    target_region?: string;
 }
 
 interface Prompt {
@@ -303,10 +304,104 @@ async function tavilySearch(query: string): Promise<{
 // DATAFORSEO LLM QUERY
 // ============================================
 
+// City-to-Country mapping for scraper endpoints (location_code must be country-level)
+function matchSchedulerCountryCode(locationCode: number): number {
+    const knownCountries = [
+        2356, 2840, 2826, 2036, 2124, 2276, 2250, 2392, 2076, 2484,
+        2380, 2724, 2410, 2702, 2784,
+    ];
+    if (knownCountries.includes(locationCode)) return locationCode;
+    // Common city → country mappings
+    const CITY_TO_COUNTRY: Record<number, number> = {
+        1023191: 2840, 1013962: 2840, 1016367: 2840, 1026481: 2840, // US cities
+        1006886: 2826, 1006984: 2826, // UK cities
+        1007768: 2356, 1007751: 2356, 1007741: 2356, // India cities
+        1000286: 2036, 1000459: 2036, // Australia cities
+    };
+    return CITY_TO_COUNTRY[locationCode] || 2840;
+}
+
+/**
+ * Query a scraper endpoint (ChatGPT or Gemini) — uses keyword + location_code
+ */
+async function queryScraperLLM(
+    prompt: string,
+    model: "chatgpt" | "gemini",
+    locationCode: number,
+    locationName?: string
+): Promise<{
+    success: boolean;
+    response: string;
+    citations: Array<{ url: string; title: string; domain: string }>;
+    cost: number;
+    error?: string;
+}> {
+    const endpoints: Record<string, string> = {
+        chatgpt: "/ai_optimization/chat_gpt/llm_scraper/live/advanced",
+        gemini: "/ai_optimization/gemini/llm_scraper/live/advanced",
+    };
+
+    const countryCode = matchSchedulerCountryCode(locationCode);
+    const locationContext = locationName ? `[Context: ${locationName} market] ` : "";
+
+    try {
+        const response = await fetch(`${DATAFORSEO_API}${endpoints[model]}`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Basic ${DATAFORSEO_AUTH}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify([{
+                keyword: `${locationContext}${prompt}`,
+                location_code: countryCode,
+                language_code: "en",
+            }]),
+        });
+
+        if (!response.ok) {
+            return { success: false, response: "", citations: [], cost: 0, error: `HTTP ${response.status}` };
+        }
+
+        const data = await response.json();
+        const task = data?.tasks?.[0];
+        const result = task?.result?.[0];
+        const cost = task?.cost || 0;
+
+        // Extract response from markdown
+        let llmResponse = result?.markdown || "";
+        if (!llmResponse && result?.items) {
+            llmResponse = result.items
+                .filter((item: any) => item.markdown)
+                .map((item: any) => item.markdown)
+                .join("\n\n");
+        }
+
+        // Extract citations from sources
+        const citations: Array<{ url: string; title: string; domain: string }> = [];
+        const sources = result?.sources || [];
+        for (const source of sources) {
+            if (source.url) {
+                try {
+                    citations.push({
+                        url: source.url,
+                        title: source.title || extractDomain(source.url),
+                        domain: source.domain || extractDomain(source.url),
+                    });
+                } catch { /* skip */ }
+            }
+        }
+
+        return { success: true, response: llmResponse, citations, cost };
+    } catch (err) {
+        return { success: false, response: "", citations: [], cost: 0, error: String(err) };
+    }
+}
+
 async function queryLLM(
     prompt: string,
     model: string,
-    locationCode: number
+    locationCode: number,
+    locationName?: string
 ): Promise<{
     success: boolean;
     response: string;
@@ -318,9 +413,12 @@ async function queryLLM(
         return { success: false, response: "", citations: [], cost: 0, error: "DataForSEO not configured" };
     }
 
+    // ChatGPT and Gemini use scraper endpoints (with location_code + structured sources)
+    if (model === "chatgpt" || model === "gemini") {
+        return queryScraperLLM(prompt, model, locationCode, locationName);
+    }
+
     const modelConfig: Record<string, { endpoint: string; model_name: string }> = {
-        chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", model_name: "gpt-5-nano" },
-        gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", model_name: "gemini-2.5-flash" },
         claude: { endpoint: "/ai_optimization/claude/llm_responses/live", model_name: "claude-haiku-4-5" },
         perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", model_name: "sonar" },
     };
@@ -390,23 +488,19 @@ async function queryLLM(
         };
         const isoCode = locationCode ? locationCodeToISO[locationCode] : undefined;
 
+        const locationContext = locationName ? `[Context: ${locationName} market] ` : "";
         const payload: Record<string, any> = {
-            user_prompt: prompt,
+            user_prompt: `${locationContext}${prompt}`,
             model_name: config.model_name,
         };
 
-        // GPT-5 Nano is extremely sensitive — do NOT send temperature or max_output_tokens
-        if (config.model_name !== "gpt-5-nano") {
-            payload.max_output_tokens = 1024;
-            payload.temperature = 0.7;
-        }
+        payload.max_output_tokens = 1024;
+        payload.temperature = 0.7;
 
-        // Perplexity and Claude support web_search; Gemini does not
-        if (model === "perplexity" || model === "claude") {
-            payload.web_search = true;
-            if (isoCode) {
-                payload.web_search_country_iso_code = isoCode;
-            }
+        // Claude and Perplexity support web_search + country ISO
+        payload.web_search = true;
+        if (isoCode) {
+            payload.web_search_country_iso_code = isoCode;
         }
 
         const response = await fetch(`${DATAFORSEO_API}${config.endpoint}`, {
@@ -574,7 +668,7 @@ async function processSingleAccountSchedule(
 
         // Run selected models
         for (const model of schedule.models) {
-            const result = await queryLLM(promptText, model, client.location_code);
+            const result = await queryLLM(promptText, model, client.location_code, client.target_region);
 
             const brandData = parseBrandData(result.response, client.brand_name, client.brand_tags);
 

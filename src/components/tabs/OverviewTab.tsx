@@ -301,7 +301,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             <span className="text-4xl font-bold text-gray-950">{(() => {
               const totalResults = filteredAuditResults.flatMap(r => r.model_results || []);
               const brandDomain = selectedClient?.brand_domain?.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/.*$/, '') || '';
-              const citedResults = totalResults.filter(mr => (mr as any).is_cited || (brandDomain && mr.citations && mr.citations.some(c => c.domain.toLowerCase().includes(brandDomain) || brandDomain.includes(c.domain.toLowerCase()))));
+              const citedResults = totalResults.filter(mr => (mr as any).is_cited || (brandDomain && mr.citations && mr.citations.some(c => c.domain.toLowerCase().includes(brandDomain) || c.url?.toLowerCase().includes(brandDomain))));
               return totalResults.length > 0 ? Math.round((citedResults.length / totalResults.length) * 100) : 0;
             })()}%</span>
             <TrendIndicator value={0} />

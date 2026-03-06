@@ -501,30 +501,6 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
     }, [formData.brandName, formData.industry, formData.customIndustry, formData.location, showNotification]);
 
     // Location drilldown helper for granular geo-context
-    const getLocationDrilldown = useCallback((region: string): string => {
-        const geographyMap: Record<string, string[]> = {
-            "India": ["Mumbai", "Bangalore", "Delhi NCR"],
-            "UAE": ["Dubai", "Abu Dhabi"],
-            "United States": ["New York", "San Francisco", "Austin"],
-            "USA": ["New York", "San Francisco", "Austin"],
-            "UK": ["London", "Manchester"],
-            "United Kingdom": ["London", "Manchester"],
-            "Dubai": ["Dubai Marina", "Downtown Dubai", "Business Bay"],
-            "Bangalore": ["Indiranagar", "Koramangala", "Whitefield"],
-            "Mumbai": ["Bandra", "Lower Parel", "Andheri"],
-            "Singapore": ["CBD", "Orchard Road", "Marina Bay"],
-            "Australia": ["Sydney", "Melbourne", "Brisbane"],
-            "Canada": ["Toronto", "Vancouver", "Montreal"],
-            "Germany": ["Berlin", "Munich", "Frankfurt"],
-            "France": ["Paris", "Lyon", "Marseille"],
-        };
-        const subLocations = geographyMap[region];
-        if (subLocations) {
-            return `Drill down into specific sub-locations: ${subLocations.join(", ")}.`;
-        }
-        return `Focus on the most prominent commercial hubs within ${region}.`;
-    }, []);
-
     // Generate prompts via LLM (Brand-Neutral GEO Strategist)
     const handleGeneratePreview = useCallback(async () => {
         const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
@@ -535,13 +511,12 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         setLoading(true);
         setCurrentStep('review_prompts');
 
-        const locationInstruction = getLocationDrilldown(locationName);
-
         // GEO Strategist system prompt — Brand-Neutral Category Dominance
         const systemInstruction = `You are a Generative Engine Optimization (GEO) Strategist. Your goal is to generate high-intent search queries that real buyers use to discover top-tier solutions in a specific category.
 
 STRICT CONSTRAINTS:
 - BRAND NEUTRALITY: You must NEVER include the brand name "${formData.brandName}" in any output. Focus entirely on category-level searches (e.g., "Best [Category]" instead of "${formData.brandName} reviews").
+- NO LOCATION NAMES: You must NEVER include any city, country, region, or area names (e.g., "in Mumbai", "in India", "in New York", "for the US market"). Location targeting is handled separately by the system. Prompts must be purely topic-focused.
 - BUYER INTENT: Prioritize queries that indicate a user is ready to purchase or compare (Commercial Investigation).
 - NO FILLER: Output ONLY the prompts, one per line. No numbers, no introductory text, no conversational filler.`;
 
@@ -553,17 +528,15 @@ STRICT CONSTRAINTS:
             // Dynamic user prompt for this keyword
             const userPrompt = `Category Keyword: ${keyword}
 Industry: ${finalIndustry}
-Region: ${locationName}
 
 Instructions:
-1. Generate ${promptsNeeded} brand-neutral search prompts.
-2. ${locationInstruction}
-3. Prompt Mix Requirement:
+1. Generate ${promptsNeeded} brand-neutral search prompts. Do NOT include any city, country, or region names.
+2. Prompt Mix Requirement:
    - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Pillar" Queries: (Top 5, Top 10, Best of 2026).
-   - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Localized" Queries: (Best in [City/Area]).
+   - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Comparison" Queries: (vs alternatives, head-to-head, compared).
    - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Industry Variations": High-intent variations specific to ${finalIndustry} (e.g., pricing, reliability, specific technical use-cases).
    - 1x "Decision Criteria": A query asking the AI for advice on how to choose a provider in this category.
-4. STOPSHIP: Do NOT mention the brand "${formData.brandName}" in any output.`;
+3. STOPSHIP: Do NOT mention the brand "${formData.brandName}" or any location/city/country names in any output.`;
 
             let generatedLines: string[] = [];
 
@@ -599,13 +572,13 @@ Instructions:
             if (generatedLines.length === 0) {
                 console.log(`[GEO Onboarding] Falling back to templates for "${keyword}"`);
                 generatedLines = [
-                    `Best ${keyword} options in ${locationName} for 2026`,
+                    `Best ${keyword} options for ${finalIndustry} in 2026`,
                     `Top 10 ${keyword} providers compared`,
                     `How to choose the right ${keyword} for ${finalIndustry}`,
                     `Most reliable ${keyword} solutions with competitive pricing`,
                     `${keyword} recommendations for small and mid-size businesses`,
                     `Affordable ${keyword} alternatives worth considering`,
-                    `Premium ${keyword} services in ${locationName}`,
+                    `${keyword} vs competitors head-to-head comparison`,
                     `${keyword} features and integrations guide`,
                     `${keyword} pricing comparison and reviews`,
                     `What to look for when choosing ${keyword}`
@@ -621,6 +594,48 @@ Instructions:
             // Small delay between keywords to avoid rate limiting
             if (formData.seedKeywords.indexOf(keyword) < formData.seedKeywords.length - 1) {
                 await new Promise(r => setTimeout(r, 300));
+            }
+        }
+
+        // Strip location names that the LLM may have injected despite instructions
+        // (location targeting is handled at query time via location_code / web_search_country_iso_code)
+        const locationTerms: string[] = [];
+        // Add selected location name parts (e.g. "Mumbai, India" → ["Mumbai", "India"])
+        locationName.split(/[,\s]+/).filter(w => w.length > 2).forEach(w => locationTerms.push(w));
+        // Add sub-locations from geography map
+        const geographyMap: Record<string, string[]> = {
+            "India": ["Mumbai", "Bangalore", "Delhi", "Delhi NCR", "Hyderabad", "Chennai", "Kolkata", "Pune"],
+            "UAE": ["Dubai", "Abu Dhabi"], "United States": ["New York", "San Francisco", "Austin", "Los Angeles", "Chicago", "Miami", "Seattle", "Boston"],
+            "USA": ["New York", "San Francisco", "Austin"], "United Kingdom": ["London", "Manchester", "Birmingham", "Edinburgh"],
+            "UK": ["London", "Manchester"], "Australia": ["Sydney", "Melbourne", "Brisbane"],
+            "Canada": ["Toronto", "Vancouver", "Montreal"], "Germany": ["Berlin", "Munich", "Frankfurt"],
+            "Singapore": ["CBD", "Orchard Road", "Marina Bay"],
+        };
+        for (const key of Object.keys(geographyMap)) {
+            if (locationName.includes(key)) {
+                geographyMap[key].forEach(sub => locationTerms.push(sub));
+            }
+        }
+        // Also add common country names that might leak
+        const extraLocations = ["United States", "United Kingdom", "India", "Australia", "Canada", "Singapore", "Dubai", "UAE", "USA", "UK"];
+        extraLocations.forEach(loc => locationTerms.push(loc));
+
+        const uniqueLocationTerms = [...new Set(locationTerms.filter(t => t.length > 2))];
+        if (uniqueLocationTerms.length > 0) {
+            const locationPattern = new RegExp(
+                `\\s*(?:in|for|near|across|around|within|throughout)\\s+(?:the\\s+)?(?:${uniqueLocationTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?:\\s+(?:market|region|area|city))?\\s*$`,
+                'i'
+            );
+            for (const p of allPrompts) {
+                p.text = p.text.replace(locationPattern, '').trim();
+            }
+            // Remove any prompts that became too short after stripping
+            const beforeCount = allPrompts.length;
+            const validPrompts = allPrompts.filter(p => p.text.length > 10);
+            allPrompts.length = 0;
+            allPrompts.push(...validPrompts);
+            if (allPrompts.length < beforeCount) {
+                console.log(`[GEO Onboarding] Removed ${beforeCount - allPrompts.length} prompts that were mostly location-based`);
             }
         }
 
@@ -660,7 +675,7 @@ Instructions:
 
         setGeneratedPrompts(dedupedPrompts);
         setLoading(false);
-    }, [formData, userLimits.maxPrompts, promptsPerKeyword, getLocationDrilldown]);
+    }, [formData, userLimits.maxPrompts, promptsPerKeyword]);
 
     // Navigation
     const handleNext = useCallback(async () => {
@@ -776,9 +791,17 @@ Instructions:
             setProcessingStatus(`Saving ${generatedPrompts.length} prompts to database...`);
             await new Promise(r => setTimeout(r, 500));
 
-            // Insert prompts
+            // Insert prompts (deduplicate by prompt_text first)
             if (generatedPrompts.length > 0) {
-                const promptsData = generatedPrompts.map(p => ({
+                const seen = new Set<string>();
+                const uniquePrompts = generatedPrompts.filter(p => {
+                    const key = p.text.trim().toLowerCase();
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+
+                const promptsData = uniquePrompts.map(p => ({
                     id: crypto.randomUUID(),
                     client_id: clientData.id,
                     prompt_text: p.text,
@@ -790,8 +813,27 @@ Instructions:
 
                 const { error: promptsError } = await supabase.from('prompts').insert(promptsData);
                 if (promptsError) {
-                    console.error("Prompts insert error:", promptsError);
-                    toast.error(`Failed to save prompts: ${promptsError.message}`);
+                    // If unique constraint violation on bulk, fall back to individual inserts
+                    if (promptsError.code === '23505') {
+                        console.warn('Bulk insert hit duplicate constraint, falling back to individual inserts...');
+                        let savedCount = 0;
+                        for (const p of promptsData) {
+                            const { error: singleError } = await supabase.from('prompts').insert(p);
+                            if (!singleError) {
+                                savedCount++;
+                            } else if (singleError.code !== '23505') {
+                                console.error('Failed to insert prompt:', p.prompt_text, singleError);
+                            }
+                        }
+                        if (savedCount === 0) {
+                            toast.error('Failed to save prompts: all were duplicates');
+                        } else if (savedCount < promptsData.length) {
+                            toast.warning(`Saved ${savedCount}/${promptsData.length} prompts (duplicates skipped)`);
+                        }
+                    } else {
+                        console.error("Prompts insert error:", promptsError);
+                        toast.error(`Failed to save prompts: ${promptsError.message}`);
+                    }
                 }
             }
 
