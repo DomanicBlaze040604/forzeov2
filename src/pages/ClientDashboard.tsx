@@ -5,7 +5,7 @@ import React, { useState, useRef, useMemo, useEffect, useCallback } from "react"
 import { cn } from "@/lib/utils";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles, Tag, Info, Bell } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles, Tag, Info, Bell, DollarSign } from 'lucide-react';
 import { SOVLineChart, CLIENT_COLOR, COMPETITOR_COLORS } from "@/components/SOVLineChart";
 import { AgencyOverview } from "@/components/AgencyOverview";
 import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
@@ -35,6 +35,7 @@ import { ContentTab } from "@/components/tabs/ContentTab";
 const MultiAccountScheduler = React.lazy(() => import("@/components/MultiAccountScheduler"));
 const SignalsDashboard = React.lazy(() => import("@/components/SignalsDashboard").then(m => ({ default: m.SignalsDashboard })));
 const TrafficTab = React.lazy(() => import("@/components/tabs/TrafficTab").then(m => ({ default: m.TrafficTab })));
+import { CostTab } from "@/components/tabs/CostTab";
 import { CitationPreview } from "@/components/CitationPreview";
 import { InsightsTab, type AiInsights } from "@/components/tabs/InsightsTab";
 import { GA4ConnectorPanel } from "@/components/GA4ConnectorPanel";
@@ -391,7 +392,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress, getAIOpportunity } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler" | "traffic">(() => {
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler" | "traffic" | "cost">(() => {
     // Restore from localStorage on mount
     try {
       const saved = localStorage.getItem('forzeo_activeTab');
@@ -402,7 +403,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
   // Persist activeTab to localStorage
   useEffect(() => {
-    try { localStorage.setItem('forzeo_activeTab', activeTab); } catch { /* quota exceeded â€” non-critical */ }
+    try { localStorage.setItem('forzeo_activeTab', activeTab); } catch { /* quota exceeded — non-critical */ }
   }, [activeTab]);
   // selectedCampaignId removed - Topics tab replaced Campaigns
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -550,14 +551,14 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       if (targetClient) {
         switchClient(targetClient);
       } else {
-        // Client not in list yet â€” dashboard may still be loading. 
+        // Client not in list yet — dashboard may still be loading. 
         // Refresh to pick up the new client.
         refreshData();
       }
       return; // Wait for next render when selectedClient matches
     }
 
-    // Now the right client is selected â€” wait for prompts to load
+    // Now the right client is selected — wait for prompts to load
     if (prompts.length > 0 && !loading) {
       console.log('[AutoRun] Triggering runFullAudit for new brand:', autoRunClientId, `(${prompts.length} prompts)`);
       toast.info(`Auto-starting audit for ${prompts.length} prompts...`);
@@ -975,7 +976,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
       return {
         topic, promptCount: topicPrompts.length, prompts: topicPrompts,
-        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "â€”",
+        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "—",
         visibilityPct: totalModels > 0 ? Math.round((totalVisible / totalModels) * 100) : 0,
         avgPosition, citations: totalCitations,
         brands: Array.from(brandFreqMap.keys()),
@@ -1023,7 +1024,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
       sorted.push({
         topic: "Others", promptCount: othersPrompts.length, prompts: othersPrompts,
-        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "â€”",
+        visibility: totalModels > 0 ? `${totalVisible}/${totalModels}` : "—",
         visibilityPct: totalModels > 0 ? Math.round((totalVisible / totalModels) * 100) : 0,
         avgPosition, citations: totalCitations,
         brands: Array.from(brandFreqMap.keys()),
@@ -1128,7 +1129,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
         // Auto-run audit for all users (admin or not)
         if (newPromptObj) {
-          toast.info("ðŸš€ Prompt added! Running audit automatically...");
+          toast.info("🚀 Prompt added! Running audit automatically...");
           setTimeout(() => runSinglePrompt(newPromptObj), 500); // Pass object directly
         }
       } catch (err: any) {
@@ -1218,7 +1219,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
 
         // Auto-run full audit for non-admin users after bulk add
         if (!isAdmin && promptTexts.length > 0) {
-          toast.info(`ðŸš€ ${promptTexts.length} prompts added! Running audits automatically...`);
+          toast.info(`🚀 ${promptTexts.length} prompts added! Running audits automatically...`);
           setTimeout(() => runFullAudit(), 500);
         }
       } catch (err: any) {
@@ -1580,6 +1581,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             { id: "future-citations", label: "Future Citations", icon: Zap, betaBadge: true },
             { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null },
             { id: "traffic", label: "Traffic", icon: BarChart3 },
+            { id: "cost", label: "Cost Analysis", icon: DollarSign },
             { id: "content", label: "Content", icon: FileText }
           ].filter(item => {
             // Admin sees all tabs
@@ -1588,8 +1590,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             if (isAgency) {
               return ["overview", "prompts", "topics", "insights", "future-citations", "sources", "content", "brands"].includes(item.id);
             }
-            // Normal users see limited tabs (bulk_scheduler is admin-only)
-            return !["schedules", "future-citations", "bulk_scheduler"].includes(item.id);
+            // Normal users see limited tabs (bulk_scheduler and cost are admin-only)
+            return !["schedules", "future-citations", "bulk_scheduler", "cost"].includes(item.id);
           }).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
@@ -1692,9 +1694,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     activeTab === "prompts" ? Target :
                       activeTab === "schedules" || activeTab === "bulk_scheduler" ? Calendar :
                         activeTab === "traffic" ? BarChart3 :
-                          activeTab === "sources" ? Globe :
-                            activeTab === "insights" ? TrendingUp :
-                              FileText;
+                          activeTab === "cost" ? DollarSign :
+                            activeTab === "sources" ? Globe :
+                              activeTab === "insights" ? TrendingUp :
+                                FileText;
                   return <Icon className="h-5 w-5 text-gray-400 hidden sm:block" />;
                 })()}
                 <span className="truncate">
@@ -1707,8 +1710,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                               activeTab === "content" ? "Content Generator" :
                                 activeTab === "insights" ? "Insights" :
                                   activeTab === "traffic" ? "AI Traffic" :
-                                    activeTab === "sources" ? "Citations" :
-                                      "Dashboard"}
+                                    activeTab === "cost" ? "Cost Analysis" :
+                                      activeTab === "sources" ? "Citations" :
+                                        "Dashboard"}
                 </span>
               </h1>
               {(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs hidden sm:inline-flex">Filtered</Badge>}
@@ -2046,6 +2050,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 ga4={ga4}
               />
             </React.Suspense>
+          )}
+          {activeTab === "cost" && (
+              <CostTab
+                filteredAuditResults={filteredAuditResults}
+              />
           )}
 
         </div>
@@ -3052,13 +3061,15 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                               <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-sm font-medium">Not Visible</span>
                             )}
                             {(() => {
+                              // Only show rank when the brand is actually visible for this model
+                              if (!mr.brand_mentioned) return null;
                               // Layer 1: DB brand_rank, Layer 2: parsed from numbered list, Layer 3: extracted_brands position, Layer 4: mention order
                               let rank: number | null = mr.brand_rank || computedRank || null;
                               if (!rank && mr.extracted_brands) {
                                 const ownBrand = mr.extracted_brands.find((eb: any) => eb.is_own_brand && eb.position);
                                 if (ownBrand) rank = ownBrand.position;
                               }
-                              if (!rank && mr.brand_mentioned && mr.raw_response && selectedClient) {
+                              if (!rank && mr.raw_response && selectedClient) {
                                 const text = mr.raw_response.toLowerCase();
                                 const brandIdx = text.indexOf(selectedClient.brand_name.toLowerCase());
                                 if (brandIdx !== -1) {
@@ -3437,7 +3448,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                       "inline-flex items-center justify-center min-w-[32px] h-8 rounded-lg font-bold",
                                       avgRank ? (avgRank <= 3 ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-gray-50 text-gray-600 border border-gray-100") : "text-gray-300"
                                     )}>
-                                      {avgRank ? `#${avgRank}` : "â€”"}
+                                      {avgRank ? `#${avgRank}` : "—"}
                                     </div>
                                   </td>
                                   {/* Brands Column */}
@@ -3736,7 +3747,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 </div>
               )}
 
-              {/* AI Insights/Recommendations Tab â€” AI Visibility Strategist */}
+              {/* AI Insights/Recommendations Tab — AI Visibility Strategist */}
               {detailTab === "insights" && (
                 <div className="space-y-4">
                   {recommendations ? (
@@ -3817,7 +3828,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                   </div>
                                 </div>
                                 {rec.targetPlatforms && (
-                                  <p className="text-xs text-purple-600 mt-1">ðŸŽ¯ {rec.targetPlatforms}</p>
+                                  <p className="text-xs text-purple-600 mt-1">🎯 {rec.targetPlatforms}</p>
                                 )}
                               </div>
                               <div className="p-4 space-y-3">
@@ -3840,7 +3851,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                         <p className="text-xs text-gray-500 mb-1">Key claims to include:</p>
                                         <ul className="space-y-0.5">
                                           {rec.exactAction.keyClaims.map((claim, ci) => (
-                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-indigo-400 mt-0.5">â€¢</span>{claim}</li>
+                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-indigo-400 mt-0.5">•</span>{claim}</li>
                                           ))}
                                         </ul>
                                       </div>
@@ -3906,7 +3917,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                   </div>
                                 </div>
                                 {rec.targetPlatforms && (
-                                  <p className="text-xs text-teal-600 mt-1">ðŸŽ¯ {rec.targetPlatforms}</p>
+                                  <p className="text-xs text-teal-600 mt-1">🎯 {rec.targetPlatforms}</p>
                                 )}
                               </div>
                               <div className="p-4 space-y-3">
@@ -3929,7 +3940,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                                         <p className="text-xs text-gray-500 mb-1">Key claims to include:</p>
                                         <ul className="space-y-0.5">
                                           {rec.exactAction.keyClaims.map((claim, ci) => (
-                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-teal-400 mt-0.5">â€¢</span>{claim}</li>
+                                            <li key={ci} className="text-xs text-gray-700 flex items-start gap-1"><span className="text-teal-400 mt-0.5">•</span>{claim}</li>
                                           ))}
                                         </ul>
                                       </div>
@@ -3994,7 +4005,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         <Target className="h-10 w-10 text-indigo-500" />
                       </div>
                       <p className="text-gray-800 font-semibold text-lg mb-2">AI Visibility Strategist</p>
-                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Analyze why competitors get cited in AI responses for this query, and get 6 precise, actionable recommendations to close the gap â€” split into High Impact strategies and Quick Wins.</p>
+                      <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">Analyze why competitors get cited in AI responses for this query, and get 6 precise, actionable recommendations to close the gap — split into High Impact strategies and Quick Wins.</p>
                       <Button onClick={handleGenerateRecommendations} disabled={generatingRecommendations} size="lg" className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-lg shadow-indigo-200 transition-all">
                         {generatingRecommendations ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Analyzing Citation Gaps...</> : <><Zap className="h-4 w-4 mr-2" />Generate Visibility Strategy</>}
                       </Button>
@@ -4045,28 +4056,28 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                 <SelectContent className="max-h-80">
                   <SelectItem value="__default__">ðŸ“ Use brand's default location</SelectItem>
                   <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50">Countries</div>
-                  <SelectItem value="United States">ðŸ‡ºðŸ‡¸ United States</SelectItem>
-                  <SelectItem value="United Kingdom">ðŸ‡¬ðŸ‡§ United Kingdom</SelectItem>
-                  <SelectItem value="India">ðŸ‡®ðŸ‡³ India</SelectItem>
-                  <SelectItem value="Thailand">ðŸ‡¹ðŸ‡­ Thailand</SelectItem>
-                  <SelectItem value="Australia">ðŸ‡¦ðŸ‡º Australia</SelectItem>
-                  <SelectItem value="Germany">ðŸ‡©ðŸ‡ª Germany</SelectItem>
-                  <SelectItem value="UAE">ðŸ‡¦ðŸ‡ª UAE</SelectItem>
-                  <SelectItem value="Canada">ðŸ‡¨ðŸ‡¦ Canada</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡ºðŸ‡¸ US Cities</div>
+                  <SelectItem value="United States">🇺🇸 United States</SelectItem>
+                  <SelectItem value="United Kingdom">🇬🇧 United Kingdom</SelectItem>
+                  <SelectItem value="India">🇮🇳 India</SelectItem>
+                  <SelectItem value="Thailand">🇹🇭 Thailand</SelectItem>
+                  <SelectItem value="Australia">🇦🇺 Australia</SelectItem>
+                  <SelectItem value="Germany">🇩🇪 Germany</SelectItem>
+                  <SelectItem value="UAE">🇦🇪 UAE</SelectItem>
+                  <SelectItem value="Canada">🇨🇦 Canada</SelectItem>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇺🇸 US Cities</div>
                   <SelectItem value="US: New York">New York, NY</SelectItem>
                   <SelectItem value="US: Los Angeles">Los Angeles, CA</SelectItem>
                   <SelectItem value="US: Chicago">Chicago, IL</SelectItem>
                   <SelectItem value="US: San Francisco">San Francisco, CA</SelectItem>
                   <SelectItem value="US: Miami">Miami, FL</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¬ðŸ‡§ UK Cities</div>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇬🇧 UK Cities</div>
                   <SelectItem value="UK: London">London</SelectItem>
                   <SelectItem value="UK: Manchester">Manchester</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡®ðŸ‡³ India Cities</div>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇮🇳 India Cities</div>
                   <SelectItem value="India: Mumbai">Mumbai</SelectItem>
                   <SelectItem value="India: Delhi">Delhi</SelectItem>
                   <SelectItem value="India: Bangalore">Bangalore</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">ðŸ‡¹ðŸ‡­ Thailand Cities</div>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇹🇭 Thailand Cities</div>
                   <SelectItem value="Thailand: Bangkok">Bangkok</SelectItem>
                   <SelectItem value="Thailand: Phuket">Phuket</SelectItem>
                 </SelectContent>

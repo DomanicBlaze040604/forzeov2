@@ -16,10 +16,10 @@
  * 
  * | Model      | Endpoint                                    | internal_model           |
  * |------------|---------------------------------------------|--------------------------|
- * | ChatGPT    | /ai_optimization/chat_gpt/llm_responses/live| gpt-4.1-mini             |
- * | Gemini     | /ai_optimization/gemini/llm_responses/live  | gemini-2.5-flash         |
- * | Claude     | /ai_optimization/claude/llm_responses/live  | claude-sonnet-4-0        |
- * | Perplexity | /ai_optimization/perplexity/llm_responses/live| sonar-pro              |
+ * | ChatGPT    | /ai_optimization/chat_gpt/llm_scraper/live/advanced | gpt-5-nano        |
+ * | Gemini     | /ai_optimization/gemini/llm_scraper/live/advanced   | gemini-2.0-flash  |
+ * | Claude     | /ai_optimization/claude/llm_responses/live          | claude-haiku-4-5  |
+ * | Perplexity | /ai_optimization/perplexity/llm_responses/live      | sonar             |
  * 
  * These are REAL-TIME responses from actual AI providers - NOT simulated!
  * 
@@ -2056,12 +2056,190 @@ async function getChatGPTScraperResponse(
 }
 
 /**
+ * Gemini LLM Scraper — structured Gemini response with geo-targeting
+ * Uses /ai_optimization/gemini/llm_scraper/live/advanced
+ * Supports location_code + language_code (unlike llm_responses/live which has NO geo params)
+ */
+async function getGeminiScraperResponse(
+  keyword: string,
+  locationCode: number
+): Promise<{
+  success: boolean;
+  response: string;
+  tokens: number;
+  cost: number;
+  latency_ms: number;
+  citations?: Citation[];
+  error?: string;
+}> {
+  const countryCode = matchCountryCode(locationCode);
+  console.log(`[Gemini Scraper] Querying: "${keyword.substring(0, 60)}..." | Location: ${locationCode} -> ${countryCode}`);
+  const startTime = Date.now();
+
+  const maxRetries = 3;
+  let lastError = "";
+  let totalCost = 0;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delay = Math.pow(2, attempt) * 1000;
+      console.log(`[Gemini Scraper] Retry ${attempt + 1}/${maxRetries}, waiting ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    const result = await callDataForSEO("/ai_optimization/gemini/llm_scraper/live/advanced", [{
+      keyword: keyword,
+      location_code: countryCode,
+      language_code: "en",
+    }]);
+
+    const latency = Date.now() - startTime;
+
+    if (result.error) {
+      lastError = result.error;
+      console.error(`[Gemini Scraper] Attempt ${attempt + 1} error: ${result.error}`);
+      if (result.status_code === 401 || result.status_code === 402) {
+        return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: latency, error: result.error };
+      }
+      continue;
+    }
+
+    const data = result.data as {
+      tasks?: Array<{
+        result?: Array<{
+          keyword?: string;
+          model?: string;
+          markdown?: string;
+          sources?: Array<{ url?: string; title?: string; domain?: string; snippet?: string }>;
+          input_tokens?: number;
+          output_tokens?: number;
+          items?: Array<{
+            type?: string;
+            markdown?: string;
+            sources?: Array<{ url?: string; title?: string; domain?: string; snippet?: string }>;
+          }>;
+        }>;
+        cost?: number;
+        status_code?: number;
+        status_message?: string;
+      }>;
+    };
+
+    const task = data?.tasks?.[0];
+    const taskResult = task?.result?.[0];
+    const cost = task?.cost || 0;
+    totalCost += cost;
+
+    if (task?.status_code && task.status_code !== 20000) {
+      lastError = task.status_message || `Task failed with code ${task.status_code}`;
+      console.error(`[Gemini Scraper] Task error: ${lastError}`);
+
+      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") || task.status_code === 40000) {
+        console.warn(`[Gemini Scraper] Rate limit / unavailable — skipping retries`);
+        return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: Date.now() - startTime, error: lastError };
+      }
+      continue;
+    }
+
+    // Extract response text from markdown (result level = complete response)
+    let responseText = taskResult?.markdown || "";
+
+    // If no result-level markdown, concatenate from items
+    if (!responseText && taskResult?.items) {
+      responseText = taskResult.items
+        .filter(item => item.markdown)
+        .map(item => item.markdown)
+        .join("\n\n");
+    }
+
+    if (!responseText) {
+      lastError = "No Gemini scraper response returned - empty markdown";
+      console.error(`[Gemini Scraper] Attempt ${attempt + 1}: No response text found`);
+      continue;
+    }
+
+    // Extract citations from sources
+    const citations: Citation[] = [];
+    const allSources = taskResult?.sources || [];
+    for (const source of allSources) {
+      if (source.url) {
+        try {
+          const urlObj = new URL(source.url);
+          const domain = urlObj.hostname.replace(/^www\./, '');
+          citations.push({
+            url: source.url,
+            title: source.title || domain,
+            domain: domain,
+            position: citations.length + 1,
+            snippet: source.snippet || `Referenced in Gemini response`,
+            is_brand_source: false,
+          });
+        } catch {
+          // skip invalid URLs
+        }
+      }
+    }
+
+    // Also collect sources from items if result-level is empty
+    if (citations.length === 0 && taskResult?.items) {
+      for (const item of taskResult.items) {
+        if (item.sources) {
+          for (const source of item.sources) {
+            if (source.url) {
+              try {
+                const urlObj = new URL(source.url);
+                const domain = urlObj.hostname.replace(/^www\./, '');
+                if (!citations.some(c => c.url === source.url)) {
+                  citations.push({
+                    url: source.url,
+                    title: source.title || domain,
+                    domain: domain,
+                    position: citations.length + 1,
+                    snippet: source.snippet || `Referenced in Gemini response`,
+                    is_brand_source: false,
+                  });
+                }
+              } catch { /* skip invalid URLs */ }
+            }
+          }
+        }
+      }
+    }
+
+    const totalTokens = (taskResult?.input_tokens || 0) + (taskResult?.output_tokens || 0);
+
+    console.log(`[Gemini Scraper] Got ${responseText.length} chars, ${totalTokens} tokens, ${citations.length} sources, ${latency}ms, cost: $${cost}`);
+
+    return {
+      success: true,
+      response: responseText,
+      tokens: totalTokens,
+      cost: totalCost,
+      latency_ms: latency,
+      citations: citations.length > 0 ? citations : undefined,
+    };
+  }
+
+  // All retries failed
+  const latency = Date.now() - startTime;
+  console.error(`[Gemini Scraper] All ${maxRetries} attempts failed: ${lastError}`);
+  return {
+    success: false,
+    response: "",
+    tokens: 0,
+    cost: totalCost,
+    latency_ms: latency,
+    error: `Gemini Scraper failed after ${maxRetries} attempts: ${lastError}`,
+  };
+}
+
+/**
  * LIVE LLM Response API - Real-time inference (NOT cached)
  * Uses DataForSEO provider-specific endpoints for each model
  *
  * Endpoints:
  * - ChatGPT: /ai_optimization/chat_gpt/llm_scraper/live/advanced (with brand entities)
- * - Gemini: /ai_optimization/gemini/llm_responses/live
+ * - Gemini: /ai_optimization/gemini/llm_scraper/live/advanced (with geo-targeting)
  * - Claude: /ai_optimization/claude/llm_responses/live
  * - Perplexity: /ai_optimization/perplexity/llm_responses/live
  *
@@ -2088,17 +2266,24 @@ async function getLiveLLMResponse(
 
   // For ChatGPT: Use llm_scraper/live/advanced to get brand_entities natively
   if (model === "chatgpt") {
-    // For ChatGPT scraper, inject location into the keyword/prompt directly
     const locationContext = locationName
       ? `[Context: ${locationName} market] `
       : "";
     return getChatGPTScraperResponse(`${locationContext}${prompt}`, locationCode || 2840);
   }
 
+  // For Gemini: Use llm_scraper/live/advanced for proper geo-targeting (location_code support)
+  if (model === "gemini") {
+    const locationContext = locationName
+      ? `[Context: ${locationName} market] `
+      : "";
+    return getGeminiScraperResponse(`${locationContext}${prompt}`, locationCode || 2840);
+  }
+
   // Map model IDs to DataForSEO endpoints and model names (from docs)
   const modelConfig: Record<string, { endpoint: string; modelName: string }> = {
     chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", modelName: "gpt-5-nano" },
-    gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", modelName: "gemini-2.5-flash" },
+    gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", modelName: "gemini-2.0-flash" },
     claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-haiku-4-5" },
     perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", modelName: "sonar" },
   };
@@ -2136,8 +2321,9 @@ async function getLiveLLMResponse(
 
     const isoCode = locationCode ? locationCodeToISO[locationCode] : undefined;
 
+    const locationContext = locationName ? `[Context: ${locationName} market] ` : "";
     const payload: Record<string, unknown> = {
-      user_prompt: prompt,
+      user_prompt: `${locationContext}${prompt}`,
       model_name: config.modelName,
     };
 
@@ -2147,10 +2333,10 @@ async function getLiveLLMResponse(
       payload.temperature = 0.7;
     }
 
-    // Gemini supports web_search:true but NOT web_search_country_iso_code
-    // Perplexity and Claude support both web_search:true AND web_search_country_iso_code
-    // All confirmed via DataForSEO docs: https://docs.dataforseo.com/v3/ai_optimization/*/llm_responses/live/
-    if (model === "gemini" || model === "perplexity" || model === "claude") {
+    // Note: ChatGPT and Gemini are handled above via scraper endpoints (with native location_code)
+    // Claude supports web_search + web_search_country_iso_code
+    // Perplexity (sonar) has web search on by default + supports web_search_country_iso_code
+    if (model === "claude") {
       payload.web_search = true;
     }
     if ((model === "perplexity" || model === "claude") && isoCode) {
@@ -2662,7 +2848,7 @@ async function queryGemini(
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
