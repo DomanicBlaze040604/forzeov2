@@ -8,7 +8,7 @@ interface SOVSeriesItem {
   isClient: boolean;
   domain: string;
   data: (number | null)[];
-  latestPct?: number; // Override for legend badge — use same value as top card/Brand Visibility
+  latestPct?: number; // Deprecated — badges now show the chart's latest data point
 }
 
 interface SOVLineChartProps {
@@ -81,12 +81,14 @@ export function SOVLineChart({ labels, series, height = 240 }: SOVLineChartProps
     return () => clearTimeout(timer);
   }, [labels.join(','), series.length]);
 
-  // Compute average SOV values for summary badges (matches KPI card aggregate)
-  const avgValues = useMemo(() => {
+  // Compute latest SOV values for summary badges (matches the rightmost chart point)
+  const latestValues = useMemo(() => {
     return series.map(s => {
-      const valid = s.data.filter((v): v is number => v !== null);
-      if (valid.length === 0) return 0;
-      return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
+      // Find the last non-null data point — matches the chart endpoint
+      for (let i = s.data.length - 1; i >= 0; i--) {
+        if (s.data[i] !== null) return s.data[i] as number;
+      }
+      return 0;
     });
   }, [series]);
 
@@ -183,7 +185,7 @@ export function SOVLineChart({ labels, series, height = 240 }: SOVLineChartProps
       <div className="flex flex-wrap gap-2 mb-3">
         {series.map((s, si) => {
           const color = getColor(s, si);
-          const val = avgValues[si];
+          const val = latestValues[si];
           return (
             <div
               key={si}
@@ -204,7 +206,7 @@ export function SOVLineChart({ labels, series, height = 240 }: SOVLineChartProps
               />
               <div className="flex flex-col">
                 <span className="text-[11px] text-gray-500 leading-tight truncate max-w-[100px]">{s.name}</span>
-                <span className="text-sm font-bold leading-tight" style={{ color }}>{s.latestPct !== undefined ? s.latestPct : val}%</span>
+                <span className="text-sm font-bold leading-tight" style={{ color }}>{val}%</span>
               </div>
             </div>
           );

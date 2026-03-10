@@ -520,6 +520,7 @@ const STORAGE_KEYS = {
   SELECTED_CLIENT: "forzeo_selected_client",
   SELECTED_MODELS: "forzeo_selected_models",
   INCLUDE_TAVILY: "forzeo_include_tavily",
+  PENDING_AUDIT: "forzeo_pending_audit",
 };
 
 function loadFromStorage<T>(key: string, defaultValue: T): T {
@@ -1225,6 +1226,13 @@ export function useClientDashboard() {
   }, [clients, selectedClient, invalidateClientCache]);
 
   const switchClient = useCallback(async (client: Client) => {
+    // Clear stale data BEFORE setting new client to prevent showing old brand's data
+    // with the new brand's name (race condition fix)
+    setPrompts([]);
+    setAuditResults([]);
+    setTavilyResults({});
+    setCitationMeta({});
+    setSummary(null);
     setSelectedClient(client);
     saveToStorage(STORAGE_KEYS.SELECTED_CLIENT, client.id);
     // Single entry point for data loading — no duplicate fetches
@@ -1749,6 +1757,15 @@ export function useClientDashboard() {
     setError(null);
     let failedCount = 0;
 
+    // Persist pending audit state so it can resume after page refresh
+    const activePromptIds = promptsToRun.filter(p => p.is_active !== false).map(p => p.id);
+    const pendingAudit = {
+      clientId: selectedClient.id,
+      pendingPromptIds: activePromptIds,
+      startedAt: new Date().toISOString(),
+    };
+    saveToStorage(STORAGE_KEYS.PENDING_AUDIT, pendingAudit);
+
     for (const prompt of promptsToRun) {
       if (prompt.is_active === false) continue; // Skip inactive prompts
 
@@ -1881,12 +1898,23 @@ export function useClientDashboard() {
         console.error("[Audit] Exception on prompt:", prompt.prompt_text.substring(0, 50), err);
       } finally {
         setLoadingPromptIds(prev => { const n = new Set(prev); n.delete(prompt.id); return n; });
+        // Remove completed prompt from pending audit state
+        try {
+          const pending = loadFromStorage<{ clientId: string; pendingPromptIds: string[]; startedAt: string } | null>(STORAGE_KEYS.PENDING_AUDIT, null);
+          if (pending) {
+            pending.pendingPromptIds = pending.pendingPromptIds.filter(id => id !== prompt.id);
+            saveToStorage(STORAGE_KEYS.PENDING_AUDIT, pending);
+          }
+        } catch { /* ignore storage errors */ }
       }
     }
     if (failedCount > 0) {
       console.warn(`[Audit] Completed with ${failedCount} failed prompt(s).`);
     }
     setLoading(false);
+
+    // Clear pending audit state — audit is complete
+    try { localStorage.removeItem(STORAGE_KEYS.PENDING_AUDIT); } catch { /* ignore */ }
 
     // Auto-trigger search volume fetch after audit completes
     try {
@@ -2892,6 +2920,37 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
   // NOTE: The old useEffect that loaded prompts/results/auto-audit on selectedClient change
   // has been REMOVED. Data loading is now handled by loadClientData() which is called
   // explicitly from fetchClients() and switchClient() — no cascading re-renders.
+
+  // ============================================
+  // RESUME INTERRUPTED AUDIT (after page refresh)
+  // ============================================
+  const auditResumeRef = useRef(false);
+  useEffect(() => {
+    if (auditResumeRef.current || !selectedClient || prompts.length === 0 || loading) return;
+    const pending = loadFromStorage<{ clientId: string; pendingPromptIds: string[]; startedAt: string } | null>(STORAGE_KEYS.PENDING_AUDIT, null);
+    if (!pending || pending.clientId !== selectedClient.id || pending.pendingPromptIds.length === 0) return;
+
+    // Only resume if audit was started within last 30 minutes
+    const startedAt = new Date(pending.startedAt).getTime();
+    if (Date.now() - startedAt > 30 * 60 * 1000) {
+      localStorage.removeItem(STORAGE_KEYS.PENDING_AUDIT);
+      return;
+    }
+
+    // Filter out prompts that already have results (completed before refresh)
+    const completedIds = new Set(auditResults.map(r => r.prompt_id));
+    const remainingPrompts = prompts.filter(p => pending.pendingPromptIds.includes(p.id) && !completedIds.has(p.id));
+
+    if (remainingPrompts.length === 0) {
+      localStorage.removeItem(STORAGE_KEYS.PENDING_AUDIT);
+      return;
+    }
+
+    auditResumeRef.current = true;
+    console.log(`[Audit] Resuming interrupted audit: ${remainingPrompts.length} prompts remaining`);
+    toast.info(`Resuming audit: ${remainingPrompts.length} prompts remaining`, { duration: 4000 });
+    runFullAudit(remainingPrompts);
+  }, [selectedClient, prompts, auditResults, loading, runFullAudit]);
 
   /**
    * Auto-discover competitors using Groq API

@@ -23,7 +23,7 @@ export interface GA4SyncLog {
     id: string;
     client_id: string;
     sync_date: string; // YYYY-MM-DD
-    source: "ChatGPT" | "Perplexity" | "Gemini" | "Claude";
+    source: "ChatGPT" | "Perplexity" | "Gemini" | "Claude" | "Copilot" | "Meta AI" | "Total" | "Direct" | "Referral";
     sessions: number;
     conversions: number;
     active_users: number;
@@ -241,14 +241,40 @@ export function useGA4Connector(clientId: string | null | undefined) {
         try {
             const result = await callProxy("refresh_sync", clientId);
             console.log("[useGA4Connector] Sync Result:", result);
-            if (result.synced === 0 && result.diagnostics) {
-                console.log("[useGA4Connector] DIAGNOSTIC - Property ID Queried:", result.diagnostics.queried_property_id);
-                console.log("[useGA4Connector] DIAGNOSTIC - Top Sources Found:", result.diagnostics.top_sources);
-                console.log("[useGA4Connector] If Top Sources is empty [], Google has ZERO data for this property in the last 30 days.");
+
+            // Log per-client results with full debug info
+            if (result.results) {
+                for (const r of result.results) {
+                    console.log(`[useGA4Connector] Client ${r.client_id}: ${r.success ? "OK" : "FAIL"} — ${r.rows} rows synced (method: ${r.method || "unknown"})${r.error ? ` — Error: ${r.error}` : ""}`);
+                    if (r.ga4_rows_found !== undefined) {
+                        console.log(`[useGA4Connector] GA4 rows found: ${r.ga4_rows_found}, aggregated: ${r.aggregated_rows}`);
+                    }
+                    if (r.sample_rows) {
+                        console.log("[useGA4Connector] Sample rows:", r.sample_rows);
+                    }
+                    if (r.upsert_errors || r.write_errors) {
+                        console.error("[useGA4Connector] DB WRITE ERRORS:", r.upsert_errors || r.write_errors);
+                    }
+                }
             }
+
+            if (result.synced === 0 && result.diagnostics) {
+                const d = result.diagnostics;
+                console.log("[useGA4Connector] DIAGNOSTIC - Property ID:", d.queried_property_id);
+                console.log("[useGA4Connector] DIAGNOSTIC - Top 10 Sources:", d.top_sources);
+                console.log("[useGA4Connector] DIAGNOSTIC - LLM Sources Found:", d.llm_sources_found);
+                console.log("[useGA4Connector] DIAGNOSTIC - Total Source Count:", d.total_source_count);
+                console.log("[useGA4Connector] DIAGNOSTIC - Hint:", d.hint);
+            }
+
             await loadIntegration();
             await loadTrafficData();
-            toast.success("GA4 data synced successfully");
+
+            if (result.synced > 0) {
+                toast.success(`Synced ${result.synced} data point${result.synced > 1 ? "s" : ""} from GA4`);
+            } else {
+                toast.error("Sync found data but couldn't save to database. Check console for errors.");
+            }
         } catch (err: any) {
             toast.error(`Sync failed: ${err.message}`);
         } finally {
@@ -282,14 +308,13 @@ export function useGA4Connector(clientId: string | null | undefined) {
         cutoff14.setDate(cutoff14.getDate() - 14);
         const cutoff14Str = cutoff14.toISOString().split("T")[0];
 
-        const totals: Record<string, { sessions: number; activeUsers: number; engagementRate: number; prevSessions: number }> = {
-            ChatGPT: { sessions: 0, activeUsers: 0, engagementRate: 0, prevSessions: 0 },
-            Perplexity: { sessions: 0, activeUsers: 0, engagementRate: 0, prevSessions: 0 },
-            Gemini: { sessions: 0, activeUsers: 0, engagementRate: 0, prevSessions: 0 },
-            Claude: { sessions: 0, activeUsers: 0, engagementRate: 0, prevSessions: 0 },
-        };
-
-        const counts: Record<string, number> = { ChatGPT: 0, Perplexity: 0, Gemini: 0, Claude: 0 };
+        const sourceNames = ["ChatGPT", "Perplexity", "Gemini", "Claude", "Copilot", "Meta AI"];
+        const totals: Record<string, { sessions: number; activeUsers: number; engagementRate: number; prevSessions: number }> = {};
+        const counts: Record<string, number> = {};
+        for (const s of sourceNames) {
+            totals[s] = { sessions: 0, activeUsers: 0, engagementRate: 0, prevSessions: 0 };
+            counts[s] = 0;
+        }
 
         for (const row of trafficData) {
             if (row.sync_date >= cutoff7Str) {
