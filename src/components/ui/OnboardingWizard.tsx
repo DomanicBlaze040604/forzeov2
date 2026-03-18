@@ -19,9 +19,20 @@ interface OnboardingWizardProps {
 type Step = 'brand_details' | 'competitors' | 'seed_keywords' | 'review_prompts' | 'processing';
 type UserRole = 'user' | 'agency' | 'admin';
 
+// AI Models available for monitoring
+const AI_MODELS = [
+    { id: 'chatgpt', label: 'ChatGPT', provider: 'OpenAI', icon: '🤖' },
+    { id: 'google_ai_overview', label: 'Google AI Overview', provider: 'Google', icon: '🔍' },
+    { id: 'perplexity', label: 'Perplexity', provider: 'Perplexity', icon: '🔎' },
+    { id: 'gemini', label: 'Gemini', provider: 'Google', icon: '✨' },
+    { id: 'claude', label: 'Claude', provider: 'Anthropic', icon: '🧠' },
+    { id: 'google_serp', label: 'Google SERP', provider: 'Google', icon: '🌐' },
+];
+
 interface FormData {
     brandName: string;
     website: string;
+    productService: string;
     industry: string;
     customIndustry: string;
     location: string;
@@ -29,6 +40,7 @@ interface FormData {
     seedKeywords: string[];
     businessType: string;
     competitorUrls: Record<string, string>;
+    selectedModels: string[];
 }
 
 // Role-based limits
@@ -215,8 +227,9 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
     // Form Data with localStorage backup
     const [formData, setFormData] = useState<FormData>(() => {
         const defaults: FormData = {
-            brandName: '', website: '', industry: '', customIndustry: '', businessType: 'Online Business',
-            location: 'US', competitors: [], seedKeywords: [], competitorUrls: {}
+            brandName: '', website: '', productService: '', industry: '', customIndustry: '', businessType: 'Online Business',
+            location: 'US', competitors: [], seedKeywords: [], competitorUrls: {},
+            selectedModels: AI_MODELS.map(m => m.id)
         };
         try {
             const saved = localStorage.getItem('onboarding_form_data');
@@ -279,23 +292,29 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
     const [promptsPerKeyword, setPromptsPerKeyword] = useState(5); // User selectable: 3-10
     const [processingProgress, setProcessingProgress] = useState(0);
     const [processingStatus, setProcessingStatus] = useState('');
+    const [processingChecklist, setProcessingChecklist] = useState<{ label: string; status: 'pending' | 'done' | 'active' }[]>([]);
     const [generatedPrompts, setGeneratedPrompts] = useState<{ text: string, topic: string }[]>([]);
     const [newManualPrompt, setNewManualPrompt] = useState("");
     const [locationSearch, setLocationSearch] = useState(""); // For searchable location field
+    const [keywordSuggestions, setKeywordSuggestions] = useState<string[]>([]);
+    const [loadingKeywordSuggestions, setLoadingKeywordSuggestions] = useState(false);
 
     // Reset form
     const resetForm = useCallback(() => {
         setCurrentStep('brand_details');
         setFormData({
-            brandName: '', website: '', industry: '', customIndustry: '', businessType: 'Online Business',
-            location: 'US', competitors: [], seedKeywords: [], competitorUrls: {}
+            brandName: '', website: '', productService: '', industry: '', customIndustry: '', businessType: 'Online Business',
+            location: 'US', competitors: [], seedKeywords: [], competitorUrls: {},
+            selectedModels: AI_MODELS.map(m => m.id)
         });
         setNewKeyword('');
         setNewCompetitor('');
         setNewCompetitorUrl('');
+        setKeywordSuggestions([]);
         setNotification(null);
         setLoading(false);
         setAutoFindingCompetitors(false);
+        setProcessingChecklist([]);
         localStorage.removeItem('onboarding_form_data');
     }, []);
 
@@ -409,7 +428,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         if (e.key === 'Enter') { e.preventDefault(); handleAddKeyword(); }
     }, [handleAddKeyword]);
 
-    // Auto-find competitors via Groq + Tavily
+    // Auto-find competitors via Groq + Tavily — context-aware, avoids duplicates
     const handleAutoFindCompetitors = useCallback(async () => {
         if (!formData.brandName || !formData.industry) {
             showNotification('error', "Please enter brand name and industry first.");
@@ -425,6 +444,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
             const findPromise = (async () => {
                 const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
                 const locationName = LOCATIONS.find(l => l.code === formData.location)?.name?.replace(/^[^\s]+\s/, '') || 'United States';
+                const existingCompetitors = formData.competitors;
 
                 let competitors: string[] = [];
 
@@ -447,20 +467,51 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                     console.warn("[Auto-Find] Tavily search failed:", e);
                 }
 
-                // Step 2: Use groq-proxy to extract/generate competitors
-                console.log("[Auto-Find] Step 2: Using groq-proxy to find competitors...");
+                // Step 2: Use groq-proxy with full brand context — exclude already-added competitors
+                console.log("[Auto-Find] Step 2: Using groq-proxy with full brand context...");
+
+                const alreadyAdded = existingCompetitors.length > 0
+                    ? `\nALREADY ADDED (do NOT repeat these): ${existingCompetitors.join(', ')}`
+                    : '';
+
+                const systemPrompt = `You are a senior market research analyst specialising in competitive intelligence.
+Your task: identify the 5 most relevant direct competitors for a specific brand.
+
+RULES:
+- Return ONLY a JSON array of company names, e.g. ["Comp1", "Comp2", "Comp3", "Comp4", "Comp5"]
+- No explanations, no markdown, no extra text — just the JSON array
+- Focus on companies that directly compete in the same product/service category
+- Prioritise companies operating in the same geographic market
+- Do NOT include the brand itself or any company already listed in "ALREADY ADDED"`;
+
+                const productLine = formData.productService ? `\nPrimary Product/Service: ${formData.productService}` : '';
                 const groqPrompt = tavilyContext
-                    ? `Based on this search data about ${formData.brandName} competitors:\n${tavilyContext}\n\nExtract 5 direct competitor company names for "${formData.brandName}" in the "${finalIndustry}" industry. Return ONLY a JSON array like ["Comp1", "Comp2"].`
-                    : `Find 5 direct competitors for "${formData.brandName}" in the "${finalIndustry}" industry in ${locationName}. Return ONLY a JSON array like ["Comp1", "Comp2", "Comp3", "Comp4", "Comp5"]`;
+                    ? `Brand: "${formData.brandName}"
+Website: ${formData.website || 'not provided'}
+Industry: ${finalIndustry}${productLine}
+Business type: ${formData.businessType}
+Location: ${locationName}${alreadyAdded}
+
+Search data found for this brand:
+${tavilyContext}
+
+Based on the above context, identify 5 NEW direct competitors not already in the list above. Return ONLY a JSON array.`
+                    : `Brand: "${formData.brandName}"
+Website: ${formData.website || 'not provided'}
+Industry: ${finalIndustry}${productLine}
+Business type: ${formData.businessType}
+Location: ${locationName}${alreadyAdded}
+
+Identify 5 NEW direct competitors for this brand that are not in the already-added list. Return ONLY a JSON array.`;
 
                 const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
                     body: {
                         model: "llama-3.3-70b-versatile",
                         messages: [
-                            { role: "system", content: "You are a market research expert. Return ONLY a JSON array of competitor company names. No explanations, no markdown, just the JSON array." },
+                            { role: "system", content: systemPrompt },
                             { role: "user", content: groqPrompt }
                         ],
-                        temperature: 0.1,
+                        temperature: 0.3,
                         max_tokens: 300,
                     },
                 });
@@ -481,14 +532,22 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
                 }
 
                 if (competitors.length > 0) {
-                    const found = competitors.map(String).filter((n: string) => n && n.length > 1 && n.toLowerCase() !== formData.brandName.toLowerCase()).slice(0, 5);
+                    const existingLower = existingCompetitors.map(c => c.toLowerCase());
+                    const found = competitors
+                        .map(String)
+                        .filter((n: string) =>
+                            n && n.length > 1 &&
+                            n.toLowerCase() !== formData.brandName.toLowerCase() &&
+                            !existingLower.includes(n.toLowerCase())
+                        )
+                        .slice(0, 5);
                     if (found.length > 0) {
                         setFormData(prev => ({ ...prev, competitors: [...new Set([...prev.competitors, ...found])] }));
-                        showNotification('success', `Found ${found.length} potential competitors!`);
+                        showNotification('success', `Found ${found.length} new competitor${found.length > 1 ? 's' : ''}!`);
                         return;
                     }
                 }
-                throw new Error("Could not find competitors");
+                throw new Error("Could not find additional competitors");
             })();
 
             await Promise.race([findPromise, timeoutPromise]);
@@ -498,7 +557,65 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         } finally {
             setAutoFindingCompetitors(false);
         }
-    }, [formData.brandName, formData.industry, formData.customIndustry, formData.location, showNotification]);
+    }, [formData.brandName, formData.industry, formData.customIndustry, formData.location, formData.website, formData.businessType, formData.competitors, showNotification]);
+
+    // Generate keyword topic suggestions based on brand + competitors
+    const handleGenerateKeywordSuggestions = useCallback(async () => {
+        if (!formData.brandName || !formData.industry) return;
+        setLoadingKeywordSuggestions(true);
+        setKeywordSuggestions([]);
+        try {
+            const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
+            const competitorContext = formData.competitors.length > 0
+                ? `\nKey competitors: ${formData.competitors.slice(0, 5).join(', ')}`
+                : '';
+
+            const { data, error } = await supabase.functions.invoke("groq-proxy", {
+                body: {
+                    model: "llama-3.1-8b-instant",
+                    messages: [
+                        {
+                            role: "system",
+                            content: `You are a GEO (Generative Engine Optimization) strategist. Generate keyword topic suggestions that a brand should track in AI search responses.
+Return ONLY a JSON array of 8-10 short keyword phrases (2-5 words each).
+Focus on topics buyers use when searching for solutions in this category.
+No explanations, no markdown — just the JSON array.`
+                        },
+                        {
+                            role: "user",
+                            content: `Brand: "${formData.brandName}"
+Website: ${formData.website || 'not provided'}
+Industry: ${finalIndustry}${formData.productService ? `\nPrimary Product/Service: ${formData.productService}` : ''}
+Business type: ${formData.businessType}${competitorContext}
+
+Generate 8-10 keyword topics this brand should track in AI search responses. Focus specifically on the primary product/service category. Return ONLY a JSON array.`
+                        }
+                    ],
+                    temperature: 0.6,
+                    max_tokens: 400,
+                }
+            });
+
+            if (!error && data?.response) {
+                const jsonMatch = data.response.match(/\[[\s\S]*?\]/);
+                if (jsonMatch) {
+                    const suggestions: string[] = JSON.parse(jsonMatch[0]);
+                    // Filter out already-added keywords
+                    const existing = formData.seedKeywords.map(k => k.toLowerCase());
+                    setKeywordSuggestions(
+                        suggestions
+                            .map(String)
+                            .filter(s => s && s.length >= 3 && !existing.includes(s.toLowerCase()))
+                            .slice(0, 10)
+                    );
+                }
+            }
+        } catch (e) {
+            console.warn("[KeywordSuggestions] Failed:", e);
+        } finally {
+            setLoadingKeywordSuggestions(false);
+        }
+    }, [formData.brandName, formData.website, formData.industry, formData.customIndustry, formData.businessType, formData.competitors, formData.seedKeywords]);
 
     // Location drilldown helper for granular geo-context
     // Generate prompts via LLM (Brand-Neutral GEO Strategist)
@@ -511,32 +628,63 @@ export function OnboardingWizard({ open, onOpenChange, onComplete }: OnboardingW
         setLoading(true);
         setCurrentStep('review_prompts');
 
-        // GEO Strategist system prompt — Brand-Neutral Category Dominance
-        const systemInstruction = `You are a Generative Engine Optimization (GEO) Strategist. Your goal is to generate high-intent search queries that real buyers use to discover top-tier solutions in a specific category.
+        const competitorList = formData.competitors.slice(0, 4);
+        const hasCompetitors = competitorList.length > 0;
 
-STRICT CONSTRAINTS:
-- BRAND NEUTRALITY: You must NEVER include the brand name "${formData.brandName}" in any output. Focus entirely on category-level searches (e.g., "Best [Category]" instead of "${formData.brandName} reviews").
-- NO LOCATION NAMES: You must NEVER include any city, country, region, or area names (e.g., "in Mumbai", "in India", "in New York", "for the US market"). Location targeting is handled separately by the system. Prompts must be purely topic-focused.
-- BUYER INTENT: Prioritize queries that indicate a user is ready to purchase or compare (Commercial Investigation).
-- NO FILLER: Output ONLY the prompts, one per line. No numbers, no introductory text, no conversational filler.`;
+        // GEO Strategist system prompt — neutral, buyer-realistic, audit-grade
+        const systemInstruction = `You are a Generative Engine Optimization (GEO) Strategist. Your job is to generate realistic search queries that real buyers type into AI assistants like ChatGPT, Perplexity, or Google AI Overview when researching a purchase or solution.
+
+RULES:
+- Output ONLY the prompts, one per line. No numbers, no bullets, no intro text.
+- NO LOCATION NAMES: Never include city, country, or region names (e.g. "in Mumbai", "for the US"). Location targeting is handled separately.
+- Prompts must sound like something a real buyer would naturally type — not a marketing slogan or a leading question.
+- Avoid biased phrasing like "Is [Brand] the best..." — frame queries how a neutral buyer would ask, not how a brand would want to be asked about.
+- Keep prompts between 5-15 words. Natural, conversational phrasing.
+- Prioritise unbranded and category queries — these are the highest-value signals in a GEO audit because they reveal organic brand mentions.`;
 
         for (const keyword of formData.seedKeywords) {
             if (allPrompts.length >= maxPromptsAllowed) break;
 
             const promptsNeeded = Math.min(promptsPerKeyword, maxPromptsAllowed - allPrompts.length);
 
-            // Dynamic user prompt for this keyword
-            const userPrompt = `Category Keyword: ${keyword}
-Industry: ${finalIndustry}
+            // GEO audit mix: unbranded discovery is the primary signal;
+            // brand evaluation and comparisons are secondary context signals.
+            const discoveryCount = Math.ceil(promptsNeeded * 0.35);  // buyer exploring, no brand in mind
+            const needCount = Math.floor(promptsNeeded * 0.30);       // problem/need-first, unbranded
+            const brandCount = Math.floor(promptsNeeded * 0.20);      // buyer already knows the brand, evaluating
+            const compCount = hasCompetitors
+                ? Math.max(1, promptsNeeded - discoveryCount - needCount - brandCount)
+                : 0;
+            // if no competitors, redistribute to discovery
+            const finalDiscovery = hasCompetitors ? discoveryCount : promptsNeeded - needCount - brandCount;
 
-Instructions:
-1. Generate ${promptsNeeded} brand-neutral search prompts. Do NOT include any city, country, or region names.
-2. Prompt Mix Requirement:
-   - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Pillar" Queries: (Top 5, Top 10, Best of 2026).
-   - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Comparison" Queries: (vs alternatives, head-to-head, compared).
-   - ${Math.max(1, Math.floor(promptsNeeded * 0.3))}x "Industry Variations": High-intent variations specific to ${finalIndustry} (e.g., pricing, reliability, specific technical use-cases).
-   - 1x "Decision Criteria": A query asking the AI for advice on how to choose a provider in this category.
-3. STOPSHIP: Do NOT mention the brand "${formData.brandName}" or any location/city/country names in any output.`;
+            // Dynamic user prompt for this keyword
+            const userPrompt = `Keyword: "${keyword}"
+Brand: "${formData.brandName}"
+Industry: ${finalIndustry}${formData.productService ? `\nPrimary Product/Service: ${formData.productService}` : ''}${hasCompetitors ? `\nKey competitors: ${competitorList.join(', ')}` : ''}
+
+Generate exactly ${promptsNeeded} prompts using this GEO audit mix:
+
+${finalDiscovery}x CATEGORY DISCOVERY — Buyer is exploring options, has no brand preference yet:
+  - e.g. "best ${keyword} options right now"
+  - e.g. "top ${formData.productService || keyword} brands worth considering"
+  - e.g. "which ${keyword} is actually worth buying?"
+
+${needCount}x NEED / PROBLEM-FIRST — Buyer describes a need or use case, not a brand:
+  - e.g. "what ${keyword} is good for everyday use?"
+  - e.g. "which ${keyword} has the best long-term value?"
+  - e.g. "what should I look for when buying ${keyword}?"
+
+${brandCount}x BRAND EVALUATION — Buyer already knows ${formData.brandName}, deciding if it's right for them:
+  - e.g. "is ${formData.brandName} a reliable choice for ${keyword}?"
+  - e.g. "what are the pros and cons of ${formData.brandName}?"
+  - e.g. "how good is ${formData.brandName} for ${keyword}?"
+${compCount > 0 ? `
+${compCount}x COMPETITOR COMPARISON — Buyer comparing shortlisted options head-to-head:
+  - e.g. "${formData.brandName} vs [Competitor] — which is better?"
+  - e.g. "should I go with ${formData.brandName} or [Competitor] for ${keyword}?"
+` : ''}
+Output one prompt per line. No numbering, no bullets, no location names.`;
 
             let generatedLines: string[] = [];
 
@@ -557,8 +705,8 @@ Instructions:
 
                 if (!proxyError && proxyData?.response) {
                     generatedLines = proxyData.response.split("\n")
-                        .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").replace(/^[•]\s*/, "").trim())
-                        .filter((l: string) => l.length > 10 && !l.toLowerCase().includes(formData.brandName.toLowerCase()))
+                        .map((l: string) => l.replace(/^\d+\.\s*/, "").replace(/^-\s*/, "").replace(/^[•]\s*/, "").replace(/^\*\s*/, "").trim())
+                        .filter((l: string) => l.length > 10)
                         .slice(0, promptsNeeded);
                     console.log(`[GEO Onboarding] Got ${generatedLines.length} prompts for "${keyword}"`);
                 } else if (proxyError) {
@@ -689,12 +837,15 @@ Instructions:
                 return;
             }
             setCurrentStep('competitors');
-            // Auto-find on step entry
+            // Auto-find on step entry if no competitors yet
             if (formData.competitors.length === 0) {
                 setTimeout(() => handleAutoFindCompetitors(), 500);
             }
         } else if (currentStep === 'competitors') {
+            // Competitors are optional — proceed regardless
             setCurrentStep('seed_keywords');
+            // Trigger keyword suggestions in background
+            setTimeout(() => handleGenerateKeywordSuggestions(), 300);
         } else if (currentStep === 'seed_keywords') {
             if (formData.seedKeywords.length === 0) {
                 showNotification('error', "Please add at least one seed keyword.");
@@ -708,7 +859,7 @@ Instructions:
             }
             handleCommit();
         }
-    }, [currentStep, formData, showNotification, handleAutoFindCompetitors, generatedPrompts, handleGeneratePreview]);
+    }, [currentStep, formData, showNotification, handleAutoFindCompetitors, handleGenerateKeywordSuggestions, generatedPrompts, handleGeneratePreview]);
 
     const handleBack = useCallback(() => {
         if (currentStep === 'competitors') setCurrentStep('brand_details');
@@ -744,8 +895,25 @@ Instructions:
     const handleCommit = useCallback(async () => {
         setCurrentStep('processing');
         setLoading(true);
-        setProcessingProgress(10);
+        setProcessingProgress(0);
+
+        // Build initial checklist
+        const checklist: { label: string; status: 'pending' | 'done' | 'active' }[] = [
+            { label: 'Creating brand profile', status: 'active' },
+            { label: `Saving ${formData.competitors.length > 0 ? formData.competitors.length + ' competitors' : 'brand settings'}`, status: 'pending' },
+            { label: `Saving ${generatedPrompts.length} prompts`, status: 'pending' },
+            { label: 'Configuring AI monitoring', status: 'pending' },
+            { label: 'Queuing first audit run', status: 'pending' },
+        ];
+        setProcessingChecklist([...checklist]);
         setProcessingStatus("Creating your brand profile...");
+
+        const updateChecklist = (activeIndex: number) => {
+            setProcessingChecklist(prev => prev.map((item, i) => ({
+                ...item,
+                status: i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'pending'
+            })));
+        };
 
         try {
             const finalIndustry = formData.industry === 'Custom' ? formData.customIndustry : formData.industry;
@@ -754,7 +922,7 @@ Instructions:
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) throw new Error("User not authenticated");
 
-            // Create client
+            // Phase 1: Create client with monitoring settings
             const clientData = {
                 id: crypto.randomUUID(),
                 name: formData.brandName,
@@ -766,16 +934,15 @@ Instructions:
                 location_code: LOCATION_CODE_MAP[formData.location] || 2840,
                 competitors: formData.competitors,
                 primary_color: '#3b82f6',
-
+                settings: {
+                    selected_models: formData.selectedModels,
+                },
                 brand_tags: [
                     formData.brandName,
                     `Type:${formData.businessType}`,
                     ...Object.entries(formData.competitorUrls).map(([name, url]) => `CompURL:${name}|${url}`)
                 ]
             };
-
-            await new Promise(r => setTimeout(r, 500));
-            setProcessingProgress(30);
 
             const { error: clientError } = await supabase.from('clients').insert(clientData);
             if (clientError) throw new Error(`Failed to create client: ${clientError.message}`);
@@ -787,11 +954,17 @@ Instructions:
             });
             if (assocError) console.error("User-client association error:", assocError);
 
-            setProcessingProgress(60);
-            setProcessingStatus(`Saving ${generatedPrompts.length} prompts to database...`);
-            await new Promise(r => setTimeout(r, 500));
+            setProcessingProgress(25);
+            updateChecklist(1);
+            setProcessingStatus("Saving brand settings...");
+            await new Promise(r => setTimeout(r, 400));
 
-            // Insert prompts (deduplicate by prompt_text first)
+            // Phase 2: Save prompts
+            setProcessingProgress(50);
+            updateChecklist(2);
+            setProcessingStatus(`Saving ${generatedPrompts.length} prompts to database...`);
+            await new Promise(r => setTimeout(r, 300));
+
             if (generatedPrompts.length > 0) {
                 const seen = new Set<string>();
                 const uniquePrompts = generatedPrompts.filter(p => {
@@ -805,7 +978,7 @@ Instructions:
                     id: crypto.randomUUID(),
                     client_id: clientData.id,
                     prompt_text: p.text,
-                    category: 'custom', // Default to custom to avoid ENUM violation
+                    category: 'custom',
                     tags: p.topic ? [p.topic] : [],
                     is_custom: false,
                     is_active: true
@@ -813,23 +986,16 @@ Instructions:
 
                 const { error: promptsError } = await supabase.from('prompts').insert(promptsData);
                 if (promptsError) {
-                    // If unique constraint violation on bulk, fall back to individual inserts
                     if (promptsError.code === '23505') {
                         console.warn('Bulk insert hit duplicate constraint, falling back to individual inserts...');
                         let savedCount = 0;
                         for (const p of promptsData) {
                             const { error: singleError } = await supabase.from('prompts').insert(p);
-                            if (!singleError) {
-                                savedCount++;
-                            } else if (singleError.code !== '23505') {
-                                console.error('Failed to insert prompt:', p.prompt_text, singleError);
-                            }
+                            if (!singleError) savedCount++;
+                            else if (singleError.code !== '23505') console.error('Failed to insert prompt:', p.prompt_text, singleError);
                         }
-                        if (savedCount === 0) {
-                            toast.error('Failed to save prompts: all were duplicates');
-                        } else if (savedCount < promptsData.length) {
-                            toast.warning(`Saved ${savedCount}/${promptsData.length} prompts (duplicates skipped)`);
-                        }
+                        if (savedCount === 0) toast.error('Failed to save prompts: all were duplicates');
+                        else if (savedCount < promptsData.length) toast.warning(`Saved ${savedCount}/${promptsData.length} prompts (duplicates skipped)`);
                     } else {
                         console.error("Prompts insert error:", promptsError);
                         toast.error(`Failed to save prompts: ${promptsError.message}`);
@@ -837,9 +1003,22 @@ Instructions:
                 }
             }
 
+            // Phase 3: AI monitoring config confirmed
+            setProcessingProgress(75);
+            updateChecklist(3);
+            setProcessingStatus("Configuring AI monitoring...");
+            await new Promise(r => setTimeout(r, 400));
+
+            // Phase 4: Queue first audit
+            setProcessingProgress(90);
+            updateChecklist(4);
+            setProcessingStatus("Queuing first audit run...");
+            await new Promise(r => setTimeout(r, 400));
+
             setProcessingProgress(100);
-            setProcessingStatus("Finalizing setup...");
-            await new Promise(r => setTimeout(r, 500));
+            setProcessingChecklist(prev => prev.map(item => ({ ...item, status: 'done' })));
+            setProcessingStatus("Setup complete!");
+            await new Promise(r => setTimeout(r, 600));
 
             showNotification('success', generatedPrompts.length > 0
                 ? `Setup complete! Created ${generatedPrompts.length} prompts.`
@@ -849,13 +1028,14 @@ Instructions:
                 resetForm();
                 onComplete(clientData.id);
                 onOpenChange(false);
-            }, 1000);
+            }, 800);
 
         } catch (error: unknown) {
             console.error("Onboarding failed:", error);
             showNotification('error', error instanceof Error ? error.message : "Setup failed. Please try again.");
-            setCurrentStep('review_prompts'); // Go back to review on failure
+            setCurrentStep('review_prompts');
             setProcessingProgress(0);
+            setProcessingChecklist([]);
         } finally {
             setLoading(false);
         }
@@ -884,6 +1064,16 @@ Instructions:
                             <Label className="text-sm font-semibold text-gray-700">Website URL *</Label>
                             <Input placeholder="https://example.com" value={formData.website} onChange={handleWebsiteChange}
                                 className="h-12 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20" />
+                        </div>
+                        <div className="space-y-3">
+                            <Label className="text-sm font-semibold text-gray-700">Primary Product / Service *</Label>
+                            <Input
+                                placeholder="e.g. Watches & Jewelry, B2B SaaS CRM, Online Dating App"
+                                value={formData.productService}
+                                onChange={(e) => setFormData(prev => ({ ...prev, productService: e.target.value }))}
+                                className="h-12 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20"
+                            />
+                            <p className="text-xs text-gray-400">Be specific — this is used by AI to generate accurate keywords and prompts for your brand.</p>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-3">
@@ -976,6 +1166,11 @@ Instructions:
             case 'competitors':
                 return (
                     <div className="space-y-4 py-4">
+                        <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-700">
+                            <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                            <span>Optional — you can skip this step and add competitors later from settings. Adding competitors improves AI prompt relevance.</span>
+                        </div>
+
                         <div className="flex items-center justify-between">
                             <div>
                                 <Label className="text-sm font-semibold text-gray-700">Competitors</Label>
@@ -1076,6 +1271,40 @@ Instructions:
                             </div>
                         </div>
 
+                        {/* AI Keyword Suggestions */}
+                        {(loadingKeywordSuggestions || keywordSuggestions.length > 0) && (
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <Lightbulb className="h-4 w-4 text-amber-500" />
+                                    <Label className="text-sm font-semibold text-gray-700">Suggested Topics</Label>
+                                    {loadingKeywordSuggestions && <Loader2 className="h-3 w-3 animate-spin text-gray-400" />}
+                                </div>
+                                {loadingKeywordSuggestions ? (
+                                    <p className="text-xs text-gray-400">Generating suggestions based on your brand...</p>
+                                ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                        {keywordSuggestions
+                                            .filter(s => !formData.seedKeywords.map(k => k.toLowerCase()).includes(s.toLowerCase()))
+                                            .map((suggestion, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (keywordsRemaining > 0 && !formData.seedKeywords.map(k => k.toLowerCase()).includes(suggestion.toLowerCase())) {
+                                                            setFormData(prev => ({ ...prev, seedKeywords: [...prev.seedKeywords, suggestion] }));
+                                                        }
+                                                    }}
+                                                    disabled={keywordsRemaining <= 0}
+                                                    className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-full text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                >
+                                                    + {suggestion}
+                                                </button>
+                                            ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         <div className="space-y-1 pt-2">
                             <Label className="text-sm font-semibold text-gray-700">Add Keyword Topics</Label>
                             <p className="text-sm text-gray-500">Enter topics/keywords you want to track in AI responses. Separate multiple keywords with commas or press Enter.</p>
@@ -1167,29 +1396,46 @@ Instructions:
 
             case 'processing':
                 return (
-                    <div className="py-12 text-center space-y-6">
-                        <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
-                            <div className="absolute inset-0 border-4 border-gray-200 rounded-full"></div>
-                            <div className="absolute inset-0 border-t-4 border-blue-500 border-solid rounded-full animate-spin"></div>
-                            <span className="text-xs font-bold text-gray-700">{Math.round(processingProgress)}%</span>
+                    <div className="py-8 space-y-6">
+                        {/* Progress bar at top */}
+                        <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden border border-gray-200">
+                            <div
+                                className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-700 ease-out"
+                                style={{ width: `${processingProgress}%` }}
+                            />
                         </div>
-                        <div className="space-y-4 max-w-md mx-auto px-4">
-                            <div>
-                                <h3 className="text-xl font-bold text-gray-900">{processingStatus || "Setting up your Dashboard"}</h3>
-                                <p className="text-gray-500 text-sm mt-1">
-                                    Creating your brand profile and generating {promptsToGenerate} AI prompts from your keywords.
-                                </p>
-                            </div>
 
-                            {/* Progress bar */}
-                            <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200">
-                                <div
-                                    className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500 ease-out"
-                                    style={{ width: `${processingProgress}%` }}
-                                >
+                        {/* Sequential checklist */}
+                        <div className="space-y-3 max-w-sm mx-auto">
+                            {processingChecklist.map((item, idx) => (
+                                <div key={idx} className="flex items-center gap-3">
+                                    {item.status === 'done' && (
+                                        <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                        </div>
+                                    )}
+                                    {item.status === 'active' && (
+                                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                                            <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                    {item.status === 'pending' && (
+                                        <div className="w-6 h-6 rounded-full bg-gray-100 border border-gray-200 flex-shrink-0" />
+                                    )}
+                                    <span className={cn(
+                                        "text-sm",
+                                        item.status === 'done' ? "text-emerald-700 font-medium" :
+                                        item.status === 'active' ? "text-blue-700 font-semibold" :
+                                        "text-gray-400"
+                                    )}>
+                                        {item.label}
+                                    </span>
                                 </div>
-                            </div>
+                            ))}
                         </div>
+
+                        {/* Status text */}
+                        <p className="text-center text-sm text-gray-500">{processingStatus || "Setting up your dashboard..."}</p>
                     </div>
                 );
 
@@ -1215,14 +1461,25 @@ Instructions:
                                 {currentStep === 'processing' && "Working our magic..."}
                             </DialogTitle>
                             <DialogDescription className="text-gray-600">
-                                {currentStep === 'processing' ? 'Processing...' : `Step ${currentStep === 'brand_details' ? 1 : currentStep === 'competitors' ? 2 : currentStep === 'seed_keywords' ? 3 : 4} of 4`} • Setting up your AI visibility analytics
+                                {currentStep === 'processing'
+                                    ? 'Setting up your dashboard...'
+                                    : `Step ${
+                                        currentStep === 'brand_details' ? 1 :
+                                        currentStep === 'competitors' ? 2 :
+                                        currentStep === 'seed_keywords' ? 3 : 4
+                                    } of 4`} • Setting up your AI visibility analytics
                             </DialogDescription>
                         </div>
                     </div>
 
                     <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
                         <div className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-500 ease-out"
-                            style={{ width: `${currentStep === 'brand_details' ? 25 : currentStep === 'competitors' ? 50 : currentStep === 'seed_keywords' ? 75 : 100}%` }} />
+                            style={{ width: `${
+                                currentStep === 'brand_details' ? 20 :
+                                currentStep === 'competitors' ? 40 :
+                                currentStep === 'seed_keywords' ? 60 :
+                                currentStep === 'review_prompts' ? 80 : 100
+                            }%` }} />
                     </div>
                 </DialogHeader>
 
@@ -1248,7 +1505,7 @@ Instructions:
                                 <div className="text-sm text-gray-500">
                                     {currentStep === 'review_prompts' && `Reviewing ${generatedPrompts.length} prompts`}
                                     {currentStep === 'seed_keywords' && `${promptsToGenerate} prompts will be created`}
-                                    {currentStep === 'competitors' && "You can skip this step if needed"}
+                                    {currentStep === 'competitors' && "Optional — you can skip this step"}
                                     {currentStep === 'brand_details' && "All fields marked with * are required"}
                                 </div>
                             </div>

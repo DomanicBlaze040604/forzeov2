@@ -386,17 +386,21 @@ function TrendIndicator({ value, suffix = "%" }: { value: number; suffix?: strin
 interface ClientDashboardProps {
   autoRunClientId?: string | null;
   onAutoRunComplete?: () => void;
+  onShowLaunchpad?: () => void;
+  initialTab?: string;
 }
 
-export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: ClientDashboardProps = {}) {
+export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, onShowLaunchpad, initialTab }: ClientDashboardProps = {}) {
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress, getAIOpportunity } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler" | "traffic" | "cost">(() => {
+    // initialTab prop takes priority (e.g. deep-link from Launchpad GA4 button)
+    const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler", "traffic"];
+    if (initialTab && validTabs.includes(initialTab)) return initialTab as any;
     // Restore from localStorage on mount
     try {
       const saved = localStorage.getItem('forzeo_activeTab');
-      const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler", "traffic"];
       return (saved && validTabs.includes(saved)) ? saved as any : "overview";
     } catch { return "overview"; }
   });
@@ -510,8 +514,8 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   const [sourcesModelFilterOpen, setSourcesModelFilterOpen] = useState(false);
   const [sourcesPage, setSourcesPage] = useState(0);
   const SOURCES_PAGE_SIZE = 25;
-  const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" });
-  const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", primary_color: "#3b82f6", logo_url: "", competitors: "", website: "" });
+  const [newClientForm, setNewClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#0372ff", logo_url: "", website: "" });
+  const [editClientForm, setEditClientForm] = useState({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", primary_color: "#0372ff", logo_url: "", competitors: "", website: "" });
   const [isAutoFinding, setIsAutoFinding] = useState(false);
   const [aiInsights, setAiInsights] = useState<AiInsights | null>(null);
   const [generatingAiInsights, setGeneratingAiInsights] = useState(false);
@@ -1268,7 +1272,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
       setGeneratingPrompts(false);
     }
   };
-  const handleGenerateContent = async () => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType, toneOfVoice, targetAudience, contentKeywords); if (c) { setGeneratedContent(c); saveToContentHistory({ id: Date.now().toString(), title: contentTopic, content: c, createdAt: new Date().toISOString(), source: 'content_tab' }); } } finally { setGeneratingContent(false); } };
+  const handleGenerateContent = async (documentContext?: string) => { if (!contentTopic.trim()) return; setGeneratingContent(true); setGeneratedContent(""); try { const c = await generateContent(contentTopic, contentType, toneOfVoice, targetAudience, contentKeywords, documentContext); if (c) { setGeneratedContent(c); saveToContentHistory({ id: Date.now().toString(), title: contentTopic, content: c, createdAt: new Date().toISOString(), source: 'content_tab' }); } } finally { setGeneratingContent(false); } };
 
   const handleAddCompetitor = async (competitorName: string) => {
     if (!selectedClient) return;
@@ -1301,7 +1305,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
         competitors: comps.length > 0 ? comps : industries[newClientForm.industry]?.competitors || [],
         primary_color: newClientForm.primary_color
       });
-      setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#3b82f6", logo_url: "", website: "" });
+      setNewClientForm({ name: "", brand_name: "", target_region: "United States", industry: "Custom", customIndustry: "", competitors: "", primary_color: "#0372ff", logo_url: "", website: "" });
       setAddClientOpen(false);
     } catch (err: any) {
       console.error("Failed to create client:", err);
@@ -1601,6 +1605,13 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
+          {onShowLaunchpad && (
+            <button onClick={onShowLaunchpad} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 text-left transition-all text-blue-600 hover:bg-blue-50">
+              <Zap className="h-4 w-4 flex-shrink-0 text-blue-500" />
+              <span className="flex-1 truncate">Launchpad</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-semibold flex-shrink-0">GEO</span>
+            </button>
+          )}
 
           {isAdmin && (
             <>
@@ -2198,11 +2209,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   function AddClientDialog() {
     return (
       <Dialog open={addClientOpen} onOpenChange={setAddClientOpen}>
-        <DialogContent className="sm:max-w-lg bg-white">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-lg bg-white flex flex-col max-h-[90vh]">
+          <DialogHeader className="flex-shrink-0 pb-2">
             <DialogTitle className="text-xl font-semibold text-gray-900">Add New Brand</DialogTitle>
           </DialogHeader>
-          <div className="space-y-5 py-4">
+          <div className="space-y-5 py-4 overflow-y-auto flex-1 min-h-0 pr-1">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium text-gray-700">Brand Name *</Label>
@@ -2300,7 +2311,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     }
                   }}
                   disabled={isAutoFinding || !newClientForm.brand_name}
-                  className="h-6 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
+                  className="h-6 text-xs px-2" style={{ color: '#0372ff' }}
                 >
                   {isAutoFinding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
                   {isAutoFinding ? "Finding..." : "Auto-Find"}
@@ -2360,9 +2371,9 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               </div>
             </div>
           </div>
-          <DialogFooter className="border-t border-gray-100 pt-4">
+          <DialogFooter className="border-t border-gray-100 pt-4 flex-shrink-0">
             <Button variant="outline" onClick={() => setAddClientOpen(false)} className="border-gray-300 text-gray-700 hover:bg-gray-50" disabled={isCreatingClient}>Cancel</Button>
-            <Button onClick={handleCreateClient} disabled={!newClientForm.name.trim() || isCreatingClient} className="bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">
+            <Button onClick={handleCreateClient} disabled={!newClientForm.name.trim() || isCreatingClient} className="text-white disabled:opacity-50" style={{ background: '#0372ff' }}>
               {isCreatingClient ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Creating...</> : "Create Brand"}
             </Button>
           </DialogFooter>
@@ -2374,11 +2385,11 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
   function EditClientDialog() {
     return (
       <Dialog open={editClientOpen} onOpenChange={setEditClientOpen}>
-        <DialogContent className="sm:max-w-lg bg-white">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-lg bg-white flex flex-col max-h-[90vh]">
+          <DialogHeader className="flex-shrink-0 pb-2">
             <DialogTitle className="text-xl font-semibold text-gray-900">Edit Brand</DialogTitle>
           </DialogHeader>
-          <div className="space-y-5 py-4">
+          <div className="space-y-5 py-4 overflow-y-auto flex-1 min-h-0 pr-1">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium text-gray-700">Brand Name *</Label>
@@ -2474,7 +2485,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                     }
                   }}
                   disabled={isAutoFinding || !editClientForm.brand_name}
-                  className="h-6 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2"
+                  className="h-6 text-xs px-2" style={{ color: '#0372ff' }}
                 >
                   {isAutoFinding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
                   {isAutoFinding ? "Finding..." : "Auto-Find"}
@@ -2541,7 +2552,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
             )}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setEditClientOpen(false)} className="border-gray-300 text-gray-700">Cancel</Button>
-              <Button onClick={handleUpdateClient} disabled={!editClientForm.name.trim()} className="bg-blue-600 hover:bg-blue-700 text-white">Save Changes</Button>
+              <Button onClick={handleUpdateClient} disabled={!editClientForm.name.trim()} className="text-white" style={{ background: '#0372ff' }}>Save Changes</Button>
             </div>
           </DialogFooter>
         </DialogContent>
@@ -3182,7 +3193,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
                         {/* Show indicator for AI Overview source type */}
                         {mr.model === "google_ai_overview" && mr.raw_response && mr.is_ai_overview === false && (
                           <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
-                            âš ï¸ This content is from <strong>Featured Snippet</strong>, not Google's AI Overview. AI Overview was not available for this query.
+                            ⚠️ This content is from <strong>Featured Snippet</strong>, not Google's AI Overview. AI Overview was not available for this query.
                           </div>
                         )}
                         {/* Show 'No AI Overview available' message when Google AI Overview has no response */}
@@ -4059,7 +4070,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete }: 
               <Select value={editingLocationValue || "__default__"} onValueChange={setEditingLocationValue}>
                 <SelectTrigger className="mt-1.5"><SelectValue placeholder="Choose location" /></SelectTrigger>
                 <SelectContent className="max-h-80">
-                  <SelectItem value="__default__">ðŸ“ Use brand's default location</SelectItem>
+                  <SelectItem value="__default__">📍 Use brand's default location</SelectItem>
                   <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50">Countries</div>
                   <SelectItem value="United States">🇺🇸 United States</SelectItem>
                   <SelectItem value="United Kingdom">🇬🇧 United Kingdom</SelectItem>

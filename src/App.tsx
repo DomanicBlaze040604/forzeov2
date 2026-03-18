@@ -4,12 +4,14 @@ import ClientDashboard from './pages/ClientDashboard'
 import { Toaster } from "sonner"
 const OnboardingWizard = React.lazy(() => import('@/components/ui/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })))
 import { AuthForm } from '@/components/AuthForm'
+import { LaunchpadView } from '@/components/LaunchpadView'
 
 function App() {
   const [session, setSession] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
-  const [checkingOnboarding, setCheckingOnboarding] = useState(false)
+  const [showLaunchpad, setShowLaunchpad] = useState(false)
+  const [launchpadClientId, setLaunchpadClientId] = useState<string | null>(null)
   const [dashboardKey, setDashboardKey] = useState(0)
   const [autoRunClientId, setAutoRunClientId] = useState<string | null>(null)
   const sessionUserRef = useRef<string | null>(null)
@@ -55,7 +57,6 @@ function App() {
 
   const checkUserOnboarding = async (userId: string) => {
     console.log('[Onboarding] Checking onboarding for user:', userId)
-    setCheckingOnboarding(true)
     try {
       // Check if user is admin first (profile may not exist for new OAuth users)
       const { data: profile, error: profileError } = await supabase
@@ -68,17 +69,15 @@ function App() {
       if (profileError) {
         console.log('[Onboarding] No profile found (new user) - showing onboarding')
         setShowOnboarding(true)
-        setCheckingOnboarding(false)
         return
       }
 
       const isAdmin = profile?.role === 'admin'
 
       if (isAdmin) {
-        // Admins don't need onboarding
-        console.log('[Onboarding] User is admin - skipping onboarding')
+        // Admins skip onboarding wizard — but still get Launchpad access via sidebar
+        console.log('[Onboarding] User is admin - skipping onboarding wizard')
         setShowOnboarding(false)
-        setCheckingOnboarding(false)
         return
       }
 
@@ -93,38 +92,85 @@ function App() {
         console.error('[Onboarding] Error checking clients:', error)
         // On error, show onboarding to be safe
         setShowOnboarding(true)
-        setCheckingOnboarding(false)
         return
       }
 
-      // If no clients, show onboarding
+      // If no clients, show onboarding wizard
       if (!userClients || userClients.length === 0) {
         console.log('[Onboarding] No brands found - showing onboarding wizard')
         setShowOnboarding(true)
       } else {
-        console.log('[Onboarding] User has brands - skipping onboarding')
+        // Has clients — check if Launchpad has already been dismissed for this user
+        const launchpadKey = `forzeo_launchpad_seen_${userId}`
+        const alreadySeen = localStorage.getItem(launchpadKey)
+
+        if (!alreadySeen) {
+          // Check if they have any completed checklist entries (partially completed = still show)
+          const { data: checklist } = await supabase
+            .from('onboarding_checklists')
+            .select('task_key, is_completed')
+            .eq('user_id', userId)
+
+          const allDone = checklist && checklist.length >= 5 && checklist.every(r => r.is_completed)
+
+          if (!allDone) {
+            console.log('[Launchpad] Existing user with incomplete checklist - showing Launchpad')
+            setLaunchpadClientId(userClients[0].client_id)
+            setShowLaunchpad(true)
+          } else {
+            console.log('[Launchpad] Checklist already complete - skipping Launchpad')
+            localStorage.setItem(launchpadKey, 'done')
+          }
+        } else {
+          console.log('[Onboarding] User has brands + dismissed Launchpad - skipping')
+        }
         setShowOnboarding(false)
       }
     } catch (error) {
       console.error('[Onboarding] Error:', error)
-      // On any error, show onboarding to be safe
       setShowOnboarding(true)
-    } finally {
-      setCheckingOnboarding(false)
     }
   }
 
   const handleOnboardingComplete = async (newClientId?: string) => {
-    console.log("[Onboarding] Completed, refreshing dashboard...", newClientId ? `Auto-run client: ${newClientId}` : '')
+    console.log("[Onboarding] Completed, showing Launchpad...", newClientId ? `Client: ${newClientId}` : '')
     setShowOnboarding(false)
 
-    // If a new client was created, trigger auto-run of prompts
+    // If a new client was created, trigger auto-run of prompts and show Launchpad
     if (newClientId) {
       setAutoRunClientId(newClientId)
+      setLaunchpadClientId(newClientId)
+      setShowLaunchpad(true)
+    } else {
+      setDashboardKey(prev => prev + 1)
     }
+  }
 
-    // Trigger soft refresh of dashboard component
+  const [launchpadInitialTab, setLaunchpadInitialTab] = useState<string | undefined>(undefined)
+
+  const handleLaunchpadDismiss = (tab?: string) => {
+    // Mark as seen so it won't auto-show again on next login
+    if (session?.user?.id) {
+      localStorage.setItem(`forzeo_launchpad_seen_${session.user.id}`, 'done')
+    }
+    setLaunchpadInitialTab(tab)
+    setShowLaunchpad(false)
     setDashboardKey(prev => prev + 1)
+  }
+
+  // Called from dashboard sidebar button — opens Launchpad for any user
+  const handleShowLaunchpad = async () => {
+    if (!session?.user?.id) return
+    // Fetch their first client if we don't have it already
+    if (!launchpadClientId) {
+      const { data } = await supabase
+        .from('user_clients')
+        .select('client_id')
+        .eq('user_id', session.user.id)
+        .limit(1)
+      if (data?.[0]?.client_id) setLaunchpadClientId(data[0].client_id)
+    }
+    setShowLaunchpad(true)
   }
 
   // Only show loading spinner on initial page load (before any session is resolved)
@@ -133,7 +179,7 @@ function App() {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: '#0372ff' }}></div>
           <p className="mt-4 text-slate-700 font-medium">Loading...</p>
         </div>
       </div>
@@ -145,25 +191,18 @@ function App() {
       <div className="min-h-screen flex items-center justify-center relative bg-gradient-to-br from-slate-50 via-white to-blue-50">
         {/* Animated Background Elements */}
         <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-pulse"></div>
-          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-pulse" style={{ animationDelay: '2s' }}></div>
-          <div className="absolute top-40 left-40 w-80 h-80 bg-emerald-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-pulse" style={{ animationDelay: '4s' }}></div>
+          <div className="absolute -top-40 -right-40 w-80 h-80 rounded-full mix-blend-multiply filter blur-xl opacity-50 animate-pulse" style={{ background: 'rgba(48,209,255,0.18)' }}></div>
+          <div className="absolute -bottom-40 -left-40 w-80 h-80 rounded-full mix-blend-multiply filter blur-xl opacity-40 animate-pulse" style={{ background: 'rgba(3,114,255,0.15)', animationDelay: '2s' }}></div>
+          <div className="absolute top-40 left-40 w-80 h-80 bg-emerald-100 rounded-full mix-blend-multiply filter blur-xl opacity-50 animate-pulse" style={{ animationDelay: '4s' }}></div>
         </div>
 
         {/* Login Card */}
         <div className="w-full max-w-[440px] px-4 relative z-10 flex flex-col items-center">
           <div className="bg-white/80 backdrop-blur-xl rounded-2xl w-full p-8 sm:p-10 flex flex-col gap-8 shadow-2xl border border-white/20">
             {/* Logo and Branding */}
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center mb-2 shadow-xl shadow-blue-600/25 ring-4 ring-white">
-                <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-              <div className="text-center">
-                <h1 className="text-slate-900 tracking-tight text-3xl font-bold mb-1">Forzeo GEO</h1>
-                <p className="text-slate-600 text-sm font-medium">AI Visibility Analytics Platform</p>
-              </div>
+            <div className="flex flex-col items-center gap-2">
+              <img src="/forzeo-logo.svg" alt="Forzeo" className="h-12 mx-auto" />
+              <p className="text-slate-500 text-sm font-medium">AI Visibility Analytics Platform</p>
             </div>
 
             {/* Auth Form */}
@@ -172,7 +211,7 @@ function App() {
             {/* Contact Sales */}
             <p className="text-center text-slate-600 text-sm">
               Need enterprise access?
-              <a className="text-blue-600 hover:text-blue-700 font-semibold transition-colors ml-1" href="mailto:contact@forzeo.com">Contact Sales</a>
+              <a className="font-semibold transition-colors ml-1" style={{ color: '#0372ff' }} href="mailto:contact@forzeo.com">Contact Sales</a>
             </p>
           </div>
 
@@ -199,7 +238,19 @@ function App() {
   return (
     <>
       <Toaster position="top-right" />
-      <ClientDashboard key={dashboardKey} autoRunClientId={autoRunClientId} onAutoRunComplete={() => setAutoRunClientId(null)} />
+
+      {/* Launchpad: shown after onboarding, before first dashboard view */}
+      {showLaunchpad && session?.user ? (
+        <LaunchpadView
+          userId={session.user.id}
+          clientId={launchpadClientId}
+          userEmail={session.user.email}
+          onDismiss={handleLaunchpadDismiss}
+          onDismissToTraffic={() => handleLaunchpadDismiss('traffic')}
+        />
+      ) : (
+        <ClientDashboard key={dashboardKey} autoRunClientId={autoRunClientId} onAutoRunComplete={() => setAutoRunClientId(null)} onShowLaunchpad={handleShowLaunchpad} initialTab={launchpadInitialTab} />
+      )}
 
       {/* Onboarding Wizard Popup */}
       {showOnboarding && session?.user && (

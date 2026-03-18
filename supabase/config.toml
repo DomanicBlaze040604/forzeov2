@@ -37,3 +37,6 @@ verify_jwt = false
 
 [functions.verify-citations]
 verify_jwt = false
+
+[functions.launchpad-abandon-email]
+verify_jwt = false

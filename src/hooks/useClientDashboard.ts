@@ -1063,6 +1063,12 @@ export function useClientDashboard() {
           const lastSelectedId = loadFromStorage<string>(STORAGE_KEYS.SELECTED_CLIENT, mappedClients[0]?.id);
           const lastSelected = mappedClients.find(c => c.id === lastSelectedId) || mappedClients[0];
           setSelectedClient(lastSelected);
+          // Sync selectedModels from client settings configured during onboarding
+          const clientModels = (lastSelected as any).settings?.selected_models;
+          if (Array.isArray(clientModels) && clientModels.length > 0) {
+            setSelectedModelsState(clientModels);
+            saveToStorage(STORAGE_KEYS.SELECTED_MODELS, clientModels);
+          }
           // Load data for the selected client (single fetch, no useEffect cascade)
           await loadClientData(lastSelected);
         }
@@ -1235,6 +1241,12 @@ export function useClientDashboard() {
     setSummary(null);
     setSelectedClient(client);
     saveToStorage(STORAGE_KEYS.SELECTED_CLIENT, client.id);
+    // Sync selectedModels from client settings if configured during onboarding
+    const clientModels = (client as any).settings?.selected_models;
+    if (Array.isArray(clientModels) && clientModels.length > 0) {
+      setSelectedModelsState(clientModels);
+      saveToStorage(STORAGE_KEYS.SELECTED_MODELS, clientModels);
+    }
     // Single entry point for data loading — no duplicate fetches
     await loadClientData(client);
   }, [loadClientData]);
@@ -2651,7 +2663,7 @@ Instructions:
 
   }, [selectedClient, getLocationDrilldown]);
 
-  const generateContent = useCallback(async (topic: string, contentType: string, tone?: string, audience?: string, keywords?: string): Promise<string | null> => {
+  const generateContent = useCallback(async (topic: string, contentType: string, tone?: string, audience?: string, keywords?: string, documentContext?: string): Promise<string | null> => {
     if (!selectedClient) return null;
 
     const contentTypeLabels: Record<string, string> = {
@@ -2662,26 +2674,143 @@ Instructions:
       faq: "FAQ section with 8-12 detailed Q&A pairs",
       press_release: "professional press release (600-800 words)",
       product_description: "compelling product description (400-600 words)",
+      video_script: "video script",
+      youtube_description: "YouTube video description",
+      linkedin_post: "LinkedIn post",
+      twitter_thread: "Twitter/X thread",
+      email_newsletter: "email newsletter",
+      landing_page: "landing page copy",
     };
 
     const typeLabel = contentTypeLabels[contentType] || contentType;
+
+    // Content-type-specific format overrides injected into the prompt
+    const typeFormatOverrides: Record<string, string> = {
+      video_script: `
+VIDEO SCRIPT FORMAT RULES:
+- Structure: [HOOK] (0-15s) → [INTRO] (15-30s) → numbered segments with [SEGMENT: Title] markers → [CTA] (final 15s)
+- Use [VISUAL:] for on-screen action, [VOICEOVER:] for narration, [ON-SCREEN TEXT:] for titles/captions
+- Hook = one compelling question or surprising statement — must grab attention in 3 seconds
+- Keep all sentences short and spoken-word natural — this script will be read aloud
+- Runtime guidance: 3-5 min for standard YouTube, 30-60s for Shorts/Reels
+- End with one clear CTA (subscribe, visit site, leave a comment)
+- Do NOT use markdown # headers — use [SEGMENT:] markers`,
+
+      youtube_description: `
+YOUTUBE DESCRIPTION FORMAT RULES:
+- First 2-3 lines = visible hook before "Show More" — include primary keyword naturally
+- [TIMESTAMPS] section listing key moments as 00:00 - Topic Name
+- [LINKS] section with website and social placeholder URLs
+- [ABOUT] section: 2-3 sentences about ${selectedClient?.brand_name}
+- [TAGS] line: comma-separated relevant search tags
+- Length: 300-500 words
+- SEO: primary keyword in first sentence, secondary keywords woven throughout`,
+
+      linkedin_post: `
+LINKEDIN POST FORMAT RULES:
+- Opening line: bold hook, max 8 words, standalone line — no greeting or lead-in
+- Short paragraphs (1-3 lines each) separated by blank lines
+- Include a personal insight or first-person observation
+- 3-5 relevant emojis placed naturally (not clustered at the end)
+- Close with a thought-provoking question to drive comments
+- Final line: 3-5 relevant hashtags
+- Length: 200-400 words
+- Tone: knowledgeable professional, NOT a press release`,
+
+      twitter_thread: `
+TWITTER/X THREAD FORMAT RULES:
+- Tweet 1 (Hook): Bold claim, question, or surprising stat. End with "🧵" — max 280 chars
+- Tweets 2-9 (Body): Each tweet = one standalone insight or step — max 280 chars each
+- Prefix each tweet with its number: "2/", "3/", etc.
+- Tweet 9 or 10 (Summary): "Here's the recap:" + 3 key takeaways
+- Final tweet (CTA): Clear ask — follow, share, reply, or visit site
+- Total: 8-12 tweets
+- Write each tweet on its own line, numbered`,
+
+      email_newsletter: `
+EMAIL NEWSLETTER FORMAT RULES:
+- [SUBJECT LINE:] under 50 characters, compelling, no spam triggers
+- [PREVIEW TEXT:] 85-100 chars extending the subject line
+- Opening: brief personal greeting + 1-2 sentence hook on a timely trend
+- 2-3 body sections with bold subheadings, 2-3 short paragraphs each
+- [VALUE TIP:] one practical insight or stat the reader can use immediately
+- [CTA BUTTON: button label | destination] — single primary action
+- Warm sign-off with brand name
+- [PS:] optional second hook or secondary CTA
+- Length: 400-600 words`,
+
+      landing_page: `
+LANDING PAGE COPY FORMAT RULES:
+- [HERO HEADLINE:] 8 words max, benefit-first
+- [HERO SUBHEADLINE:] one sentence expanding the headline
+- [HERO CTA BUTTON:]
+- [SOCIAL PROOF:] stat, logo bar, or trust signal
+- [PROBLEM:] 2-3 sentences articulating the reader's pain point
+- [SOLUTION:] how ${selectedClient?.brand_name} solves it, 3-4 sentences
+- [FEATURE 1:] [FEATURE 2:] [FEATURE 3:] each with a title + one-sentence description
+- [TESTIMONIAL:] realistic placeholder with name and title
+- [FAQ:] 3-4 objection-handling Q&As
+- [FINAL CTA:] headline variation + button
+- Keep every section skimmable — short, punchy copy only`,
+    };
+
+    const formatOverride = typeFormatOverrides[contentType] || '';
+
+    // Preserve acronyms: extract all-caps words from topic and keywords to protect them
+    const rawText = `${topic} ${keywords || ''}`;
+    const acronymsFound = [...new Set((rawText.match(/\b[A-Z]{2,}\b/g) || []))];
+    const acronymInstruction = acronymsFound.length > 0
+      ? `\nACRONYM PRESERVATION: The following acronyms must appear EXACTLY as written (never reformat or split them): ${acronymsFound.join(', ')}.`
+      : '';
+
+    const region = selectedClient.target_region || "Global";
+
+    // Build country-specific localization instructions based on the target region
+    const getLocalizationRules = (r: string): string => {
+      const rl = r.toLowerCase();
+      if (rl.includes("india") || rl.includes("in")) return `LOCALIZATION — India:\n- Use Indian English spelling and phrasing (e.g. "colour", "analyse") where appropriate\n- Reference relevant Indian platforms, apps, or services where context fits (e.g. Razorpay, Zepto, ONDC, UPI)\n- Use INR (₹) for pricing examples; reference Indian market dynamics, regulations, or cultural nuances where relevant\n- Mention India-specific industry context (e.g. Tier-1/2 cities, GST, SEBI, TRAI) where appropriate`;
+      if (rl.includes("united states") || rl.includes("us") || rl.includes("usa")) return `LOCALIZATION — United States:\n- Use American English spelling (e.g. "color", "analyze")\n- Reference US-centric platforms, regulations, and cultural touchpoints where relevant\n- Use USD ($) for pricing examples; reference US market dynamics (e.g. FTC, SEC, US consumer behavior)`;
+      if (rl.includes("united kingdom") || rl.includes("uk") || rl.includes("britain")) return `LOCALIZATION — United Kingdom:\n- Use British English spelling (e.g. "colour", "programme")\n- Reference UK platforms, regulations (ICO, FCA, Ofcom), and cultural context\n- Use GBP (£) for pricing examples`;
+      if (rl.includes("australia") || rl.includes("au")) return `LOCALIZATION — Australia:\n- Use Australian English; reference ACCC, ATO, and Australia-specific market context\n- Use AUD ($) for pricing; reference key Australian platforms and consumer behavior`;
+      if (rl.includes("europe") || rl.includes("eu") || rl.includes("germany") || rl.includes("france")) return `LOCALIZATION — Europe/EU:\n- Reference GDPR and EU regulatory context where relevant\n- Use EUR (€) for pricing examples; acknowledge multi-country market diversity`;
+      if (rl.includes("middle east") || rl.includes("uae") || rl.includes("gulf") || rl.includes("ksa") || rl.includes("saudi")) return `LOCALIZATION — Middle East/GCC:\n- Reference GCC market dynamics (UAE, KSA, Qatar) and relevant platforms\n- Use USD or AED for pricing; acknowledge Arabic/English bilingual market context`;
+      if (rl.includes("southeast asia") || rl.includes("sea") || rl.includes("singapore") || rl.includes("indonesia")) return `LOCALIZATION — Southeast Asia:\n- Reference SEA market platforms (Grab, Shopee, Lazada, Tokopedia) where relevant\n- Acknowledge multi-country diversity (SG, ID, MY, PH, TH, VN); use USD for pricing`;
+      if (r && r !== "Global") return `LOCALIZATION — ${r}:\n- Tailor examples, references, pricing, and cultural context specifically to the ${r} market\n- Use locally-appropriate terminology, currency, and regulatory references`;
+      return "";
+    };
+
+    const localizationRules = getLocalizationRules(region);
 
     let prompt = `Write a ${typeLabel} about: ${topic}
 
 BRAND CONTEXT:
 - Brand: ${selectedClient.brand_name}
 - Industry: ${selectedClient.industry}
-- Region: ${selectedClient.target_region}
+- Target Region / Market: ${region}
 - Competitors: ${selectedClient.competitors.join(", ")}`;
 
     if (audience?.trim()) prompt += `\n- Target Audience: ${audience.trim()}`;
     if (keywords?.trim()) prompt += `\n- Key Selling Points / Keywords: ${keywords.trim()}`;
 
+    if (localizationRules) {
+      prompt += `\n\n${localizationRules}`;
+    }
+
     if (tone?.trim()) {
       prompt += `\n\nTONE OF VOICE / STYLE REFERENCE:\n"${tone.trim()}"\n\nINSTRUCTION: Analyze the style, vocabulary, and sentence structure of the reference text above. Generate the desired content strictly mimicking this tone and style.`;
     }
 
-    prompt += `
+    if (documentContext?.trim()) {
+      const truncated = documentContext.trim().slice(0, 4000);
+      prompt += `\n\nUPLOADED BRAND / REFERENCE DOCUMENT:\n"""\n${truncated}\n"""\nINSTRUCTION: Use the above document as additional brand context, tone guidance, product details, or factual reference when generating the content. Prioritize any specific facts, product names, or tone signals found in this document.`;
+    }
+
+    const isVideoOrSocial = ['video_script', 'youtube_description', 'linkedin_post', 'twitter_thread', 'email_newsletter', 'landing_page'].includes(contentType);
+
+    if (formatOverride) {
+      prompt += `\n${formatOverride}`;
+    } else {
+      prompt += `
 
 CONTENT QUALITY REQUIREMENTS:
 1. FORMAT: Use proper Markdown with clear hierarchy:
@@ -2709,8 +2838,23 @@ CONTENT QUALITY REQUIREMENTS:
    - Show Expertise: Use industry-specific terminology correctly
    - Build Authority: Reference industry trends and best practices
    - Establish Trust: Be transparent, cite reasoning, avoid hype`;
+    }
 
-    const systemPrompt = `You are an elite content strategist and writer specializing in ${selectedClient.industry}. You create content that ranks highly in both traditional search and AI-powered search engines. Your writing is engaging, authoritative, and optimized for E-E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness). You always output well-structured Markdown with proper headings, lists, and formatting.`;
+    prompt += `\nCITATIONS: Do NOT add any citation references like [1], [2], [Source: x] or footnotes. Write claims inline with context but without placeholder citations.${acronymInstruction}`;
+
+    const systemPrompt = isVideoOrSocial
+      ? `You are an expert ${contentType === 'video_script' ? 'video scriptwriter and content creator' :
+          contentType === 'youtube_description' ? 'YouTube SEO specialist' :
+          contentType === 'linkedin_post' ? 'LinkedIn content strategist' :
+          contentType === 'twitter_thread' ? 'Twitter/X content creator' :
+          contentType === 'email_newsletter' ? 'email marketing copywriter' :
+          'conversion copywriter and landing page specialist'} specialising in ${selectedClient.industry}.
+You write for ${selectedClient.brand_name} and understand their voice and competitive landscape.
+Follow the format rules precisely — structure matters as much as content for this format.`
+      : `You are an elite content strategist and writer specializing in ${selectedClient.industry}. You create content that ranks highly in both traditional search and AI-powered search engines. Your writing is engaging, authoritative, and optimized for E-E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness). You always output well-structured Markdown with proper headings, lists, and formatting.`;
+
+    // Use larger model + higher token limit for video scripts and landing pages
+    const needsLargerModel = ['video_script', 'landing_page', 'email_newsletter'].includes(contentType);
 
     try {
       const { data, error } = await supabase.functions.invoke("generate-content", {
@@ -2722,10 +2866,10 @@ CONTENT QUALITY REQUIREMENTS:
     try {
       const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
         body: {
-          model: "llama-3.1-8b-instant",
+          model: needsLargerModel ? "llama-3.3-70b-versatile" : "llama-3.1-8b-instant",
           messages: [{ role: "system", content: systemPrompt }, { role: "user", content: prompt }],
-          temperature: 0.7,
-          max_tokens: 4096,
+          temperature: isVideoOrSocial ? 0.8 : 0.7,
+          max_tokens: needsLargerModel ? 6000 : 4096,
         },
       });
       if (!proxyError && proxyData?.response) return proxyData.response;
@@ -2920,6 +3064,46 @@ Generate comprehensive, humanized content that will improve this brand's AI visi
   // NOTE: The old useEffect that loaded prompts/results/auto-audit on selectedClient change
   // has been REMOVED. Data loading is now handled by loadClientData() which is called
   // explicitly from fetchClients() and switchClient() — no cascading re-renders.
+
+  // ============================================
+  // REALTIME: live audit_results updates
+  // ============================================
+  useEffect(() => {
+    if (!selectedClient) return;
+    const clientId = selectedClient.id;
+
+    const channel = supabase
+      .channel(`dashboard_audit_results_${clientId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'audit_results', filter: `client_id=eq.${clientId}` },
+        (payload) => {
+          const r = payload.new as Record<string, unknown>;
+          if (!r?.id) return;
+          const newResult: AuditResult = {
+            id: r.id as string,
+            prompt_id: r.prompt_id as string,
+            prompt_text: r.prompt_text as string,
+            model_results: (r.model_results as AuditResult['model_results']) || [],
+            summary: (r.summary as AuditResult['summary']) ?? {
+              share_of_voice: (r.share_of_voice as number) ?? 0,
+              average_rank: (r.average_rank as number | null) ?? null,
+              total_citations: (r.total_citations as number) ?? 0,
+              total_cost: (r.total_cost as number) ?? 0,
+            },
+            created_at: r.created_at as string,
+          };
+          setAuditResults(prev => {
+            // Skip if we already have this result (inserted by the same browser session)
+            if (prev.some(existing => existing.id === newResult.id)) return prev;
+            return [newResult, ...prev];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => { void supabase.removeChannel(channel); };
+  }, [selectedClient]);
 
   // ============================================
   // RESUME INTERRUPTED AUDIT (after page refresh)

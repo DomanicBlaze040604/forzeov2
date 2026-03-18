@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -14,6 +14,13 @@ import {
   Clock,
   FileText,
   BookOpen,
+  Video,
+  Mail,
+  MessageSquare,
+  Globe,
+  Upload,
+  X,
+  FileUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,7 +71,7 @@ export interface ContentTabProps {
   generatingContent: boolean;
   generatedContent: string;
   selectedClient: Client | null;
-  onGenerateContent: () => void;
+  onGenerateContent: (documentContext?: string) => void;
   prompts: Prompt[];
   industries: Record<string, { competitors: string[]; prompts: string[]; nichePrompts: string[]; superNichePrompts: string[] }>;
   setEditClientForm: React.Dispatch<React.SetStateAction<EditClientFormData>>;
@@ -100,6 +107,49 @@ export function ContentTab({
   isAdmin,
 }: ContentTabProps) {
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const [uploadedDocText, setUploadedDocText] = useState<string>("");
+  const [uploadedDocName, setUploadedDocName] = useState<string>("");
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [docError, setDocError] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (file: File) => {
+    setDocError("");
+    setUploadingDoc(true);
+    try {
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      if (ext === "txt" || ext === "md") {
+        const text = await file.text();
+        setUploadedDocText(text);
+        setUploadedDocName(file.name);
+      } else if (ext === "pdf") {
+        const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist");
+        GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).toString();
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await getDocument({ data: arrayBuffer }).promise;
+        let fullText = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          fullText += content.items.map((item: any) => item.str).join(" ") + "\n";
+        }
+        setUploadedDocText(fullText);
+        setUploadedDocName(file.name);
+      } else if (ext === "docx") {
+        const mammoth = await import("mammoth");
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        setUploadedDocText(result.value);
+        setUploadedDocName(file.name);
+      } else {
+        setDocError("Unsupported file type. Please upload a .txt, .md, .pdf, or .docx file.");
+      }
+    } catch (err) {
+      setDocError("Failed to read file. Please try again.");
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -107,11 +157,63 @@ export function ContentTab({
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-6">
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="article">Article</SelectItem><SelectItem value="listicle">Listicle (Top 10)</SelectItem><SelectItem value="comparison">Comparison Guide</SelectItem><SelectItem value="guide">How-To Guide</SelectItem><SelectItem value="faq">FAQ Section</SelectItem><SelectItem value="press_release">Press Release</SelectItem><SelectItem value="product_description">Product Description</SelectItem></SelectContent></Select></div></div>
+            <div className="grid grid-cols-2 gap-4"><div><Label>Topic / Title</Label><Input placeholder="e.g., Best dating apps for professionals in 2025" value={contentTopic} onChange={(e) => setContentTopic(e.target.value)} className="mt-1" /></div><div><Label>Content Type</Label><Select value={contentType} onValueChange={setContentType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent>
+              <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Written Content</div>
+              <SelectItem value="article">📝 Article</SelectItem>
+              <SelectItem value="listicle">📋 Listicle (Top 10)</SelectItem>
+              <SelectItem value="comparison">⚖️ Comparison Guide</SelectItem>
+              <SelectItem value="guide">🗺️ How-To Guide</SelectItem>
+              <SelectItem value="faq">❓ FAQ Section</SelectItem>
+              <SelectItem value="press_release">📰 Press Release</SelectItem>
+              <SelectItem value="product_description">🛍️ Product Description</SelectItem>
+              <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider mt-1">Video</div>
+              <SelectItem value="video_script">🎬 Video Script (YouTube / CTV)</SelectItem>
+              <SelectItem value="youtube_description">▶️ YouTube Description</SelectItem>
+              <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider mt-1">Social & Email</div>
+              <SelectItem value="linkedin_post">💼 LinkedIn Post</SelectItem>
+              <SelectItem value="twitter_thread">🐦 Twitter/X Thread</SelectItem>
+              <SelectItem value="email_newsletter">📧 Email Newsletter</SelectItem>
+              <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider mt-1">Conversion</div>
+              <SelectItem value="landing_page">🚀 Landing Page Copy</SelectItem>
+            </SelectContent></Select></div></div>
             <div className="grid grid-cols-2 gap-4"><div><Label>Target Audience</Label><Input placeholder="e.g., Millennials, CTOs, Stay-at-home parents" value={targetAudience} onChange={(e) => setTargetAudience(e.target.value)} className="mt-1" /></div><div><Label>Keywords / Key Selling Points</Label><Input placeholder="e.g., affordable, AI-powered, 24/7 support" value={contentKeywords} onChange={(e) => setContentKeywords(e.target.value)} className="mt-1" /></div></div>
             <div><Label>Tone of Voice Reference</Label><Textarea placeholder="Paste a sample press release or product description here. The AI will analyze and mimic its style." value={toneOfVoice} onChange={(e) => setToneOfVoice(e.target.value)} className="mt-1 h-24" /></div>
+
+            {/* File upload for brand/reference docs */}
+            <div>
+              <Label>Brand / Reference Document <span className="text-gray-400 font-normal">(optional)</span></Label>
+              <p className="text-xs text-gray-500 mt-0.5 mb-2">Upload a PDF, DOCX, or TXT with brand guidelines, tone samples, product specs, etc. The AI will use it as extra context.</p>
+              {!uploadedDocName ? (
+                <div
+                  className={`relative border-2 border-dashed rounded-lg p-4 transition-colors cursor-pointer hover:border-gray-400 hover:bg-gray-50 ${uploadingDoc ? "border-blue-300 bg-blue-50" : "border-gray-200"}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFileUpload(f); }}
+                >
+                  <input ref={fileInputRef} type="file" accept=".txt,.md,.pdf,.docx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ""; }} />
+                  <div className="flex flex-col items-center gap-1.5 py-1">
+                    {uploadingDoc ? (
+                      <><Loader2 className="h-6 w-6 text-blue-400 animate-spin" /><p className="text-sm text-blue-600">Reading document...</p></>
+                    ) : (
+                      <><FileUp className="h-6 w-6 text-gray-400" /><p className="text-sm text-gray-600"><span className="font-medium text-gray-800">Click to upload</span> or drag & drop</p><p className="text-xs text-gray-400">PDF, DOCX, TXT, MD — up to 5MB</p></>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="p-1.5 bg-green-100 rounded"><FileText className="h-4 w-4 text-green-600" /></div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-green-800 truncate">{uploadedDocName}</p>
+                    <p className="text-xs text-green-600">{uploadedDocText.length.toLocaleString()} characters extracted · will be included in generation</p>
+                  </div>
+                  <button onClick={() => { setUploadedDocText(""); setUploadedDocName(""); setDocError(""); }} className="p-1 rounded hover:bg-green-200 transition-colors flex-shrink-0"><X className="h-4 w-4 text-green-700" /></button>
+                </div>
+              )}
+              {docError && <p className="text-xs text-red-500 mt-1.5">{docError}</p>}
+            </div>
+
             <div className="p-4 bg-gray-50 rounded-lg"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Content will include:</Label><Button variant="outline" size="sm" onClick={() => { const clientIndustry = Object.keys(industries).includes(selectedClient?.industry || "") ? selectedClient?.industry : "Custom"; const customInd = Object.keys(industries).includes(selectedClient?.industry || "") ? "" : selectedClient?.industry || ""; setEditClientForm({ name: selectedClient?.name || "", brand_name: selectedClient?.brand_name || "", target_region: selectedClient?.target_region || "", industry: clientIndustry || "Custom", customIndustry: customInd, primary_color: selectedClient?.primary_color || "#3b82f6", logo_url: "", competitors: selectedClient?.competitors?.join(", ") || "", website: selectedClient?.brand_domain || "" }); setEditClientOpen(true); }} className="text-xs"><Settings className="h-3 w-3 mr-1" />Edit</Button></div><div className="flex flex-wrap gap-2">{selectedClient?.brand_name && <span className="inline-flex items-center px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-sm text-blue-800 font-medium">Brand: {selectedClient.brand_name}</span>}{selectedClient?.target_region && <span className="inline-flex items-center px-3 py-1.5 bg-green-100 border border-green-300 rounded-lg text-sm text-green-800 font-medium">Region: {selectedClient.target_region}</span>}{selectedClient?.industry && <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 border border-purple-300 rounded-lg text-sm text-purple-800 font-medium">Industry: {selectedClient.industry}</span>}{selectedClient?.competitors?.slice(0, 3).map((c, i) => <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800 font-medium"><Building2 className="h-3.5 w-3.5" />{c}</span>)}</div></div>
-            <Button onClick={onGenerateContent} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : <><Wand2 className="h-4 w-4 mr-2" />Generate Content</>}</Button>
+            <Button onClick={() => onGenerateContent(uploadedDocText || undefined)} disabled={generatingContent || !contentTopic.trim()} className="w-full bg-gray-900 hover:bg-gray-800">{generatingContent ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating...</> : <><Wand2 className="h-4 w-4 mr-2" />{uploadedDocText ? "Generate with Document" : "Generate Content"}</>}</Button>
             {generatedContent && (<div className="mt-6"><div className="flex items-center justify-between mb-3"><Label className="text-sm font-medium">Generated Content</Label><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(generatedContent)}><Copy className="h-3.5 w-3.5 mr-1" /> Copy</Button><Button variant="outline" size="sm" onClick={() => { const blob = new Blob([generatedContent], { type: "text/markdown" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${contentTopic.replace(/\s+/g, "-").toLowerCase()}-content.md`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-3.5 w-3.5 mr-1" /> Download</Button></div></div><div className="max-w-none p-6 bg-white rounded-lg border max-h-[600px] overflow-y-auto"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{
               p: ({ node, ...props }) => <p className="mb-4 text-gray-700 leading-relaxed text-[15px] max-w-3xl" {...props} />,
               a: ({ node, ...props }) => <a className="text-blue-600 hover:text-blue-700 hover:underline font-medium transition-colors" target="_blank" rel="noopener noreferrer" {...props} />,
@@ -142,7 +244,50 @@ export function ContentTab({
         </div>
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Quick Topics</h3><p className="text-xs text-gray-500 mb-3">Based on your prompts and audit results</p><div className="space-y-2">{prompts.slice(0, 5).map((p, i) => (<button key={i} onClick={() => setContentTopic(p.prompt_text)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg truncate">{p.prompt_text}</button>))}{prompts.length === 0 && <p className="text-sm text-gray-500 text-center py-2">Add prompts to see suggestions</p>}</div></div>
-          <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Content Ideas</h3><div className="space-y-2">{[`Why ${selectedClient?.brand_name} is the best choice in ${selectedClient?.target_region}`, `${selectedClient?.brand_name} vs ${selectedClient?.competitors[0] || "Competitors"}: Complete Comparison`, `Top 10 reasons to choose ${selectedClient?.brand_name}`, `How ${selectedClient?.brand_name} solves common ${selectedClient?.industry} problems`].map((idea, i) => (<button key={i} onClick={() => setContentTopic(idea)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">{idea}</button>))}</div></div>
+          {/* Content type-aware idea suggestions */}
+          {['video_script', 'youtube_description'].includes(contentType) ? (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center gap-2 mb-3"><Video className="h-4 w-4 text-red-500" /><h3 className="font-semibold text-gray-900">Video Ideas</h3></div>
+              <div className="space-y-2">{[
+                `How ${selectedClient?.brand_name} helps ${selectedClient?.industry} businesses`,
+                `${selectedClient?.brand_name} vs ${selectedClient?.competitors?.[0] || "the competition"}: which wins?`,
+                `Step-by-step: Getting started with ${selectedClient?.brand_name}`,
+                `Top 5 mistakes in ${selectedClient?.industry} (and how to fix them)`,
+              ].map((idea, i) => (<button key={i} onClick={() => setContentTopic(idea)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">{idea}</button>))}</div>
+            </div>
+          ) : ['linkedin_post', 'twitter_thread'].includes(contentType) ? (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center gap-2 mb-3"><MessageSquare className="h-4 w-4 text-blue-500" /><h3 className="font-semibold text-gray-900">Social Ideas</h3></div>
+              <div className="space-y-2">{[
+                `Unpopular opinion: most ${selectedClient?.industry} tools are overpriced`,
+                `What I learned after testing ${selectedClient?.competitors?.slice(0, 2).join(' and ') || 'top tools'} vs ${selectedClient?.brand_name}`,
+                `The one ${selectedClient?.industry} metric nobody talks about`,
+                `How we cut costs with ${selectedClient?.brand_name}`,
+              ].map((idea, i) => (<button key={i} onClick={() => setContentTopic(idea)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">{idea}</button>))}</div>
+            </div>
+          ) : contentType === 'email_newsletter' ? (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center gap-2 mb-3"><Mail className="h-4 w-4 text-emerald-500" /><h3 className="font-semibold text-gray-900">Email Ideas</h3></div>
+              <div className="space-y-2">{[
+                `Welcome to ${selectedClient?.brand_name} — here's what to do first`,
+                `5 ways ${selectedClient?.brand_name} users are winning in ${selectedClient?.industry}`,
+                `This week in ${selectedClient?.industry}: trends + how we respond`,
+                `Your monthly ${selectedClient?.industry} roundup from ${selectedClient?.brand_name}`,
+              ].map((idea, i) => (<button key={i} onClick={() => setContentTopic(idea)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">{idea}</button>))}</div>
+            </div>
+          ) : contentType === 'landing_page' ? (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center gap-2 mb-3"><Globe className="h-4 w-4 text-purple-500" /><h3 className="font-semibold text-gray-900">Page Ideas</h3></div>
+              <div className="space-y-2">{[
+                `${selectedClient?.brand_name} vs ${selectedClient?.competitors?.[0] || 'alternatives'} comparison page`,
+                `${selectedClient?.brand_name} for ${selectedClient?.industry} businesses`,
+                `${selectedClient?.brand_name} pricing and plans`,
+                `Get started with ${selectedClient?.brand_name} free trial`,
+              ].map((idea, i) => (<button key={i} onClick={() => setContentTopic(idea)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">{idea}</button>))}</div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 p-5"><h3 className="font-semibold text-gray-900 mb-3">Content Ideas</h3><div className="space-y-2">{[`Why ${selectedClient?.brand_name} is the best choice in ${selectedClient?.target_region}`, `${selectedClient?.brand_name} vs ${selectedClient?.competitors?.[0] || "Competitors"}: Complete Comparison`, `Top 10 reasons to choose ${selectedClient?.brand_name}`, `How ${selectedClient?.brand_name} solves common ${selectedClient?.industry} problems`].map((idea, i) => (<button key={i} onClick={() => setContentTopic(idea)} className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">{idea}</button>))}</div></div>
+          )}
           <div className="bg-blue-50 rounded-xl border border-blue-200 p-5"><h3 className="font-semibold text-blue-900 mb-2">Pro Tip</h3><p className="text-sm text-blue-700">Generate content for topics where your brand has low visibility to improve your AI search presence.</p></div>
         </div>
       </div>
