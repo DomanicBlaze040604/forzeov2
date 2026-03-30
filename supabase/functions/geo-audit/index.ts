@@ -1436,7 +1436,23 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
 
     const text = await response.text();
 
+    // Parse body regardless of HTTP status — DataForSEO sometimes returns HTTP 500
+    // with a valid JSON body (status_code: 20000) containing task-level errors.
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+
     if (!response.ok) {
+      // If the body is a valid DataForSEO response, pass it through so callers
+      // can inspect task-level status codes rather than hitting a generic error.
+      if (data && data.status_code === 20000) {
+        console.warn(`[DataForSEO] HTTP ${response.status} but body OK — passing through for task-level handling`);
+        return { data };
+      }
+
       console.error(`[DataForSEO] HTTP ${response.status}: ${text.substring(0, 300)}`);
 
       // Handle specific error codes
@@ -1452,8 +1468,6 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
         status_code: response.status
       };
     }
-
-    const data = JSON.parse(text);
 
     if (data.status_code !== 20000) {
       console.error(`[DataForSEO] API Error: ${data.status_message}`);
@@ -1961,11 +1975,14 @@ async function getChatGPTScraperResponse(
 
     if (task?.status_code && task.status_code !== 20000) {
       lastError = task.status_message || `Task failed with code ${task.status_code}`;
-      console.error(`[ChatGPT Scraper] Task error: ${lastError}`);
+      console.error(`[ChatGPT Scraper] Task error (${task.status_code}): ${lastError}`);
 
-      // Don't retry on rate limits or service unavailable — fail fast
-      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") || task.status_code === 40000) {
-        console.warn(`[ChatGPT Scraper] Rate limit / unavailable — skipping retries`);
+      // Don't retry on rate limits, service unavailable, internal errors, or timeouts — fail fast
+      // "Internal Error - Timeout" = DataForSEO's servers overloaded; retrying only wastes money
+      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") ||
+          lastError.includes("Internal Error") || lastError.includes("Timeout") ||
+          task.status_code === 40000 || task.status_code === 50401) {
+        console.warn(`[ChatGPT Scraper] Non-retryable error — skipping retries`);
         return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: Date.now() - startTime, error: lastError };
       }
       continue;
@@ -2132,10 +2149,12 @@ async function getGeminiScraperResponse(
 
     if (task?.status_code && task.status_code !== 20000) {
       lastError = task.status_message || `Task failed with code ${task.status_code}`;
-      console.error(`[Gemini Scraper] Task error: ${lastError}`);
+      console.error(`[Gemini Scraper] Task error (${task.status_code}): ${lastError}`);
 
-      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") || task.status_code === 40000) {
-        console.warn(`[Gemini Scraper] Rate limit / unavailable — skipping retries`);
+      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") ||
+          lastError.includes("Internal Error") || lastError.includes("Timeout") ||
+          task.status_code === 40000 || task.status_code === 50401) {
+        console.warn(`[Gemini Scraper] Non-retryable error — skipping retries`);
         return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: Date.now() - startTime, error: lastError };
       }
       continue;
@@ -2394,9 +2413,9 @@ async function getLiveLLMResponse(
       console.error(`[LIVE LLM/${model}] Task error (code ${task.status_code}): ${lastError}`);
       console.error(`[LIVE LLM/${model}] Task data dump: ${JSON.stringify(task).substring(0, 500)}`);
 
-      // Don't retry on rate limits, service unavailable, or field validation errors — fail fast
-      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") || lastError.includes("Invalid Field") || task.status_code === 40000) {
-        console.warn(`[LIVE LLM/${model}] Non-retryable error — skipping retries`);
+      // Don't retry on rate limits, service unavailable, field validation, or resource-not-found errors — fail fast
+      if (lastError.includes("rate_limit") || lastError.includes("Service Unavailable") || lastError.includes("Invalid Field") || task.status_code === 40000 || task.status_code === 50401) {
+        console.warn(`[LIVE LLM/${model}] Non-retryable error (${task.status_code}) — skipping retries`);
         return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: Date.now() - startTime, error: lastError };
       }
       continue;

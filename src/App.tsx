@@ -5,6 +5,7 @@ import { Toaster } from "sonner"
 const OnboardingWizard = React.lazy(() => import('@/components/ui/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })))
 import { AuthForm } from '@/components/AuthForm'
 import { LaunchpadView } from '@/components/LaunchpadView'
+import { ProductTour } from '@/components/ProductTour'
 
 function App() {
   const [session, setSession] = useState<any>(null)
@@ -147,15 +148,28 @@ function App() {
   }
 
   const [launchpadInitialTab, setLaunchpadInitialTab] = useState<string | undefined>(undefined)
+  const [showTour, setShowTour] = useState(false)
 
   const handleLaunchpadDismiss = (tab?: string) => {
     // Mark as seen so it won't auto-show again on next login
     if (session?.user?.id) {
       localStorage.setItem(`forzeo_launchpad_seen_${session.user.id}`, 'done')
+      // Show product tour if not already seen
+      const tourKey = `forzeo_tour_seen_${session.user.id}`
+      if (!localStorage.getItem(tourKey)) {
+        setShowTour(true)
+      }
     }
     setLaunchpadInitialTab(tab)
     setShowLaunchpad(false)
     setDashboardKey(prev => prev + 1)
+  }
+
+  const handleTourDone = () => {
+    if (session?.user?.id) {
+      localStorage.setItem(`forzeo_tour_seen_${session.user.id}`, 'done')
+    }
+    setShowTour(false)
   }
 
   // Called from dashboard sidebar button — opens Launchpad for any user
@@ -250,6 +264,11 @@ function App() {
         />
       ) : (
         <ClientDashboard key={dashboardKey} autoRunClientId={autoRunClientId} onAutoRunComplete={() => setAutoRunClientId(null)} onShowLaunchpad={handleShowLaunchpad} initialTab={launchpadInitialTab} />
+      )}
+
+      {/* Product Tour */}
+      {showTour && (
+        <ProductTour onComplete={handleTourDone} onSkip={handleTourDone} />
       )}
 
       {/* Onboarding Wizard Popup */}

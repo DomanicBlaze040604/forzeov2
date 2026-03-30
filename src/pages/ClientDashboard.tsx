@@ -1547,7 +1547,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      <aside className={cn(
+      <aside data-tour="tour-sidebar" className={cn(
         "bg-white border-r border-gray-200 flex flex-col fixed h-full z-40 transition-all duration-300 shadow-sm overflow-hidden",
         // Mobile: Fixed overlay, toggled by mobileMenuOpen
         "md:translate-x-0 w-56",
@@ -1555,7 +1555,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
         // Desktop: Toggled by sidebarCollapsed
         sidebarCollapsed && "md:w-0 md:-translate-x-full"
       )}>
-        <div className="p-4 border-b border-gray-100 flex-shrink-0 flex items-center justify-between">
+        <div data-tour="tour-brand-switcher" className="p-4 border-b border-gray-100 flex-shrink-0 flex items-center justify-between">
           <DropdownMenu>
             <DropdownMenuTrigger asChild><button className="w-full flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors"><div className="h-8 w-8 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0 overflow-hidden" style={{ backgroundColor: selectedClient?.brand_domain ? 'transparent' : (selectedClient?.primary_color || "#3b82f6") }}>{selectedClient?.brand_domain ? (<img src={`https://www.google.com/s2/favicons?domain=${selectedClient.brand_domain}&sz=32`} alt="" className="h-8 w-8" onError={(e) => { const parent = (e.target as HTMLImageElement).parentElement; if (parent) { parent.style.backgroundColor = selectedClient?.primary_color || '#3b82f6'; } (e.target as HTMLImageElement).style.display = 'none'; const span = document.createElement('span'); span.className = 'text-white font-bold text-sm'; span.textContent = selectedClient?.brand_name?.charAt(0) || '?'; parent?.appendChild(span); }} />) : (<span className="text-white font-bold text-sm">{selectedClient?.brand_name?.charAt(0) || "?"}</span>)}</div><span className="font-semibold text-gray-900 flex-1 truncate">{selectedClient?.brand_name || "Select"}</span><ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" /></button></DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-52 max-h-[70vh] flex flex-col">
@@ -1601,7 +1601,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
             }
             // Normal users see limited tabs (bulk_scheduler and cost are admin-only)
             return !["schedules", "future-citations", "bulk_scheduler", "cost"].includes(item.id);
-          }).map(item => (<button key={item.id} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
+          }).map(item => (<button key={item.id} data-tour={`tour-nav-${item.id}`} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
           <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
           <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
           <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>

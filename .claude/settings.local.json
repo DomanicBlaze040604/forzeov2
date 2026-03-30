@@ -5,7 +5,8 @@
       "Bash(powershell:*)",
       "Bash(npx supabase functions deploy:*)",
       "Bash(npx tsc:*)",
-      "Bash(npx supabase projects api-keys:*)"
+      "Bash(npx supabase projects api-keys:*)",
+      "Bash(xargs grep -l \"CREATE TABLE.*clients\")"
     ]
   }
 }

@@ -557,7 +557,23 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
 
     const text = await response.text();
 
+    // Parse body regardless of HTTP status — DataForSEO sometimes returns HTTP 500
+    // with a valid JSON body (status_code: 20000) containing task-level errors.
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+
     if (!response.ok) {
+      // If the body is a valid DataForSEO response, pass it through so callers
+      // can inspect task-level status codes rather than hitting a generic error.
+      if (data && data.status_code === 20000) {
+        console.warn(`[DataForSEO] HTTP ${response.status} but body OK — passing through for task-level handling`);
+        return { data };
+      }
+
       console.error(`[DataForSEO] HTTP ${response.status}: ${text.substring(0, 300)}`);
 
       // Handle specific error codes
@@ -573,8 +589,6 @@ async function callDataForSEO(endpoint: string, body: unknown): Promise<{
         status_code: response.status
       };
     }
-
-    const data = JSON.parse(text);
 
     if (data.status_code !== 20000) {
       console.error(`[DataForSEO] API Error: ${data.status_message}`);
@@ -1020,7 +1034,13 @@ Important: Please provide specific recommendations with actual business names, w
     // Check task status
     if (task?.status_code && task.status_code !== 20000) {
       lastError = task.status_message || `Task failed with code ${task.status_code}`;
-      console.error(`[LIVE LLM/${model}] Task error: ${lastError}`);
+      console.error(`[LIVE LLM/${model}] Task error (${task.status_code}): ${lastError}`);
+
+      // 50401 = Resource/Model Not Found — retrying won't help, fail fast
+      if (task.status_code === 50401) {
+        console.warn(`[LIVE LLM/${model}] Non-retryable error (50401) — skipping retries`);
+        return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: latency, error: lastError };
+      }
       continue;
     }
 
