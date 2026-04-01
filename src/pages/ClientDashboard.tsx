@@ -426,6 +426,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
   const [editLocationOpen, setEditLocationOpen] = useState(false);
   const [editingLocationPromptId, setEditingLocationPromptId] = useState<string | null>(null);
   const [editingLocationValue, setEditingLocationValue] = useState<string>("");
+  const [locationSearchQuery, setLocationSearchQuery] = useState("");
   const [sourcesView, setSourcesView] = useState<"domains" | "urls">("domains");
   // categorizationProgress is now provided by the hook (shared between auto-categorize and manual button)
   const [verificationProgress, setVerificationProgress] = useState<{ completed: number; total: number; currentBatch: number; totalBatches: number; running: boolean } | null>(null);
@@ -1241,6 +1242,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
       setEditLocationOpen(false);
       setEditingLocationPromptId(null);
       setEditingLocationValue("");
+      setLocationSearchQuery("");
     } catch (err: any) {
       toast.error(err.message || "Failed to update location.");
     }
@@ -4053,56 +4055,82 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
 
   function EditLocationDialog() {
     const editingPrompt = prompts.find(p => p.id === editingLocationPromptId);
+
+    // Group LOCATION_CODES into sections by prefix
+    const grouped: Record<string, string[]> = {};
+    Object.keys(locations).forEach(key => {
+      const colon = key.indexOf(": ");
+      const section = colon === -1 ? "Countries" : key.slice(0, colon) + " Cities";
+      if (!grouped[section]) grouped[section] = [];
+      grouped[section].push(key);
+    });
+
+    const q = locationSearchQuery.toLowerCase().trim();
+    const filteredGrouped: Record<string, string[]> = {};
+    Object.entries(grouped).forEach(([section, keys]) => {
+      const matched = keys.filter(k => !q || k.toLowerCase().includes(q) || section.toLowerCase().includes(q));
+      if (matched.length > 0) filteredGrouped[section] = matched;
+    });
+
+    // Display name: strip the "XX: " prefix for city entries
+    const displayName = (key: string) => key.includes(": ") ? key.split(": ")[1] : key;
+
     return (
-      <Dialog open={editLocationOpen} onOpenChange={setEditLocationOpen}>
+      <Dialog open={editLocationOpen} onOpenChange={(open) => { setEditLocationOpen(open); if (!open) setLocationSearchQuery(""); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Globe className="h-5 w-5 text-blue-500" /> Edit Prompt Location</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             {editingPrompt && (
-              <div className="p-3 bg-gray-50 rounded-lg border text-sm text-gray-700">
+              <div className="p-3 bg-gray-50 rounded-lg border text-sm text-gray-700 truncate">
                 "{editingPrompt.prompt_text}"
               </div>
             )}
             <div>
               <Label className="text-xs text-gray-500 uppercase tracking-wider">Select Location</Label>
-              <Select value={editingLocationValue || "__default__"} onValueChange={setEditingLocationValue}>
-                <SelectTrigger className="mt-1.5"><SelectValue placeholder="Choose location" /></SelectTrigger>
-                <SelectContent className="max-h-80">
-                  <SelectItem value="__default__">📍 Use brand's default location</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50">Countries</div>
-                  <SelectItem value="United States">🇺🇸 United States</SelectItem>
-                  <SelectItem value="United Kingdom">🇬🇧 United Kingdom</SelectItem>
-                  <SelectItem value="India">🇮🇳 India</SelectItem>
-                  <SelectItem value="Thailand">🇹🇭 Thailand</SelectItem>
-                  <SelectItem value="Australia">🇦🇺 Australia</SelectItem>
-                  <SelectItem value="Germany">🇩🇪 Germany</SelectItem>
-                  <SelectItem value="UAE">🇦🇪 UAE</SelectItem>
-                  <SelectItem value="Canada">🇨🇦 Canada</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇺🇸 US Cities</div>
-                  <SelectItem value="US: New York">New York, NY</SelectItem>
-                  <SelectItem value="US: Los Angeles">Los Angeles, CA</SelectItem>
-                  <SelectItem value="US: Chicago">Chicago, IL</SelectItem>
-                  <SelectItem value="US: San Francisco">San Francisco, CA</SelectItem>
-                  <SelectItem value="US: Miami">Miami, FL</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇬🇧 UK Cities</div>
-                  <SelectItem value="UK: London">London</SelectItem>
-                  <SelectItem value="UK: Manchester">Manchester</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇮🇳 India Cities</div>
-                  <SelectItem value="India: Mumbai">Mumbai</SelectItem>
-                  <SelectItem value="India: Delhi">Delhi</SelectItem>
-                  <SelectItem value="India: Bangalore">Bangalore</SelectItem>
-                  <div className="px-2 py-1 text-xs font-semibold text-gray-400 bg-gray-50 mt-1">🇹🇭 Thailand Cities</div>
-                  <SelectItem value="Thailand: Bangkok">Bangkok</SelectItem>
-                  <SelectItem value="Thailand: Phuket">Phuket</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* Search */}
+              <input
+                type="text"
+                value={locationSearchQuery}
+                onChange={e => setLocationSearchQuery(e.target.value)}
+                placeholder="Search country or city..."
+                className="mt-1.5 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              />
+              {/* Scrollable location list */}
+              <div className="mt-2 max-h-64 overflow-y-auto border border-gray-200 rounded-lg bg-white text-sm">
+                {/* Default option */}
+                {(!q || "default brand location".includes(q)) && (
+                  <button
+                    onClick={() => setEditingLocationValue("__default__")}
+                    className={`w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors ${editingLocationValue === "__default__" || !editingLocationValue ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700"}`}
+                  >
+                    📍 Use brand&apos;s default location
+                  </button>
+                )}
+                {Object.entries(filteredGrouped).map(([section, keys]) => (
+                  <div key={section}>
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-50 sticky top-0 border-b border-gray-100">{section}</div>
+                    {keys.map(key => (
+                      <button
+                        key={key}
+                        onClick={() => setEditingLocationValue(key)}
+                        className={`w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors ${editingLocationValue === key ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700"}`}
+                      >
+                        {displayName(key)}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+                {Object.keys(filteredGrouped).length === 0 && (
+                  <div className="px-3 py-4 text-center text-gray-400 text-xs">No locations found</div>
+                )}
+              </div>
               <p className="text-xs text-gray-500 mt-2">AI responses will be personalized for this location when you run the audit.</p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditLocationOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setEditLocationOpen(false); setLocationSearchQuery(""); }}>Cancel</Button>
             <Button onClick={handleSaveLocation} className="bg-blue-600 hover:bg-blue-700"><Globe className="h-4 w-4 mr-1" /> Save Location</Button>
           </DialogFooter>
         </DialogContent>
