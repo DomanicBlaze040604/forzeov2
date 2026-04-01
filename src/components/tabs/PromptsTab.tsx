@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
 import {
@@ -20,6 +20,9 @@ import {
   RefreshCw,
   Tag,
   MessageSquare,
+  Layers,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -238,6 +241,34 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
   const [bulkTopicMode, setBulkTopicMode] = useState(false);
   const [bulkTopicValue, setBulkTopicValue] = useState("");
 
+  // Group by topic view
+  const [groupByTopic, setGroupByTopic] = useState(false);
+  const [collapsedTopics, setCollapsedTopics] = useState<Set<string>>(new Set());
+
+  const toggleTopicCollapse = (topic: string) => {
+    setCollapsedTopics(prev => {
+      const next = new Set(prev);
+      if (next.has(topic)) next.delete(topic); else next.add(topic);
+      return next;
+    });
+  };
+
+  // Build topic groups for group-by-topic view
+  const topicGroups = useMemo(() => {
+    if (!groupByTopic) return null;
+    const groups: Record<string, typeof filteredPrompts> = {};
+    for (const p of filteredPrompts) {
+      const key = p.topic || "Uncategorized";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(p);
+    }
+    return Object.entries(groups).sort(([a], [b]) => {
+      if (a === "Uncategorized") return 1;
+      if (b === "Uncategorized") return -1;
+      return a.localeCompare(b);
+    });
+  }, [groupByTopic, filteredPrompts]);
+
   return (
     <div className="space-y-4">
 
@@ -378,6 +409,19 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
             className="pl-9 bg-gray-50 border-transparent hover:bg-gray-100 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-colors"
           />
         </div>
+        <button
+          onClick={() => setGroupByTopic(v => !v)}
+          className={cn(
+            "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-all",
+            groupByTopic
+              ? "bg-blue-50 border-blue-200 text-blue-700"
+              : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+          )}
+          title="Group prompts by topic"
+        >
+          <Layers className="h-4 w-4" />
+          <span className="hidden sm:inline">By Topic</span>
+        </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -403,8 +447,79 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
         </DropdownMenu>
       </div>
 
-      {/* Table */}
-      <div ref={scrollContainerRef} className={cn("bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm overflow-x-auto max-h-[600px] overflow-y-auto", selectedPromptIds.size > 0 && "pb-16")}>
+      {/* Grouped by Topic View */}
+      {groupByTopic && topicGroups && (
+        <div className="space-y-3">
+          {topicGroups.map(([topic, topicPrompts]) => {
+            const isCollapsed = collapsedTopics.has(topic);
+            return (
+              <div key={topic} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <button
+                  onClick={() => toggleTopicCollapse(topic)}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    {isCollapsed ? <ChevronRight className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+                    <span className="font-semibold text-gray-900 text-sm">{topic}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 font-medium">{topicPrompts.length} prompts</span>
+                  </div>
+                </button>
+                {!isCollapsed && (
+                  <div className="divide-y divide-gray-50 border-t border-gray-100">
+                    {topicPrompts.map((prompt) => {
+                      const result = getPromptResult(prompt.id);
+                      return (
+                        <div
+                          key={prompt.id}
+                          className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer"
+                          onClick={() => setSelectedPromptDetail(prompt.id)}
+                        >
+                          <Checkbox
+                            checked={selectedPromptIds.has(prompt.id)}
+                            onCheckedChange={(checked) => {
+                              setSelectedPromptIds(prev => {
+                                const next = new Set(prev);
+                                if (checked) next.add(prompt.id); else next.delete(prompt.id);
+                                return next;
+                              });
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-800 truncate">{prompt.prompt_text}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {result ? (
+                              <span className={cn(
+                                "text-xs px-2 py-0.5 rounded-full font-medium",
+                                (result.summary?.share_of_voice ?? 0) > 0 ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"
+                              )}>
+                                {(result.summary?.share_of_voice ?? 0) > 0 ? "Visible" : "Not found"}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-400">No data</span>
+                            )}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); runSinglePrompt(prompt.id); }}
+                              className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
+                              title="Run this prompt"
+                            >
+                              <Play className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Table (flat view) */}
+      {!groupByTopic && <div ref={scrollContainerRef} className={cn("bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm overflow-x-auto max-h-[600px] overflow-y-auto", selectedPromptIds.size > 0 && "pb-16")}>
         <table className="w-full">
           <thead className="bg-gray-50/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
             <tr className="flex w-full">
@@ -859,7 +974,7 @@ export const PromptsTab: React.FC<PromptsTabProps> = ({
             )}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Floating Action Bar for Bulk Operations */}
       {

@@ -572,14 +572,14 @@ Identify 5 NEW direct competitors for this brand that are not in the already-add
 
             const { data, error } = await supabase.functions.invoke("groq-proxy", {
                 body: {
-                    model: "llama-3.1-8b-instant",
+                    model: "llama-3.3-70b-versatile",
                     messages: [
                         {
                             role: "system",
-                            content: `You are a GEO (Generative Engine Optimization) strategist. Generate keyword topic suggestions that a brand should track in AI search responses.
+                            content: `You are an expert GEO (Generative Engine Optimization) strategist. Generate high-value seed keyword topics a brand should track in AI search engines (ChatGPT, Perplexity, Google AI Overview).
 Return ONLY a JSON array of 8-10 short keyword phrases (2-5 words each).
-Focus on topics buyers use when searching for solutions in this category.
-No explanations, no markdown — just the JSON array.`
+Choose topics that buyers actually search — category terms, problem-first queries, and comparison terms that trigger AI responses where brands get mentioned organically.
+No explanations, no markdown — just the raw JSON array.`
                         },
                         {
                             role: "user",
@@ -631,16 +631,19 @@ Generate 8-10 keyword topics this brand should track in AI search responses. Foc
         const competitorList = formData.competitors.slice(0, 4);
         const hasCompetitors = competitorList.length > 0;
 
-        // GEO Strategist system prompt — neutral, buyer-realistic, audit-grade
-        const systemInstruction = `You are a Generative Engine Optimization (GEO) Strategist. Your job is to generate realistic search queries that real buyers type into AI assistants like ChatGPT, Perplexity, or Google AI Overview when researching a purchase or solution.
+        // GEO Strategist system prompt — upgraded for llama-3.3-70b-versatile
+        const systemInstruction = `You are an expert Generative Engine Optimization (GEO) and Answer Engine Optimization (AEO) strategist. Your speciality is crafting high-signal search queries that reveal how a brand appears — or fails to appear — in AI-generated answers from ChatGPT, Perplexity, Google AI Overview, Claude, and Gemini.
 
-RULES:
-- Output ONLY the prompts, one per line. No numbers, no bullets, no intro text.
-- NO LOCATION NAMES: Never include city, country, or region names (e.g. "in Mumbai", "for the US"). Location targeting is handled separately.
-- Prompts must sound like something a real buyer would naturally type — not a marketing slogan or a leading question.
-- Avoid biased phrasing like "Is [Brand] the best..." — frame queries how a neutral buyer would ask, not how a brand would want to be asked about.
-- Keep prompts between 5-15 words. Natural, conversational phrasing.
-- Prioritise unbranded and category queries — these are the highest-value signals in a GEO audit because they reveal organic brand mentions.`;
+Your prompts must:
+- Sound exactly like something a real buyer would type into an AI assistant — natural, conversational, intent-driven
+- Cover the full buyer journey: awareness → consideration → comparison → decision
+- Be rich enough to trigger a detailed AI response (not too vague, not too narrow)
+- Be 6–15 words. Never shorter than 5 words or longer than 18 words.
+- Never include location names, city names, country names, or regional identifiers — location targeting is separate
+- Avoid leading questions ("Is X the best..."), marketing slogans, or biased framing
+- Avoid starting every prompt with "What" — vary your question openers (How, Which, Why, Should I, Where can I, What's the difference between...)
+
+CRITICAL OUTPUT FORMAT: Output ONLY the prompts, one per line. Zero numbering, zero bullets, zero commentary, zero intro text. Just the prompts.`;
 
         for (const keyword of formData.seedKeywords) {
             if (allPrompts.length >= maxPromptsAllowed) break;
@@ -693,12 +696,12 @@ Output one prompt per line. No numbering, no bullets, no location names.`;
                 console.log(`[GEO Onboarding] Generating prompts for keyword: "${keyword}"`);
                 const { data: proxyData, error: proxyError } = await supabase.functions.invoke("groq-proxy", {
                     body: {
-                        model: "llama-3.1-8b-instant",
+                        model: "llama-3.3-70b-versatile",
                         messages: [
                             { role: "system", content: systemInstruction },
                             { role: "user", content: userPrompt }
                         ],
-                        temperature: 0.7,
+                        temperature: 0.65,
                         max_tokens: 2048,
                     },
                 });
@@ -1051,6 +1054,14 @@ Output one prompt per line. No numbering, no bullets, no location names.`;
             case 'brand_details':
                 return (
                     <div className="space-y-6 py-4">
+                        {/* Hero welcome */}
+                        <div className="text-center pb-2">
+                            <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-600 rounded-2xl mb-3 shadow-lg shadow-blue-200">
+                                <Zap className="h-6 w-6 text-white" />
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-900">Let's set up your brand</h3>
+                            <p className="text-sm text-gray-500 mt-1">We'll generate AI-optimised prompts tailored to your brand in under 60 seconds.</p>
+                        </div>
                         <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700">
                             <Info className="h-3.5 w-3.5 flex-shrink-0" />
                             <span>Your plan: up to <strong>{userLimits.maxKeywords}</strong> keywords, <strong>{userLimits.maxPrompts}</strong> prompts, <strong>{userLimits.promptsPerKeyword}</strong> prompts per keyword</span>
@@ -1354,42 +1365,72 @@ Output one prompt per line. No numbering, no bullets, no location names.`;
 
             case 'review_prompts':
                 return (
-                    <div className="space-y-4 py-4 h-[400px] flex flex-col">
-                        <div className="flex items-center justify-between">
-                            <Label className="text-sm font-semibold text-gray-700">
-                                Review Prompts <span className={cn(generatedPrompts.length > userLimits.maxPrompts ? "text-red-600" : "text-gray-500")}>({generatedPrompts.length} / {userLimits.maxPrompts})</span>
-                            </Label>
-                            <span className="text-xs text-gray-500">Edit or delete prompts before continuing</span>
+                    <div className="space-y-4 py-4 h-[420px] flex flex-col">
+                        {/* Header row */}
+                        <div className="flex items-center justify-between flex-shrink-0">
+                            <div className="flex items-center gap-2">
+                                <span className={cn(
+                                    "inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-bold",
+                                    generatedPrompts.length > userLimits.maxPrompts ? "bg-red-100 text-red-600" : "bg-blue-100 text-blue-700"
+                                )}>{generatedPrompts.length}</span>
+                                <Label className="text-sm font-semibold text-gray-700">prompts ready to track</Label>
+                                <span className="text-xs text-gray-400">/ {userLimits.maxPrompts} max</span>
+                            </div>
+                            <span className="text-xs text-gray-400">Click to edit · X to remove</span>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-2 bg-gray-50">
+                        {/* Prompt cards */}
+                        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                             {generatedPrompts.map((prompt, idx) => (
-                                <div key={idx} className="flex gap-2 items-start group">
-                                    <Input
+                                <div key={idx} className="flex gap-2 items-center group bg-white border border-gray-200 rounded-xl px-3 py-2.5 hover:border-blue-300 hover:shadow-sm transition-all">
+                                    {/* Number badge */}
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-50 text-blue-600 text-xs font-bold flex items-center justify-center border border-blue-100">
+                                        {idx + 1}
+                                    </span>
+                                    {/* Topic tag */}
+                                    {prompt.topic && (
+                                        <span className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 bg-sky-50 text-sky-600 border border-sky-100 rounded-full hidden sm:inline-flex">
+                                            {prompt.topic}
+                                        </span>
+                                    )}
+                                    {/* Editable text */}
+                                    <input
                                         value={prompt.text}
                                         onChange={(e) => handlePromptEdit(idx, e.target.value)}
-                                        className="bg-white border-gray-200 text-sm h-9"
+                                        className="flex-1 min-w-0 bg-transparent text-sm text-gray-700 outline-none focus:text-gray-900 placeholder:text-gray-300"
                                     />
+                                    {/* Delete */}
                                     <button
                                         onClick={() => handlePromptDelete(idx)}
-                                        className="text-gray-400 hover:text-red-500 p-2 transition-colors"
+                                        className="flex-shrink-0 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all p-1"
                                         title="Remove prompt"
                                     >
-                                        <X className="h-4 w-4" />
+                                        <X className="h-3.5 w-3.5" />
                                     </button>
                                 </div>
                             ))}
+                            {generatedPrompts.length === 0 && (
+                                <div className="flex flex-col items-center justify-center h-32 text-center">
+                                    <p className="text-sm text-gray-400">No prompts yet. Add one below.</p>
+                                </div>
+                            )}
                         </div>
 
-                        <div className="flex gap-2 pt-2">
-                            <Input
+                        {/* Add custom prompt */}
+                        <div className="flex gap-2 pt-1 flex-shrink-0">
+                            <input
                                 placeholder="Add a custom prompt..."
                                 value={newManualPrompt}
                                 onChange={(e) => setNewManualPrompt(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddManualPrompt()}
-                                className="flex-1 bg-white"
+                                className="flex-1 h-9 px-3 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/20 placeholder:text-gray-400"
                             />
-                            <Button onClick={handleAddManualPrompt} variant="outline" disabled={generatedPrompts.length >= userLimits.maxPrompts}>Add</Button>
+                            <Button
+                                onClick={handleAddManualPrompt}
+                                variant="outline"
+                                disabled={generatedPrompts.length >= userLimits.maxPrompts}
+                                className="h-9 text-xs border-blue-200 text-blue-600 hover:bg-blue-50"
+                            >Add</Button>
                         </div>
                     </div>
                 );

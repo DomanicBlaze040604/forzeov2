@@ -394,6 +394,28 @@ export interface CompetitorGapItem { name: string; mentions: number; percentage:
 export interface SourceItem { domain: string; count: number; prompts: string[]; type: string; promptCount: number; avg: number; }
 export interface Insights { status: "high" | "medium" | "low"; statusText: string; recommendations: string[]; }
 
+export interface AuditSnapshot {
+  id: string;
+  client_id: string;
+  created_at: string;
+  overall_sov: number;
+  avg_rank: number | null;
+  total_citations: number;
+  citation_rate: number;
+  competitor_sov: { name: string; percentage: number; mentions: number }[];
+  model_visibility: { model_id: string; name: string; visible: number; total: number; pct: number }[];
+  prompt_scores: { prompt_id: string; prompt_text: string; sov: number }[];
+}
+
+export interface AuditDeltas {
+  sovDelta: number;
+  rankDelta: number | null;
+  citationsDelta: number;
+  citationRateDelta: number;
+  prevSnapshot: AuditSnapshot | null;
+  hasDelta: boolean;
+}
+
 // Prompt-level AI Visibility Strategist types
 export interface PromptInsightRecommendation {
   title: string;
@@ -672,6 +694,7 @@ export function useClientDashboard() {
   const [auditResults, setAuditResults] = useState<AuditResult[]>([]);
   const auditResultsRef = useRef<AuditResult[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [auditSnapshots, setAuditSnapshots] = useState<AuditSnapshot[]>([]);
   const [selectedModels, setSelectedModelsState] = useState<string[]>(
     loadFromStorage(STORAGE_KEYS.SELECTED_MODELS, ["chatgpt", "google_ai_overview", "google_serp"])
   );
@@ -823,6 +846,118 @@ export function useClientDashboard() {
         `Monitor ${selectedClient?.competitors[0] || "competitor"}'s presence`, "Focus on niche and super-niche keywords"]
     };
   }, [summary, selectedClient]);
+
+  // ── Audit Snapshots ────────────────────────────────────────────────────────
+
+  // Load last 2 snapshots when client changes
+  useEffect(() => {
+    if (!selectedClient) { setAuditSnapshots([]); return; }
+    supabase
+      .from("audit_snapshots" as any)
+      .select("*")
+      .eq("client_id", selectedClient.id)
+      .order("created_at", { ascending: false })
+      .limit(2)
+      .then(({ data }) => setAuditSnapshots((data as AuditSnapshot[]) || []));
+  }, [selectedClient?.id]);
+
+  // Save a baseline snapshot from existing audit data if none exists yet
+  useEffect(() => {
+    if (!selectedClient || auditSnapshots.length > 0 || auditResults.length === 0) return;
+    saveAuditSnapshot(auditResults).catch(() => {});
+  }, [selectedClient?.id, auditSnapshots.length, auditResults.length]);
+
+  const saveAuditSnapshot = useCallback(async (resultsOverride?: AuditResult[]) => {
+    if (!selectedClient) return;
+    let results = resultsOverride ?? auditResultsRef.current;
+
+    // If no override provided, fetch fresh from DB to avoid stale React state
+    if (!resultsOverride) {
+      const { data } = await supabase
+        .from("audit_results")
+        .select("*")
+        .eq("client_id", selectedClient.id)
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (data && data.length > 0) results = data as AuditResult[];
+    }
+
+    if (results.length === 0) return;
+
+    // SOV
+    const overallSov = Math.round(results.reduce((s, r) => s + r.summary.share_of_voice, 0) / results.length);
+
+    // Avg rank
+    const ranks = results.map(r => r.summary.average_rank).filter((r): r is number => r !== null);
+    const avgRank = ranks.length > 0 ? Math.round((ranks.reduce((a, b) => a + b, 0) / ranks.length) * 10) / 10 : null;
+
+    // Total citations
+    const totalCitations = results.reduce((s, r) => s + r.summary.total_citations, 0);
+
+    // Citation rate
+    const allMR = results.flatMap(r => r.model_results || []);
+    const brandDomain = selectedClient.brand_domain?.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").replace(/\/.*$/, "") || "";
+    const cited = allMR.filter(mr => (mr as any).is_cited || (brandDomain && mr.citations?.some(c => c.domain?.toLowerCase().includes(brandDomain))));
+    const citationRate = allMR.length > 0 ? Math.round((cited.length / allMR.length) * 100) : 0;
+
+    // Competitor SOV
+    const mentions: Record<string, number> = { [selectedClient.brand_name]: 0 };
+    selectedClient.competitors.forEach(c => { mentions[c] = 0; });
+    results.forEach(r => r.model_results.forEach(mr => {
+      const resp = mr.raw_response?.toLowerCase() || "";
+      if (mr.brand_mentioned) mentions[selectedClient.brand_name] += mr.brand_mention_count;
+      selectedClient.competitors.forEach(comp => {
+        const m = resp.match(new RegExp(comp.toLowerCase(), "gi"));
+        if (m) mentions[comp] += m.length;
+      });
+    }));
+    const mentionTotal = Object.values(mentions).reduce((a, b) => a + b, 0) || 1;
+    const competitorSov = Object.entries(mentions)
+      .map(([name, count]) => ({ name, mentions: count, percentage: Math.round((count / mentionTotal) * 100) }))
+      .sort((a, b) => b.mentions - a.mentions);
+
+    // Model visibility
+    const mStats: Record<string, { visible: number; total: number }> = {};
+    AI_MODELS.forEach(m => { mStats[m.id] = { visible: 0, total: 0 }; });
+    results.forEach(r => r.model_results.forEach(mr => {
+      if (mStats[mr.model]) { mStats[mr.model].total++; if (mr.brand_mentioned) mStats[mr.model].visible++; }
+    }));
+    const modelVisibility = AI_MODELS
+      .filter(m => mStats[m.id]?.total > 0)
+      .map(m => ({ model_id: m.id, name: m.name, ...mStats[m.id], pct: Math.round((mStats[m.id].visible / mStats[m.id].total) * 100) }));
+
+    // Prompt scores
+    const promptScores = results.map(r => ({ prompt_id: r.prompt_id, prompt_text: r.prompt_text, sov: Math.round(r.summary.share_of_voice) }));
+
+    const { data } = await supabase.from("audit_snapshots" as any).insert({
+      client_id: selectedClient.id,
+      overall_sov: overallSov,
+      avg_rank: avgRank,
+      total_citations: totalCitations,
+      citation_rate: citationRate,
+      competitor_sov: competitorSov,
+      model_visibility: modelVisibility,
+      prompt_scores: promptScores,
+    }).select().single();
+
+    if (data) {
+      setAuditSnapshots(prev => [data as AuditSnapshot, ...prev].slice(0, 2));
+    }
+  }, [selectedClient]);
+
+  const auditDeltas = useMemo((): AuditDeltas => {
+    const empty: AuditDeltas = { sovDelta: 0, rankDelta: null, citationsDelta: 0, citationRateDelta: 0, prevSnapshot: null, hasDelta: false };
+    if (auditSnapshots.length < 2) return empty;
+    const [latest, prev] = auditSnapshots;
+    return {
+      sovDelta: latest.overall_sov - prev.overall_sov,
+      rankDelta: (prev.avg_rank != null && latest.avg_rank != null) ? Math.round((prev.avg_rank - latest.avg_rank) * 10) / 10 : null,
+      citationsDelta: latest.total_citations - prev.total_citations,
+      citationRateDelta: latest.citation_rate - prev.citation_rate,
+      prevSnapshot: prev,
+      hasDelta: true,
+    };
+  }, [auditSnapshots]);
 
   const costBreakdown = useCallback(() => {
     let total = 0;
@@ -1937,7 +2072,10 @@ export function useClientDashboard() {
 
     // Auto-categorize any new citation domains (fire-and-forget)
     autoCategorizeRef.current?.().catch(err => console.warn("[AutoCategorize] Post-audit failed:", err));
-  }, [selectedClient, prompts, selectedModels, updateSummary, includeTavily]);
+
+    // Save run-over-run snapshot (fire-and-forget)
+    saveAuditSnapshot().catch(err => console.warn("[Snapshot] Save failed:", err));
+  }, [selectedClient, prompts, selectedModels, updateSummary, includeTavily, saveAuditSnapshot]);
 
   const runSinglePrompt = useCallback(async (promptOrId: string | Prompt) => {
     if (!selectedClient) return;
@@ -4274,6 +4412,7 @@ Provide strategic, pinpoint recommendations to improve overall AI visibility for
 
     // Analytics
     getAllCitations, getModelStats, getCompetitorGap, getTopSources, getInsights,
+    auditSnapshots, auditDeltas, saveAuditSnapshot,
     citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress,
     getAIOpportunity,
 

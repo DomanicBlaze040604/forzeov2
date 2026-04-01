@@ -5,7 +5,7 @@ import React, { useState, useRef, useMemo, useEffect, useCallback } from "react"
 import { cn } from "@/lib/utils";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles, Tag, Info, Bell, DollarSign } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Search, Plus, Trash2, Play, AlertTriangle, Archive, RotateCcw, Copy, ExternalLink, Link2, Download, Filter, Eye, Settings, Clock, CheckCircle, X, ChevronRight, TrendingUp, TrendingDown, Minus, ArrowUpDown, Loader2, FileText, Globe, Zap, Lightbulb, Target, Layers, Wand2, Briefcase, LogOut, Home, MessageSquare, Building2, Users, HelpCircle, PanelLeft, PanelLeftClose, Calendar, Upload, BarChart3, RefreshCw, Circle, Shield, History, Sparkles, Tag, Info, Bell, DollarSign, BookOpen } from 'lucide-react';
 import { SOVLineChart, CLIENT_COLOR, COMPETITOR_COLORS } from "@/components/SOVLineChart";
 import { AgencyOverview } from "@/components/AgencyOverview";
 import { AgencyBrandsManager } from "@/components/AgencyBrandsManager";
@@ -40,6 +40,9 @@ import { CitationPreview } from "@/components/CitationPreview";
 import { InsightsTab, type AiInsights } from "@/components/tabs/InsightsTab";
 import { GA4ConnectorPanel } from "@/components/GA4ConnectorPanel";
 import { useGA4Connector } from "@/hooks/useGA4Connector";
+import { AgentChat } from "@/components/AgentChat";
+import { IssuesTab } from "@/components/tabs/IssuesTab";
+import { KnowledgeBase } from "@/components/KnowledgeBase";
 
 import { toast } from "sonner";
 
@@ -391,12 +394,12 @@ interface ClientDashboardProps {
 }
 
 export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, onShowLaunchpad, initialTab }: ClientDashboardProps = {}) {
-  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress, getAIOpportunity } = useClientDashboard();
+  const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress, getAIOpportunity, auditDeltas } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler" | "traffic" | "cost">(() => {
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler" | "traffic" | "cost" | "agent" | "issues" | "knowledge-base">(() => {
     // initialTab prop takes priority (e.g. deep-link from Launchpad GA4 button)
-    const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler", "traffic"];
+    const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler", "traffic", "agent", "issues", "knowledge-base"];
     if (initialTab && validTabs.includes(initialTab)) return initialTab as any;
     // Restore from localStorage on mount
     try {
@@ -1578,35 +1581,103 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
           </DropdownMenu>
         </div>
         <nav className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-h-0">
-          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">General</div>
+          {/* Ask Agent CTA */}
+          <button
+            onClick={() => setActiveTab("agent")}
+            className={cn(
+              "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-semibold mb-4 transition-all text-left shadow-sm",
+              activeTab === "agent"
+                ? "bg-blue-600 text-white shadow-blue-200"
+                : "bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200"
+            )}
+          >
+            <Sparkles className="h-4 w-4 flex-shrink-0" />
+            <span className="flex-1 truncate">Ask AI Agent</span>
+          </button>
+
+          {/* Analytics */}
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-1.5">Analytics</div>
           {[
             { id: "overview", label: "Overview", icon: Home },
-            { id: "prompts", label: "Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null },
-            { id: "topics", label: "Topics", icon: Layers },
-            { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true },
-
-            { id: "schedules", label: "Schedules", icon: Clock },
-            { id: "bulk_scheduler", label: "Bulk Scheduler", icon: Calendar },
-            { id: "future-citations", label: "Future Citations", icon: Zap, betaBadge: true },
-            { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null },
             { id: "traffic", label: "Traffic", icon: BarChart3 },
-            { id: "cost", label: "Cost Analysis", icon: DollarSign },
-            { id: "content", label: "Content", icon: FileText }
+          ].map(item => (
+            <button key={item.id} data-tour={`tour-nav-${item.id}`} onClick={() => setActiveTab(item.id as typeof activeTab)}
+              className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-0.5 transition-all text-left",
+                activeTab === item.id ? "bg-blue-600 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}>
+              <item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} />
+              <span className="flex-1 truncate">{item.label}</span>
+            </button>
+          ))}
+
+          {/* Prompts */}
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-1.5 mt-4">Prompts</div>
+          {[
+            { id: "prompts", label: "Your Prompts", icon: MessageSquare, badge: pendingPrompts > 0 ? pendingPrompts : null },
+            { id: "topics", label: "Prompt Research", icon: Layers },
+            { id: "insights", label: "Insights", icon: Lightbulb, betaBadge: true },
           ].filter(item => {
-            // Admin sees all tabs
             if (isAdmin) return true;
-            // Agency sees specific tabs
-            if (isAgency) {
-              return ["overview", "prompts", "topics", "insights", "future-citations", "sources", "content", "brands"].includes(item.id);
-            }
-            // Normal users see limited tabs (bulk_scheduler and cost are admin-only)
-            return !["schedules", "future-citations", "bulk_scheduler", "cost"].includes(item.id);
-          }).map(item => (<button key={item.id} data-tour={`tour-nav-${item.id}`} onClick={() => setActiveTab(item.id as typeof activeTab)} className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-all text-left", activeTab === item.id ? "bg-gray-900 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}><item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} /><span className="flex-1 truncate">{item.label}</span>{item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}{item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-blue-500 text-white font-semibold">BETA</span>}</button>))}
-          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Project</div>
-          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
-          <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
+            if (isAgency) return ["prompts", "topics", "insights"].includes(item.id);
+            return ["prompts", "topics"].includes(item.id);
+          }).map(item => (
+            <button key={item.id} data-tour={`tour-nav-${item.id}`} onClick={() => setActiveTab(item.id as typeof activeTab)}
+              className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-0.5 transition-all text-left",
+                activeTab === item.id ? "bg-blue-600 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}>
+              <item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} />
+              <span className="flex-1 truncate">{item.label}</span>
+              {item.badge && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{item.badge > 99 ? "99+" : item.badge}</span>}
+              {item.betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-sky-100 text-sky-600 font-semibold">BETA</span>}
+            </button>
+          ))}
+
+          {/* Actions */}
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-1.5 mt-4">Actions</div>
+          {[
+            { id: "content", label: "Content", icon: FileText },
+            { id: "schedules", label: "Schedules", icon: Clock, adminOnly: true },
+            { id: "bulk_scheduler", label: "Bulk Scheduler", icon: Calendar, adminOnly: true },
+          ].filter(item => {
+            if ((item as any).adminOnly) return isAdmin;
+            if (isAgency) return ["content"].includes(item.id);
+            return ["content"].includes(item.id);
+          }).map(item => (
+            <button key={item.id} data-tour={`tour-nav-${item.id}`} onClick={() => setActiveTab(item.id as typeof activeTab)}
+              className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-0.5 transition-all text-left",
+                activeTab === item.id ? "bg-blue-600 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}>
+              <item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} />
+              <span className="flex-1 truncate">{item.label}</span>
+            </button>
+          ))}
+
+          {/* On Page */}
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-1.5 mt-4">On Page</div>
+          {[
+            { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null },
+            { id: "issues", label: "Issues", icon: AlertTriangle },
+            { id: "knowledge-base", label: "Knowledge Base", icon: BookOpen },
+            { id: "future-citations", label: "Future Citations", icon: Zap, betaBadge: true, adminAgency: true },
+            { id: "cost", label: "Cost Analysis", icon: DollarSign, adminOnly: true },
+          ].filter(item => {
+            if ((item as any).adminOnly) return isAdmin;
+            if ((item as any).adminAgency) return isAdmin || isAgency;
+            return true;
+          }).map(item => (
+            <button key={item.id} data-tour={`tour-nav-${item.id}`} onClick={() => setActiveTab(item.id as typeof activeTab)}
+              className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-0.5 transition-all text-left",
+                activeTab === item.id ? "bg-blue-600 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100")}>
+              <item.icon className={cn("h-4 w-4 flex-shrink-0", activeTab === item.id ? "text-white" : "text-gray-400")} />
+              <span className="flex-1 truncate">{item.label}</span>
+              {(item as any).badge != null && <span className={cn("text-xs px-1.5 py-0.5 rounded flex-shrink-0 min-w-[20px] text-center", activeTab === item.id ? "bg-white/20 text-white" : "bg-blue-100 text-blue-600")}>{(item as any).badge > 99 ? "99+" : (item as any).badge}</span>}
+              {(item as any).betaBadge && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-sky-100 text-sky-600 font-semibold">BETA</span>}
+            </button>
+          ))}
+
+          {/* Project */}
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-1.5 mt-4">Project</div>
+          <button onClick={() => setSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Settings className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Settings</span></button>
+          <button onClick={() => setManageBrandsOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all"><Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" /><span className="flex-1 truncate">Brands</span></button>
           {onShowLaunchpad && (
-            <button onClick={onShowLaunchpad} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 text-left transition-all text-blue-600 hover:bg-blue-50">
+            <button onClick={onShowLaunchpad} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-0.5 text-left transition-all text-blue-600 hover:bg-blue-50">
               <Zap className="h-4 w-4 flex-shrink-0 text-blue-500" />
               <span className="flex-1 truncate">Launchpad</span>
               <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-semibold flex-shrink-0">GEO</span>
@@ -1615,15 +1686,14 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
 
           {isAdmin && (
             <>
-              <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-5">Company</div>
-              <button onClick={() => setUserManagementOpen(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all">
+              <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-1.5 mt-4">Company</div>
+              <button onClick={() => setUserManagementOpen(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 mb-0.5 text-left transition-all">
                 <Users className="h-4 w-4 flex-shrink-0 text-gray-400" />
                 <span className="flex-1 truncate">Users</span>
                 <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-purple-100 text-purple-600">Admin</span>
               </button>
             </>
           )}
-
         </nav>
         <div className="p-3 border-t border-gray-100 flex-shrink-0">
           {/* Agency Quota Display */}
@@ -1713,7 +1783,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
                           activeTab === "cost" ? DollarSign :
                             activeTab === "sources" ? Globe :
                               activeTab === "insights" ? TrendingUp :
-                                FileText;
+                                activeTab === "agent" ? Sparkles :
+                                  activeTab === "issues" ? AlertTriangle :
+                                    activeTab === "knowledge-base" ? BookOpen :
+                                      FileText;
                   return <Icon className="h-5 w-5 text-gray-400 hidden sm:block" />;
                 })()}
                 <span className="truncate">
@@ -1728,7 +1801,10 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
                                   activeTab === "traffic" ? "AI Traffic" :
                                     activeTab === "cost" ? "Cost Analysis" :
                                       activeTab === "sources" ? "Citations" :
-                                        "Dashboard"}
+                                        activeTab === "agent" ? "Ask AI Agent" :
+                                          activeTab === "issues" ? "Issues" :
+                                            activeTab === "knowledge-base" ? "Knowledge Base" :
+                                              "Dashboard"}
                 </span>
               </h1>
               {(dateRangeFilter !== "all" || modelFilter.length > 0) && <Badge variant="secondary" className="text-xs hidden sm:inline-flex">Filtered</Badge>}
@@ -1898,6 +1974,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
               setSelectedPromptDetail={setSelectedPromptDetail}
               refreshData={refreshData}
               totalAiTraffic={totalLLMSessionsLast7}
+              auditDeltas={auditDeltas}
             />
           )}{activeTab === "brands" && BrandsTab()}
           {activeTab === "prompts" && (
@@ -2071,6 +2148,34 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
               <CostTab
                 filteredAuditResults={filteredAuditResults}
               />
+          )}
+          {activeTab === "agent" && (
+            <AgentChat
+              selectedClient={selectedClient}
+              prompts={prompts}
+              auditResults={auditResults}
+              sovScore={competitorGap.find(c => c.name === selectedClient?.brand_name)?.percentage ?? 0}
+              citationCount={allCitations.length}
+              ga4Connected={!!integration}
+              competitorGap={competitorGap}
+              modelStats={modelStats}
+              auditDeltas={auditDeltas}
+            />
+          )}
+          {activeTab === "issues" && (
+            <IssuesTab
+              selectedClient={selectedClient}
+              prompts={prompts}
+              auditResults={auditResults}
+              isAdmin={isAdmin}
+              setActiveTab={(tab: string) => setActiveTab(tab as any)}
+            />
+          )}
+          {activeTab === "knowledge-base" && (
+            <KnowledgeBase
+              selectedClient={selectedClient}
+              isAdmin={isAdmin}
+            />
           )}
 
         </div>

@@ -22,12 +22,13 @@ import { AgencyOverview } from "@/components/AgencyOverview";
 import { UniversalImport } from "@/components/UniversalImport";
 import { MODEL_LOGOS } from "@/components/ModelLogos";
 import { AI_MODELS } from "@/hooks/useClientDashboard";
-import type { Client, Prompt, AuditResult } from "@/hooks/useClientDashboard";
+import type { Client, Prompt, AuditResult, AuditDeltas } from "@/hooks/useClientDashboard";
 import {
   DOMAIN_TYPES,
   computePositionForResult,
   roundToHundred,
 } from "@/utils/dashboardHelpers";
+import { SharePill, ChangeBadge } from "@/components/VisibilityScore";
 
 // ---------------------------------------------------------------------------
 // Local helper components
@@ -234,6 +235,7 @@ export interface OverviewTabProps {
   setSelectedPromptDetail: (id: string) => void;
   refreshData: () => void;
   totalAiTraffic?: number;
+  auditDeltas?: AuditDeltas;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +270,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   setSelectedPromptDetail,
   refreshData,
   totalAiTraffic = 0,
+  auditDeltas,
 }) => {
   // ---- Agency landing (no selected brand) ----
   if (isAgency && !selectedClient) {
@@ -284,11 +287,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-4xl font-bold text-gray-950">{(() => {
-              // Use the same percentage as Brand Visibility for consistency
               const brandEntry = competitorGap.find(c => c.name === selectedClient?.brand_name);
               return brandEntry?.percentage ?? 0;
             })()}%</span>
-            <TrendIndicator value={0} />
+            <TrendIndicator value={auditDeltas?.sovDelta ?? 0} />
           </div>
           <div className="mt-3 text-xs font-medium text-gray-400">Brand vs competitors in AI</div>
         </div>
@@ -304,7 +306,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               const citedResults = totalResults.filter(mr => (mr as any).is_cited || (brandDomain && mr.citations && mr.citations.some(c => c.domain.toLowerCase().includes(brandDomain) || c.url?.toLowerCase().includes(brandDomain))));
               return totalResults.length > 0 ? Math.round((citedResults.length / totalResults.length) * 100) : 0;
             })()}%</span>
-            <TrendIndicator value={0} />
+            <TrendIndicator value={auditDeltas?.citationRateDelta ?? 0} />
           </div>
           <div className="mt-3 text-xs font-medium text-gray-400">% of responses citing your site</div>
         </div>
@@ -316,7 +318,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-4xl font-bold text-gray-950">{allCitations.length}</span>
-            <span className="text-sm text-gray-500 font-medium">citations</span>
+            {auditDeltas?.hasDelta && <TrendIndicator value={auditDeltas.citationsDelta} suffix="" />}
           </div>
           <div className="mt-3 text-[10px] font-medium text-gray-400 whitespace-nowrap overflow-hidden text-ellipsis">{domainStats.length} unique domains referenced</div>
         </div>
@@ -336,7 +338,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 return `#${avgRank}`;
               })()}
             </span>
-            <TrendIndicator value={0} />
+            {auditDeltas?.rankDelta != null && <TrendIndicator value={auditDeltas.rankDelta} />}
           </div>
           <div className="mt-3 text-[10px] font-medium text-gray-400 whitespace-nowrap overflow-hidden text-ellipsis">{filteredAuditResults.length} audits completed</div>
         </div>
@@ -439,8 +441,60 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           {filteredAuditResults.length === 0 && <div className="text-center py-8 text-gray-500"><BarChart3 className="h-10 w-10 mx-auto mb-2 text-gray-300" /><p className="text-sm">Run audits to see visibility data</p></div>}
         </div>
         <div className="col-span-1 md:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4"><h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Brand Visibility</h3><button onClick={() => setShowBrandVisibilityModal(true)} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">View All <ChevronRight className="h-3.5 w-3.5" /></button></div>
-          <div className="space-y-3">{competitorGap.slice(0, 8).map((c, i) => { const isBrand = c.name === selectedClient?.brand_name; const brandDomain = isBrand ? selectedClient?.brand_domain : `${c.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`; return (<div key={i} className={cn("flex items-center gap-3 p-2 rounded-lg", isBrand && "bg-blue-50")}><span className="text-sm text-gray-400 w-5">{i + 1}</span><img src={`https://www.google.com/s2/favicons?domain=${brandDomain}&sz=20`} alt="" className="h-5 w-5 rounded" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }} /><Building2 className="h-5 w-5 text-gray-400 hidden" /><span className={cn("flex-1 text-sm truncate", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span><div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${c.percentage}%`, backgroundColor: isBrand ? "#3b82f6" : "#9ca3af" }} /></div><span className={cn("text-sm font-medium w-12 text-right", isBrand ? "text-blue-600" : "text-gray-600")}>{c.percentage}%</span></div>); })}{competitorGap.length === 0 && <p className="text-sm text-gray-500 text-center py-4">Run audits to see brand data</p>}</div>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /> Share of Voice</h3>
+              <p className="text-xs text-gray-400 mt-0.5">AI mention share vs competitors</p>
+            </div>
+            <button onClick={() => setShowBrandVisibilityModal(true)} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">View All <ChevronRight className="h-3.5 w-3.5" /></button>
+          </div>
+          {competitorGap.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
+                    <th className="text-left py-2 w-6">#</th>
+                    <th className="text-left py-2">Brand</th>
+                    <th className="text-right py-2">SOV</th>
+                    <th className="text-right py-2 hidden sm:table-cell">Change</th>
+                    <th className="text-right py-2">Share</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {competitorGap.slice(0, 8).map((c, i) => {
+                    const isBrand = c.name === selectedClient?.brand_name;
+                    const brandDomain = isBrand ? selectedClient?.brand_domain : `${c.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`;
+                    const change = (c as any).change ?? 0;
+                    return (
+                      <tr key={i} className={cn("group transition-colors", isBrand ? "bg-blue-50/60" : "hover:bg-gray-50")}>
+                        <td className="py-2.5 pr-2">
+                          <span className={cn("text-xs font-semibold tabular-nums", isBrand ? "text-blue-600" : "text-gray-400")}>#{i + 1}</span>
+                        </td>
+                        <td className="py-2.5">
+                          <div className="flex items-center gap-2">
+                            <img src={`https://www.google.com/s2/favicons?domain=${brandDomain}&sz=16`} alt="" className="h-4 w-4 rounded flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                            <span className={cn("text-sm truncate max-w-[90px]", isBrand ? "font-semibold text-blue-700" : "text-gray-700")}>{c.name}</span>
+                            {isBrand && <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded font-semibold flex-shrink-0">You</span>}
+                          </div>
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <span className={cn("text-sm font-semibold tabular-nums", isBrand ? "text-blue-700" : "text-gray-700")}>{c.percentage}%</span>
+                        </td>
+                        <td className="py-2.5 text-right hidden sm:table-cell">
+                          <ChangeBadge change={change} />
+                        </td>
+                        <td className="py-2.5 text-right pl-2">
+                          <SharePill share={c.percentage} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 text-center py-8">Run audits to see brand data</p>
+          )}
         </div>
       </div>
       <div className="bg-white rounded-xl border border-gray-200 p-5">
