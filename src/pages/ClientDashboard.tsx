@@ -40,6 +40,8 @@ import { CitationPreview } from "@/components/CitationPreview";
 import { InsightsTab, type AiInsights } from "@/components/tabs/InsightsTab";
 import { GA4ConnectorPanel } from "@/components/GA4ConnectorPanel";
 import { useGA4Connector } from "@/hooks/useGA4Connector";
+import { useSEOConnector } from "@/hooks/useSEOConnector";
+const SEOTab = React.lazy(() => import("@/components/tabs/SEOTab"));
 
 import { toast } from "sonner";
 
@@ -390,13 +392,15 @@ interface ClientDashboardProps {
   initialTab?: string;
 }
 
+let isGscOauthProcessing = false;
+
 export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, onShowLaunchpad, initialTab }: ClientDashboardProps = {}) {
   const { clients, selectedClient, prompts, auditResults, selectedModels, loading, loadingPromptIds, error, includeTavily, tavilyResults, addClient, updateClient, deleteClient, switchClient, setSelectedModels, setIncludeTavily, runFullAudit, runSinglePrompt, runCampaign, clearResults, addCustomPrompt, addMultiplePrompts, deletePrompt, bulkArchivePrompts, bulkDeletePrompts, reactivatePrompt, clearAllPrompts, updatePrompt, updateBrandTags, updateCompetitors, fetchCompetitors, exportToCSV, exportFullReport, importData, generatePromptsFromKeywords, generateContent, generateVisibilityContent, generateRecommendations, generateOverallRecommendations, fetchSearchVolumes, auditProgress, INDUSTRY_PRESETS: industries, LOCATION_CODES: locations, refreshData, citationMeta, categorizeCitations, verifyCitations, categorizationProgress, setCategorizationProgress, getAIOpportunity } = useClientDashboard();
   const { isAdmin, isAgency, user, role } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler" | "traffic" | "cost">(() => {
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "citations" | "sources" | "content" | "schedules" | "future-citations" | "topics" | "insights" | "brands" | "bulk_scheduler" | "traffic" | "cost" | "seo">(() => {
     // initialTab prop takes priority (e.g. deep-link from Launchpad GA4 button)
-    const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler", "traffic"];
+    const validTabs = ["overview", "prompts", "citations", "sources", "content", "schedules", "future-citations", "topics", "insights", "brands", "bulk_scheduler", "traffic", "seo"];
     if (initialTab && validTabs.includes(initialTab)) return initialTab as any;
     // Restore from localStorage on mount
     try {
@@ -470,7 +474,26 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
   });
 
   const ga4 = useGA4Connector(selectedClient?.id);
+  const seo = useSEOConnector(selectedClient?.id);
   const { integration, totalLLMSessionsLast7, trafficData } = ga4;
+
+  // Handle Google Search Console OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    if (code && state?.startsWith("gsc:") && !isGscOauthProcessing) {
+      isGscOauthProcessing = true;
+      const clientIdFromState = state.replace("gsc:", "");
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setActiveTab("seo");
+      seo.handleGSCCallback(code, clientIdFromState).finally(() => {
+        isGscOauthProcessing = false;
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Reload history when client changes
   useEffect(() => {
@@ -1592,6 +1615,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
             { id: "future-citations", label: "Future Citations", icon: Zap, betaBadge: true },
             { id: "sources", label: "Citations", icon: Globe, badge: allCitations.length > 0 ? allCitations.length : null },
             { id: "traffic", label: "Traffic", icon: BarChart3 },
+            { id: "seo", label: "SEO", icon: Search },
             { id: "cost", label: "Cost Analysis", icon: DollarSign },
             { id: "content", label: "Content", icon: FileText }
           ].filter(item => {
@@ -1712,6 +1736,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
                     activeTab === "prompts" ? Target :
                       activeTab === "schedules" || activeTab === "bulk_scheduler" ? Calendar :
                         activeTab === "traffic" ? BarChart3 :
+                          activeTab === "seo" ? Search :
                           activeTab === "cost" ? DollarSign :
                             activeTab === "sources" ? Globe :
                               activeTab === "insights" ? TrendingUp :
@@ -1728,6 +1753,7 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
                               activeTab === "content" ? "Content Generator" :
                                 activeTab === "insights" ? "Insights" :
                                   activeTab === "traffic" ? "AI Traffic" :
+                                    activeTab === "seo" ? "SEO" :
                                     activeTab === "cost" ? "Cost Analysis" :
                                       activeTab === "sources" ? "Citations" :
                                         "Dashboard"}
@@ -2069,9 +2095,15 @@ export default function ClientDashboard({ autoRunClientId, onAutoRunComplete, on
               />
             </React.Suspense>
           )}
+          {activeTab === "seo" && (
+            <React.Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>}>
+              <SEOTab seo={seo} brandName={selectedClient?.brand_name || ""} clientId={selectedClient?.id} competitors={selectedClient?.competitors || []} />
+            </React.Suspense>
+          )}
           {activeTab === "cost" && (
               <CostTab
                 filteredAuditResults={filteredAuditResults}
+                clientId={selectedClient?.id}
               />
           )}
 

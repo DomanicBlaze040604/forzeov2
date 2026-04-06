@@ -40,3 +40,12 @@ verify_jwt = false
 
 [functions.launchpad-abandon-email]
 verify_jwt = false
+
+[functions.agent-chat]
+verify_jwt = false
+
+[functions.gsc-proxy]
+verify_jwt = false
+
+[functions.bing-seo]
+verify_jwt = false

@@ -80,6 +80,7 @@ interface CostAlert {
 // ---------------------------------------------------------------------------
 export interface CostTabProps {
     filteredAuditResults: AuditResult[];
+    clientId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,7 +88,26 @@ export interface CostTabProps {
 // ---------------------------------------------------------------------------
 export const CostTab: React.FC<CostTabProps> = ({
     filteredAuditResults,
+    clientId,
 }) => {
+    const [dfsData, setDfsData] = React.useState<{date: string, count: number}[]>([]);
+
+    React.useEffect(() => {
+        if (!clientId) return;
+        const fetchDFS = async () => {
+            const { supabase } = await import("@/integrations/supabase/client");
+            const { data } = await supabase
+                .from("seo_rank_tracking")
+                .select("created_at")
+                .eq("client_id", clientId);
+            
+            if (data) {
+                const dates = data.map(d => d.created_at);
+                setDfsData(dates.map(date => ({ date, count: 1 })));
+            }
+        };
+        fetchDFS();
+    }, [clientId]);
     // ------- Compute per-model cost stats -------
     const modelCostStats = useMemo<ModelCostStat[]>(() => {
         const buckets: Record<
@@ -500,6 +520,76 @@ export const CostTab: React.FC<CostTabProps> = ({
                         </li>
                     )}
                 </ul>
+            </div>
+
+            {/* ---- Independent SEO Operations Section ---- */}
+            <div className="pt-6 border-t border-gray-200 mt-10">
+                <div className="mb-6">
+                    <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                        <Activity className="h-5 w-5 text-green-500" />
+                        SEO Operations Costs
+                    </h2>
+                    <p className="text-sm text-gray-500">
+                        Tracks API costs incurred by backend SEO tools (e.g. DataForSEO Rank Tracker)
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                        <div className="flex items-center justify-between">
+                            <div className="text-sm font-medium text-gray-500 uppercase tracking-wide">SEO Spend</div>
+                            <div className="p-2.5 bg-green-50 rounded-lg">
+                                <DollarSign className="h-5 w-5 text-green-600" />
+                            </div>
+                        </div>
+                        <div className="mt-4 text-4xl font-bold text-gray-950">
+                            ${(dfsData.reduce((s, d) => s + d.count, 0) * 0.002).toFixed(4)}
+                        </div>
+                        <div className="mt-3 text-xs font-medium text-gray-400">
+                            {dfsData.reduce((s, d) => s + d.count, 0).toLocaleString()} rank checks
+                        </div>
+                    </div>
+                </div>
+
+                {dfsData.length > 0 && (
+                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                        <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <BarChart3 className="h-4 w-4 text-gray-400" />
+                            Daily SEO Task Breakdown (Google SERP API)
+                        </h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm" role="grid">
+                                <thead>
+                                    <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                                        <th scope="col" className="text-left py-3 pl-2">Date</th>
+                                        <th scope="col" className="text-left py-3">Tool</th>
+                                        <th scope="col" className="text-right py-3">Tasks Ran</th>
+                                        <th scope="col" className="text-right py-3">Total Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {(() => {
+                                        const dailyTotals: Record<string, number> = {};
+                                        dfsData.forEach(d => {
+                                            const day = new Date(d.date).toLocaleDateString();
+                                            if (!dailyTotals[day]) dailyTotals[day] = 0;
+                                            dailyTotals[day] += d.count;
+                                        });
+
+                                        return Object.entries(dailyTotals).sort((a,b) => new Date(b[0]).getTime() - new Date(a[0]).getTime()).map(([dateStr, count]) => (
+                                            <tr key={dateStr} className="group hover:bg-gray-50 transition-colors">
+                                                <td className="py-3 pl-2 font-medium text-gray-900">{dateStr}</td>
+                                                <td className="py-3 text-gray-600">Rank Tracker</td>
+                                                <td className="py-3 text-right text-gray-600 font-medium">{count.toLocaleString()}</td>
+                                                <td className="py-3 text-right text-gray-900 font-semibold">${(count * 0.002).toFixed(4)}</td>
+                                            </tr>
+                                        ));
+                                    })()}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
