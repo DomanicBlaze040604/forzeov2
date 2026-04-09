@@ -15,8 +15,29 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { callSEOFunction, fmtNum } from "./helpers";
+import { supabase } from "@/integrations/supabase/client";
+import { fmtNum } from "./helpers";
 import type { TopQuery } from "@/hooks/useSEOConnector";
+
+const FN_URL = import.meta.env.VITE_SUPABASE_URL
+  ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
+  : "https://bvmwnxargzlfheiwyget.supabase.co/functions/v1";
+
+async function callRankCheck(clientId: string, keywords: string[], siteUrl: string, competitorDomains: string[]) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${FN_URL}/seo-competitive`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session?.access_token || ""}`,
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || "",
+    },
+    body: JSON.stringify({ action: "rank_check", client_id: clientId, keywords, site_url: siteUrl, competitor_domains: competitorDomains }),
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -382,17 +403,48 @@ export default function RankTracker({
     if (!clientId) return;
     setLoading(true);
     try {
-      const [kwRes, posRes, histRes] = await Promise.all([
-        callSEOFunction("seo-competitive", "list_tracked_keywords", clientId, {}),
-        callSEOFunction("seo-competitive", "get_latest_positions", clientId, {}),
-        callSEOFunction("seo-competitive", "get_rank_history", clientId, {}),
+      // ── Direct Supabase calls (no edge function needed) ──────────────────
+      const [kwRes, latestRes, histRes] = await Promise.all([
+        supabase.from("seo_tracked_keywords" as any)
+          .select("*").eq("client_id", clientId).order("created_at", { ascending: true }),
+        supabase.from("seo_rank_tracking" as any)
+          .select("*").eq("client_id", clientId)
+          .order("date", { ascending: false }).limit(1000),
+        supabase.from("seo_rank_tracking" as any)
+          .select("keyword,date,position,url,competitors,serp_features,search_volume")
+          .eq("client_id", clientId).order("date", { ascending: true }).limit(5000),
       ]);
-      setTrackedKeywords(kwRes.keywords || []);
-      setPositions(posRes.positions || []);
-      setHistory(histRes.rows || []);
-      if (posRes.positions?.length) {
-        const dates = posRes.positions.map((p: KeywordPosition) => p.date).filter(Boolean);
-        if (dates.length) setLastChecked(dates.sort().reverse()[0]);
+
+      setTrackedKeywords((kwRes.data as TrackedKeyword[]) || []);
+      setHistory((histRes.data as HistoryRow[]) || []);
+
+      // Build latest position per keyword + delta vs previous
+      const rows = (latestRes.data || []) as any[];
+      const seen = new Set<string>();
+      const latest: any[] = [];
+      rows.forEach(r => { if (!seen.has(r.keyword)) { seen.add(r.keyword); latest.push(r); } });
+
+      // For delta: find second-most-recent date per keyword
+      const prevSeen = new Set<string>();
+      const prevMap: Record<string, number | null> = {};
+      rows.forEach(r => {
+        if (seen.has(r.keyword) && !prevSeen.has(r.keyword) && latest.find(l => l.keyword === r.keyword && l.date !== r.date)) {
+          prevMap[r.keyword] = r.position;
+          prevSeen.add(r.keyword);
+        }
+      });
+
+      const positions = latest.map(r => ({
+        ...r,
+        previous_position: prevMap[r.keyword] ?? null,
+        change: (prevMap[r.keyword] != null && r.position != null)
+          ? (prevMap[r.keyword] as number) - (r.position as number) : null,
+      }));
+
+      setPositions(positions);
+      if (positions.length) {
+        const dates = positions.map((p: any) => p.date).filter(Boolean);
+        if (dates.length) setLastChecked([...dates].sort().reverse()[0]);
       }
     } catch (err: any) {
       console.error("[RankTracker] loadAll:", err);
@@ -407,7 +459,9 @@ export default function RankTracker({
 
   const handleAdd = useCallback(async (keywords: string[]) => {
     try {
-      await callSEOFunction("seo-competitive", "add_keywords", clientId, { keywords });
+      const rows = keywords.map(k => ({ client_id: clientId, keyword: k.toLowerCase().trim(), tags: [] }));
+      const { error } = await supabase.from("seo_tracked_keywords" as any).upsert(rows, { onConflict: "client_id,keyword" });
+      if (error) throw new Error(error.message);
       toast.success(`${keywords.length} keyword${keywords.length > 1 ? "s" : ""} added`);
       await loadAll();
     } catch (err: any) {
@@ -419,7 +473,10 @@ export default function RankTracker({
 
   const handleRemove = useCallback(async (keyword: string) => {
     try {
-      await callSEOFunction("seo-competitive", "remove_keyword", clientId, { keyword });
+      await Promise.all([
+        supabase.from("seo_tracked_keywords" as any).delete().eq("client_id", clientId).eq("keyword", keyword),
+        supabase.from("seo_rank_tracking" as any).delete().eq("client_id", clientId).eq("keyword", keyword),
+      ]);
       setTrackedKeywords(p => p.filter(k => k.keyword !== keyword));
       setPositions(p => p.filter(k => k.keyword !== keyword));
       toast.success("Keyword removed");
@@ -436,11 +493,7 @@ export default function RankTracker({
     setChecking(true);
     try {
       const keywords = trackedKeywords.map(k => k.keyword);
-      await callSEOFunction("seo-competitive", "rank_check", clientId, {
-        keywords,
-        site_url: siteUrl,
-        competitor_domains: competitorDomains,
-      });
+      await callRankCheck(clientId, keywords, siteUrl, competitorDomains);
       toast.success("Rankings updated");
       await loadAll();
     } catch (err: any) {
@@ -743,7 +796,7 @@ export default function RankTracker({
                 {/* Competitor positions */}
                 {competitorDomains.length > 0 && (
                   <div className="flex flex-col gap-0.5">
-                    {competitorDomains.slice(0, 2).map((cd, i) => {
+                    {competitorDomains.slice(0, 2).map((cd) => {
                       const comp = (row.competitors || []).find(c => c.domain === cd);
                       return (
                         <div key={cd} className="flex items-center gap-1.5 text-[10px]">
