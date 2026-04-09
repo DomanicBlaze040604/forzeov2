@@ -50,13 +50,7 @@ serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization") || "";
-    const userToken = authHeader.replace("Bearer ", "");
     const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-    const { data: { user }, error: authErr } = await createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-      .auth.getUser(userToken);
-    if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json();
     const { action, client_id } = body;

@@ -49,3 +49,12 @@ verify_jwt = false
 
 [functions.bing-seo]
 verify_jwt = false
+
+[functions.seo-competitive]
+verify_jwt = false
+
+[functions.seo-tools]
+verify_jwt = false
+
+[functions.seo-backlinks]
+verify_jwt = false
