@@ -66,6 +66,7 @@ import CompetitiveIntel from "@/components/seo/CompetitiveIntel";
 import ContentOnPage from "@/components/seo/ContentOnPage";
 import BacklinkModule from "@/components/seo/BacklinkModule";
 import ReportingGoals from "@/components/seo/ReportingGoals";
+import RankTracker from "@/components/seo/RankTracker";
 
 // ── Groq AI helper ────────────────────────────────────────────────────────────
 
@@ -424,7 +425,7 @@ export default function SEOTab({ seo, brandName = "", clientId, competitors = []
   } = seo;
 
   const [activeEngine, setActiveEngine] = useState<"google" | "bing">("google");
-  const [activeSection, setActiveSection] = useState<"overview" | "queries" | "pages" | "opportunities" | "countries" | "technical" | "competitive" | "content" | "backlinks" | "reports">("overview");
+  const [activeSection, setActiveSection] = useState<"overview" | "queries" | "pages" | "opportunities" | "countries" | "technical" | "competitive" | "content" | "backlinks" | "reports" | "keywords">("overview");
   const [querySearch, setQuerySearch] = useState("");
   const [pageSearch, setPageSearch] = useState("");
   const [queryFilter, setQueryFilter] = useState<"all" | "brand" | "nonbrand">("all");
@@ -855,12 +856,13 @@ Return ONLY a JSON object:
           <div className="flex gap-1 bg-gray-50 rounded-xl p-1 w-fit flex-wrap">
             {[
               { id: "overview", label: "Overview", icon: Activity },
+              { id: "keywords", label: "Rank Tracker", icon: Target },
               { id: "opportunities", label: "Opportunities", icon: Zap, badge: quickWins.length + ctrOpportunities.length },
               { id: "queries", label: "Queries", icon: Search },
               { id: "pages", label: "Pages", icon: FileText },
               { id: "countries", label: "Countries", icon: Globe },
               { id: "technical", label: "Technical", icon: Activity },
-              { id: "competitive", label: "Competitive", icon: Target },
+              { id: "competitive", label: "Competitive", icon: BarChart3 },
               { id: "content", label: "Content", icon: BookOpen },
               { id: "backlinks", label: "Backlinks", icon: Link2 },
               { id: "reports", label: "Reports", icon: FileText },
@@ -1642,6 +1644,16 @@ Return ONLY a JSON object:
             <BacklinkModule 
               clientId={clientId || ""} 
               siteUrl={gscIntegration?.site_url || bingIntegration?.site_url || null} 
+            />
+          )}
+
+          {/* ─────────────────── RANK TRACKER ────────────────────────────────── */}
+          {activeSection === "keywords" && (
+            <RankTracker
+              clientId={clientId || ""}
+              siteUrl={gscIntegration?.site_url || bingIntegration?.site_url || null}
+              competitorDomains={competitors}
+              gscTopQueries={gscTopQueries}
             />
           )}
 
