@@ -1647,16 +1647,6 @@ Return ONLY a JSON object:
             />
           )}
 
-          {/* ─────────────────── RANK TRACKER ────────────────────────────────── */}
-          {activeSection === "keywords" && (
-            <RankTracker
-              clientId={clientId || ""}
-              siteUrl={gscIntegration?.site_url || bingIntegration?.site_url || null}
-              competitorDomains={competitors}
-              gscTopQueries={gscTopQueries}
-            />
-          )}
-
           {/* ─────────────────── REPORTS & GOALS ─────────────────────────────── */}
           {activeSection === "reports" && (
             <ReportingGoals 
@@ -1694,6 +1684,16 @@ Return ONLY a JSON object:
             </div>
           )}
         </>
+      )}
+
+      {/* ─────────────────── RANK TRACKER (always visible) ───────────────────── */}
+      {activeSection === "keywords" && (
+        <RankTracker
+          clientId={clientId || ""}
+          siteUrl={gscIntegration?.site_url || bingIntegration?.site_url || null}
+          competitorDomains={competitors}
+          gscTopQueries={gscTopQueries}
+        />
       )}
     </div>
   );
